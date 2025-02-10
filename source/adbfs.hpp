@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common.hpp"
+#include <atomic>
 
 #define FUSE_USE_VERSION 26
 #include <fuse.h>
@@ -52,10 +53,11 @@ namespace adbfs
 
     struct AdbfsData
     {
-        Cache       m_cache;
-        fs::path    m_dir;
-        std::string m_serial;
-        bool        m_rescan = false;
+        Cache             m_cache;
+        fs::path          m_dir;
+        std::string       m_serial;
+        std::atomic<bool> m_readdir = false;
+        bool              m_rescan  = false;
     };
 
     int readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_t offset, fuse_file_info* fi);

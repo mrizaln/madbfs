@@ -264,10 +264,11 @@ int main(int argc, char** argv)
     }
 
     auto data = adbfs::AdbfsData{
-        .m_cache  = {},
-        .m_dir    = make_temp_dir(),
-        .m_serial = adbfs_opt.m_serial,
-        .m_rescan = static_cast<bool>(adbfs_opt.m_rescan),
+        .m_cache   = {},
+        .m_dir     = make_temp_dir(),
+        .m_serial  = adbfs_opt.m_serial,
+        .m_readdir = false,
+        .m_rescan  = static_cast<bool>(adbfs_opt.m_rescan),
     };
 
     auto ret = fuse_main(args.argc, args.argv, &adbfs_oper, (void*)&data);

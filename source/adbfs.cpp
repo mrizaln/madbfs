@@ -199,8 +199,6 @@ namespace detail
             log_e({ "get_gid: failed to get gid for [{}] (err: {}) {}" }, group, gid.returncode, gid.cerr);
         }
 
-        log_d({ "get_gid: [{}] -> [{}]" }, group, gid.cout);
-
         auto lock     = std::unique_lock{ cache.m_mutex };
         auto real_gid = parse_fundamental<int>(util::strip(gid.cout, '\n')).value_or(default_gid);
 
@@ -269,7 +267,7 @@ namespace detail
      *  d?????????   ? ?      ?             ?                             ? metadata
      */
     template <std::invocable<ParsedStat> Fn>
-    bool parse_file_stat(Str str, Cache& cache, Str serial, Fn&& fn)
+    bool parse_file_stat(Str parent, Str str, Cache& cache, Str serial, Fn&& fn)
     {
         auto result = util::split_n<8>(str, ' ');
         if (not result) {
@@ -292,10 +290,12 @@ namespace detail
         }
 
         {
-            auto lock = std::shared_lock{ cache.m_mutex };
-            if (auto found = cache.m_file_stat.find(path); found != cache.m_file_stat.end()) {
-                auto& [path, stat] = *found;
-                fn(ParsedStat{ .m_path = path, .m_stat = stat });
+            auto lock        = std::shared_lock{ cache.m_mutex };
+            auto actual_path = fs::path{ parent } / path;
+            if (auto found = cache.m_file_stat.find(actual_path.c_str()); found != cache.m_file_stat.end()) {
+                auto& [_, stat] = *found;
+                auto basename   = actual_path.filename();
+                fn(ParsedStat{ .m_path = basename.c_str(), .m_stat = stat });
                 return true;
             }
         }
@@ -315,13 +315,15 @@ namespace detail
             log_c({ "parse_file_stat: link is empty for [{}] when it should not be" }, path);
         }
 
-        auto it = cache.m_file_stat.begin();
+        auto it          = cache.m_file_stat.begin();
+        auto actual_path = fs::path{ parent } / path;
         {
             auto lock = std::unique_lock{ cache.m_mutex };
-            it        = cache.m_file_stat.emplace(path, stat).first;
+            it        = cache.m_file_stat.emplace(actual_path, stat).first;
         }
 
-        fn(ParsedStat{ .m_path = it->first, .m_stat = it->second });
+        auto basename = actual_path.filename();
+        fn(ParsedStat{ .m_path = basename.c_str(), .m_stat = it->second });
         return true;
     }
 }
@@ -337,7 +339,9 @@ namespace adbfs
     )
     {
         log_i({ "readdir: {}" }, path);
-        auto& [cache, temp, serial, _] = detail::get_data();
+        auto& [cache, temp, serial, readdir_flag, _] = detail::get_data();
+
+        readdir_flag.wait(true);
 
         if (auto found = cache.m_file_stat.find(path); found != cache.m_file_stat.end()) {
             auto& [path, stat] = *found;
@@ -350,23 +354,22 @@ namespace adbfs
         if (ls.returncode != 0) {
             auto errn = to_errno(detail::parse_stderr(ls.cerr));
             log_e({ "readdir: failed to list directory [{}] (err: {}) {}" }, ls.returncode, errn, ls.cerr);
-            if (errn != ENODEV) {
-                cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
-            }
+            cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
             return -errn;
         }
 
         util::StringSplitter{ ls.cout, '\n' }.while_next([&](Str line) {
-            // skip lines too short to process
-            if (line.size() < detail::minimum_path_size) {
+            if (line.size() < detail::minimum_path_size) {    // skip lines too short to process
                 return;
             }
-
-            detail::parse_file_stat(line, cache, serial, [&](detail::ParsedStat parsed) {
+            detail::parse_file_stat(path, line, cache, serial, [&](detail::ParsedStat parsed) {
                 auto& [path, stat] = parsed;
                 filler(buf, path.data(), nullptr, 0);
             });
         });
+
+        readdir_flag = false;
+        readdir_flag.notify_all();
 
         return 0;
     }
@@ -374,21 +377,20 @@ namespace adbfs
     int getattr(const char* path, struct stat* stbuf)
     {
         log_i({ "getattr: {:?}" }, path);
-        auto& [cache, temp, serial, _] = detail::get_data();
+        auto& [cache, temp, serial, readdir_flag, _] = detail::get_data();
+
+        readdir_flag.wait(true);
 
         if (auto found = cache.m_file_stat.find(path); found == cache.m_file_stat.end()) {
             auto ls = cmd::exec_adb({ "ls", "-llad", detail::copy_escape(path) }, serial);
             if (ls.returncode != 0) {
                 auto errn = to_errno(detail::parse_stderr(ls.cerr));
                 log_e({ "getattr: failed to get attribute [{}] (err: {}) {}" }, ls.returncode, errn, ls.cerr);
+                cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
                 return -errn;
             }
 
-            // to elimiate any trailing newline
-            auto line = util::StringSplitter{ ls.cout, '\n' }.next();
-
-            auto success = detail::parse_file_stat(*line, cache, serial, [&](auto parsed) { });
-
+            auto success = detail::parse_file_stat("/", util::strip(ls.cout), cache, serial, [&](auto) { });
             if (not success) {
                 log_e({ "getattr: failed to parse file stat [{}]" }, ls.cout);
                 return -EIO;
@@ -506,19 +508,20 @@ namespace adbfs
     int readlink(const char* path, char* buf, size_t size)
     {
         log_i({ "readdir: {}" }, path);
-        auto& [cache, temp, serial, _] = detail::get_data();
+        auto& [cache, temp, serial, readdir_flag, _] = detail::get_data();
+
+        readdir_flag.wait(true);
 
         if (auto found = cache.m_file_stat.find(path); found == cache.m_file_stat.end()) {
             auto ls = cmd::exec_adb({ "ls", "-llad", detail::copy_escape(path) }, serial);
             if (ls.returncode != 0) {
                 auto errn = to_errno(detail::parse_stderr(ls.cerr));
                 log_e({ "readlink: failed to read info [{}] (err: {}) {}" }, ls.returncode, errn, ls.cerr);
+                cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
                 return -errn;
             }
 
-            auto line    = util::StringSplitter{ ls.cout, '\n' }.next();
-            auto success = detail::parse_file_stat(*line, cache, serial, [&](auto parsed) { });
-
+            auto success = detail::parse_file_stat("/", util::strip(ls.cout), cache, serial, [&](auto) { });
             if (not success) {
                 log_e({ "readdir: failed to parse file stat [{}]" }, ls.cout);
                 return -EIO;
