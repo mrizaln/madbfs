@@ -74,6 +74,25 @@ void sigsegv_handler(int)
     std::raise(SIGSEGV);
 }
 
+void terminate_handler()
+{
+    auto array = std::array<void*, 10>{};
+    auto size  = static_cast<int>(array.size());
+
+    // get void*'s for all entries on the stack
+    size = backtrace(array.data(), array.size());
+
+    // print out all the frames to stderr
+    fmt::print(stderr, "Termination reached, backtrace:\n");
+    backtrace_symbols_fd(array.data(), size, STDERR_FILENO);
+
+    // remove the temporary directory
+    if (auto* fuse_ctx = fuse_get_context(); fuse_ctx != nullptr) {
+        auto& data = *static_cast<adbfs::AdbfsData*>(fuse_ctx->private_data);
+        std::filesystem::remove_all(data.m_dir);
+    }
+}
+
 void show_help(const char* prog, bool err)
 {
     auto out = err ? stderr : stdout;
@@ -122,6 +141,9 @@ SerialStatus check_serial(std::string_view serial)
 
 int main(int argc, char** argv)
 {
+    adbfs::log::init(spdlog::level::debug);
+    adbfs::log_i({ "starting adb server..." });
+
     if (auto serv = adbfs::cmd::exec({ "adb", "start-server" }); serv.returncode != 0) {
         fmt::println(stderr, "error: failed to start adb server, make sure adb is installed and in PATH");
         fmt::println(stderr, "stderr:\n{}", serv.cerr);
@@ -129,6 +151,7 @@ int main(int argc, char** argv)
     }
 
     std::signal(SIGSEGV, sigsegv_handler);
+    std::set_terminate(terminate_handler);
 
     auto adbfs_oper = fuse_operations{
         .getattr     = adbfs::getattr,
@@ -241,6 +264,7 @@ int main(int argc, char** argv)
     }
 
     auto data = adbfs::AdbfsData{
+        .m_cache  = {},
         .m_dir    = make_temp_dir(),
         .m_serial = adbfs_opt.m_serial,
         .m_rescan = static_cast<bool>(adbfs_opt.m_rescan),

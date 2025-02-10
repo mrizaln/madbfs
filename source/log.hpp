@@ -47,8 +47,8 @@ namespace adbfs::log
      */
     inline void init(spdlog::level::level_enum level)
     {
-        spdlog::set_default_logger(spdlog::stderr_color_mt("logger"));
-        spdlog::set_pattern("[%Y-%m-%d|%H:%M:%S] [%^-%L-%$] [%!:%#] %v");
+        spdlog::set_default_logger(spdlog::stdout_color_mt("logger"));
+        spdlog::set_pattern("[%Y-%m-%d|%H:%M:%S] [%^-%L-%$] [%s:%#] %v");
         spdlog::set_level(level);
     }
 

@@ -61,7 +61,7 @@ namespace adbfs::util
                 return res;
             }
 
-            auto pos = static_cast<std::size_t>(it - m_str.begin());
+            auto pos = static_cast<usize>(it - m_str.begin());
             auto res = m_str.substr(m_idx, pos - m_idx);
             m_idx    = pos + 1;
 
@@ -79,12 +79,47 @@ namespace adbfs::util
             return count;
         }
 
-        void reset() noexcept { m_idx = 0; }
-        bool is_end() const noexcept { return m_idx >= m_str.size(); }
+        void  reset() noexcept { m_idx = 0; }
+        bool  is_end() const noexcept { return m_idx >= m_str.size(); }
+        usize offset() const noexcept { return m_idx; }
 
     private:
-        Str         m_str;
-        std::size_t m_idx   = 0;
-        SplitDelim  m_delim = SplitDelim{ ' ' };
+        Str        m_str;
+        usize      m_idx   = 0;
+        SplitDelim m_delim = SplitDelim{ ' ' };
     };
+
+    template <usize N>
+    struct SplitResult
+    {
+        std::array<Str, N> m_result;
+        Str                m_remainder;
+    };
+
+    template <usize N>
+    Opt<SplitResult<N>> split_n(Str str, SplitDelim delim)
+    {
+        auto splitter = StringSplitter{ str, delim };
+        auto res      = std::array<Str, N>{};
+
+        auto idx = 0_usize;
+        while (idx < N) {
+            if (auto next = splitter.next()) {
+                res[idx++] = *next;
+            } else {
+                break;
+            }
+        }
+
+        if (idx < N) {
+            return std::nullopt;
+        }
+
+        auto offset = splitter.offset();
+        while (offset != str.size() and delim.is_delim(str[offset])) {
+            ++offset;
+        }
+
+        return SplitResult<N>{ res, str.substr(offset) };
+    }
 }
