@@ -3,6 +3,7 @@
 #include "util.hpp"
 #include "adbfs.hpp"
 
+#include <cstring>
 #include <fuse.h>
 
 #include <charconv>
@@ -20,6 +21,7 @@ namespace detail
     static constexpr Str   no_such_file_or_dir = "No such file or directory";
     static constexpr Str   not_a_directory     = "Not a directory";
     static constexpr Str   inaccessible        = "inaccessible or not found";
+    static constexpr Str   bash_escapes        = " \t\n\'\"\\`$()<>;&|*?[#~=%";
 
     struct ParsedStat
     {
@@ -72,8 +74,22 @@ namespace detail
     {
         auto  new_str = std::string{};
         auto* ch      = str;
-        while (ch != nullptr) {
+        while (*ch != '\0') {
             *ch == replace ? new_str.push_back(with) : new_str.push_back(*ch);
+            ++ch;
+        }
+        return new_str;
+    }
+
+    std::string copy_escape(const char* str, Str escapes = bash_escapes)
+    {
+        auto  new_str = std::string{};
+        auto* ch      = str;
+        while (*ch != '\0') {
+            if (escapes.find(*ch) != std::string::npos) {
+                new_str.push_back('\\');
+            }
+            new_str.push_back(*ch);
             ++ch;
         }
         return new_str;
@@ -93,14 +109,14 @@ namespace detail
 
     Error parse_stderr(Str str)
     {
-        auto splitter = util::StringSplitter{ str, { '\n' } };
+        auto splitter = util::StringSplitter{ str, '\n' };
         while (auto line = splitter.next()) {
             if (*line == no_device) {
                 return Error::NoDev;
             }
 
             auto rev = std::string{ line->rbegin(), line->rend() };
-            auto err = util::StringSplitter{ rev, { ':' } }.next();
+            auto err = util::StringSplitter{ rev, ':' }.next();
             if (not err) {
                 continue;
             }
@@ -113,6 +129,8 @@ namespace detail
                 return Error::NoSuchFileOrDir;
             } else if (eq(*err, not_a_directory)) {
                 return Error::NotADir;
+            } else if (eq(*err, inaccessible)) {
+                return Error::Inaccessible;
             }
         }
 
@@ -181,8 +199,10 @@ namespace detail
             log_e({ "get_gid: failed to get gid for [{}] (err: {}) {}" }, group, gid.returncode, gid.cerr);
         }
 
+        log_d({ "get_gid: [{}] -> [{}]" }, group, gid.cout);
+
         auto lock     = std::unique_lock{ cache.m_mutex };
-        auto real_gid = parse_fundamental<int>(gid.cout).value_or(default_gid);
+        auto real_gid = parse_fundamental<int>(util::strip(gid.cout, '\n')).value_or(default_gid);
 
         return cache.m_gid[std::string{ group }] = real_gid;
     }
@@ -202,7 +222,7 @@ namespace detail
         }
 
         auto lock     = std::unique_lock{ cache.m_mutex };
-        auto real_uid = parse_fundamental<int>(uid.cout).value_or(default_uid);
+        auto real_uid = parse_fundamental<int>(util::strip(uid.cout, '\n')).value_or(default_uid);
 
         return cache.m_uid[std::string{ user }] = real_uid;
     }
@@ -251,7 +271,7 @@ namespace detail
     template <std::invocable<ParsedStat> Fn>
     bool parse_file_stat(Str str, Cache& cache, Str serial, Fn&& fn)
     {
-        auto result = util::split_n<8>(str, { ' ' });
+        auto result = util::split_n<8>(str, ' ');
         if (not result) {
             return false;
         }
@@ -317,7 +337,6 @@ namespace adbfs
     )
     {
         log_i({ "readdir: {}" }, path);
-
         auto& [cache, temp, serial, _] = detail::get_data();
 
         if (auto found = cache.m_file_stat.find(path); found != cache.m_file_stat.end()) {
@@ -327,7 +346,7 @@ namespace adbfs
             }
         }
 
-        auto ls = cmd::exec_adb({ "ls", "-lla", path }, serial);
+        auto ls = cmd::exec_adb({ "ls", "-lla", detail::copy_escape(path) }, serial);
         if (ls.returncode != 0) {
             auto errn = to_errno(detail::parse_stderr(ls.cerr));
             log_e({ "readdir: failed to list directory [{}] (err: {}) {}" }, ls.returncode, errn, ls.cerr);
@@ -337,7 +356,7 @@ namespace adbfs
             return -errn;
         }
 
-        util::StringSplitter{ ls.cout, { '\n' } }.while_next([&](Str line) {
+        util::StringSplitter{ ls.cout, '\n' }.while_next([&](Str line) {
             // skip lines too short to process
             if (line.size() < detail::minimum_path_size) {
                 return;
@@ -355,19 +374,18 @@ namespace adbfs
     int getattr(const char* path, struct stat* stbuf)
     {
         log_i({ "getattr: {:?}" }, path);
-
         auto& [cache, temp, serial, _] = detail::get_data();
 
         if (auto found = cache.m_file_stat.find(path); found == cache.m_file_stat.end()) {
-            auto ls = cmd::exec_adb({ "ls", "-llad", path }, serial);
+            auto ls = cmd::exec_adb({ "ls", "-llad", detail::copy_escape(path) }, serial);
             if (ls.returncode != 0) {
                 auto errn = to_errno(detail::parse_stderr(ls.cerr));
-                log_e({ "getattr: failed to get attribute[{}] (err: {}) {}" }, ls.returncode, errn, ls.cerr);
+                log_e({ "getattr: failed to get attribute [{}] (err: {}) {}" }, ls.returncode, errn, ls.cerr);
                 return -errn;
             }
 
             // to elimiate any trailing newline
-            auto line = util::StringSplitter{ ls.cout, { '\n' } }.next();
+            auto line = util::StringSplitter{ ls.cout, '\n' }.next();
 
             auto success = detail::parse_file_stat(*line, cache, serial, [&](auto parsed) { });
 
@@ -380,7 +398,7 @@ namespace adbfs
         auto lock        = std::shared_lock{ cache.m_mutex };
         auto& [__, stat] = *cache.m_file_stat.find(path);
 
-        memset(stbuf, 0, sizeof(struct stat));
+        std::memset(stbuf, 0, sizeof(struct stat));
 
         stbuf->st_ino   = 1;    // fake inode number;
         stbuf->st_mode  = static_cast<__mode_t>(stat.m_mode);
@@ -487,6 +505,42 @@ namespace adbfs
 
     int readlink(const char* path, char* buf, size_t size)
     {
+        log_i({ "readdir: {}" }, path);
+        auto& [cache, temp, serial, _] = detail::get_data();
+
+        if (auto found = cache.m_file_stat.find(path); found == cache.m_file_stat.end()) {
+            auto ls = cmd::exec_adb({ "ls", "-llad", detail::copy_escape(path) }, serial);
+            if (ls.returncode != 0) {
+                auto errn = to_errno(detail::parse_stderr(ls.cerr));
+                log_e({ "readlink: failed to read info [{}] (err: {}) {}" }, ls.returncode, errn, ls.cerr);
+                return -errn;
+            }
+
+            auto line    = util::StringSplitter{ ls.cout, '\n' }.next();
+            auto success = detail::parse_file_stat(*line, cache, serial, [&](auto parsed) { });
+
+            if (not success) {
+                log_e({ "readdir: failed to parse file stat [{}]" }, ls.cout);
+                return -EIO;
+            }
+        }
+
+        auto lock        = std::shared_lock{ cache.m_mutex };
+        auto& [__, stat] = *cache.m_file_stat.find(path);
+
+        if ((stat.m_mode & S_IFMT) != S_IFLNK) {
+            log_e({ "readlink: [{}] is not a link" }, path);
+            return -EINVAL;
+        }
+
+        if (stat.m_link_to.size() >= size) {
+            log_e({ "readlink: buffer too small for link [{}]" }, path);
+            return -ENOSYS;
+        }
+
+        std::memset(buf, 0, size);
+        std::memcpy(buf, stat.m_link_to.data(), stat.m_link_to.size());
+
         return 0;
     }
 }

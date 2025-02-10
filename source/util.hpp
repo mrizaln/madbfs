@@ -11,7 +11,12 @@ namespace adbfs::util
     {
         using Variant = Var<char, Span<const char>>;
 
-        constexpr SplitDelim(Variant delim)
+        constexpr SplitDelim(Str delim)
+            : m_variant{ delim }
+        {
+        }
+
+        constexpr SplitDelim(char delim)
             : m_variant{ delim }
         {
         }
@@ -121,5 +126,26 @@ namespace adbfs::util
         }
 
         return SplitResult<N>{ res, str.substr(offset) };
+    }
+
+    inline Str rstrip(Str str, SplitDelim delim)
+    {
+        while (not str.empty() and delim.is_delim(str.back())) {
+            str.remove_suffix(1);
+        }
+        return str;
+    }
+
+    inline Str lstrip(Str str, SplitDelim delim)
+    {
+        while (not str.empty() and delim.is_delim(str.front())) {
+            str.remove_prefix(1);
+        }
+        return str;
+    }
+
+    inline Str strip(Str str, SplitDelim delim)
+    {
+        return rstrip(lstrip(str, delim), delim);
     }
 }
