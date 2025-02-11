@@ -15,7 +15,7 @@ pkg_check_modules(FUSE REQUIRED IMPORTED_TARGET fuse)
 
 include(cmake/fetched-libs.cmake)       # emits fetch::*
 
-add_executable(adbfsm source/main.cpp source/adbfs.cpp)
+add_executable(adbfsm source/main.cpp source/adbfsm.cpp)
 target_include_directories(adbfsm PRIVATE source)
 target_link_libraries(adbfsm PRIVATE PkgConfig::FUSE fetch::subprocess fmt::fmt spdlog::spdlog)
 target_compile_options(adbfsm PRIVATE -Wall -Wextra -Wconversion)

@@ -13,7 +13,7 @@
 #include <unordered_map>
 #include <filesystem>
 
-namespace adbfs
+namespace adbfsm
 {
     namespace fs = std::filesystem;
 
@@ -55,7 +55,7 @@ namespace adbfs
         std::shared_mutex m_mutex;
     };
 
-    struct AdbfsData
+    struct AdbfsmData
     {
         Cache             m_cache;
         fs::path          m_dir;

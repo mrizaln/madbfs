@@ -1,7 +1,7 @@
 #include "cmd.hpp"
 #include "common.hpp"
 #include "util.hpp"
-#include "adbfs.hpp"
+#include "adbfsm.hpp"
 
 #include <fuse.h>
 #include <fcntl.h>
@@ -12,7 +12,7 @@
 
 namespace detail
 {
-    using namespace adbfs;
+    using namespace adbfsm;
 
     static constexpr usize minimum_path_size   = 3;
     static constexpr int   default_gid         = 98;
@@ -64,11 +64,11 @@ namespace detail
         }
     }
 
-    AdbfsData& get_data()
+    AdbfsmData& get_data()
     {
         auto ctx = fuse_get_context()->private_data;
         assert(ctx != nullptr);
-        return *static_cast<AdbfsData*>(ctx);
+        return *static_cast<AdbfsmData*>(ctx);
     }
 
     std::string copy_replace(const char* str, char replace, char with)
@@ -370,13 +370,13 @@ namespace detail
     }
 }
 
-namespace adbfs
+namespace adbfsm
 {
     void destroy(void* private_data)
     {
-        auto& data = *static_cast<AdbfsData*>(private_data);
+        auto& data = *static_cast<AdbfsmData*>(private_data);
         fs::remove_all(data.m_dir);
-        adbfs::log_i({ "cleaned up temporary directory: {:?}" }, data.m_dir.c_str());
+        adbfsm::log_i({ "cleaned up temporary directory: {:?}" }, data.m_dir.c_str());
     }
 
     int readdir(

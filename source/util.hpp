@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <variant>
 
-namespace adbfs::util
+namespace adbfsm::util
 {
     struct SplitDelim
     {

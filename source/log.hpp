@@ -7,7 +7,7 @@
 
 #include <source_location>
 
-namespace adbfs::log
+namespace adbfsm::log
 {
 
     // inspired by this issue on spdlog: https://github.com/gabime/spdlog/issues/1959
@@ -58,8 +58,8 @@ namespace adbfs::log
      * This functions must be called in the form of
      *
      * ```
-     * adbfs::log::log(spdlog::level::info, { "this is a test log: {} + {} = {}" }, 1, 2, 3);
-       adbfs::log::log(spdlog::level::info, { "akdjhaksdfjh" });
+     * adbfsm::log::log(spdlog::level::info, { "this is a test log: {} + {} = {}" }, 1, 2, 3);
+       adbfsm::log::log(spdlog::level::info, { "akdjhaksdfjh" });
      * ```
      *
      * Notice the curly braces around the format string. If you don't use them, the compiler will complain.
@@ -71,21 +71,21 @@ namespace adbfs::log
     }
 }
 
-namespace adbfs
+namespace adbfsm
 {
-#define ADBFS_LOG_LOG_ENTRY(Name, Level)                                                                     \
+#define ADBFSM_LOG_LOG_ENTRY(Name, Level)                                                                    \
     template <typename... Args>                                                                              \
     inline void Name(log::FmtWithLoc<Args...> fmt, Args&&... args)                                           \
     {                                                                                                        \
         log::log(spdlog::level::Level, std::move(fmt), std::forward<Args>(args)...);                         \
     }
 
-    ADBFS_LOG_LOG_ENTRY(log_t, trace)
-    ADBFS_LOG_LOG_ENTRY(log_d, debug)
-    ADBFS_LOG_LOG_ENTRY(log_i, info)
-    ADBFS_LOG_LOG_ENTRY(log_w, warn)
-    ADBFS_LOG_LOG_ENTRY(log_e, err)
-    ADBFS_LOG_LOG_ENTRY(log_c, critical)
+    ADBFSM_LOG_LOG_ENTRY(log_t, trace)
+    ADBFSM_LOG_LOG_ENTRY(log_d, debug)
+    ADBFSM_LOG_LOG_ENTRY(log_i, info)
+    ADBFSM_LOG_LOG_ENTRY(log_w, warn)
+    ADBFSM_LOG_LOG_ENTRY(log_e, err)
+    ADBFSM_LOG_LOG_ENTRY(log_c, critical)
 
-#undef ADBFS_LOG_LOG_ENTRY
+#undef ADBFSM_LOG_LOG_ENTRY
 }

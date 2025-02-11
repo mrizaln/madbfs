@@ -7,7 +7,7 @@
 
 #include <array>
 
-namespace adbfs::cmd
+namespace adbfsm::cmd
 {
     using Out = subprocess::CompletedProcess;
     using Cmd = subprocess::CommandLine;

@@ -1,4 +1,4 @@
-#include "adbfs.hpp"
+#include "adbfsm.hpp"
 #include "cmd.hpp"
 #include "util.hpp"
 
@@ -41,9 +41,9 @@ std::string_view to_string(SerialStatus status)
  */
 std::filesystem::path make_temp_dir()
 {
-    char adbfs_template[] = "/tmp/adbfs-XXXXXX";
-    auto temp             = mkdtemp(adbfs_template);
-    adbfs::log_i({ "created temporary directory: {:?}" }, temp);
+    char adbfsm_template[] = "/tmp/adbfsm-XXXXXX";
+    auto temp              = mkdtemp(adbfsm_template);
+    adbfsm::log_i({ "created temporary directory: {:?}" }, temp);
     return temp;
 }
 
@@ -67,7 +67,7 @@ void sigsegv_handler(int)
 
     // remove the temporary directory
     if (auto* fuse_ctx = fuse_get_context(); fuse_ctx != nullptr) {
-        auto& data = *static_cast<adbfs::AdbfsData*>(fuse_ctx->private_data);
+        auto& data = *static_cast<adbfsm::AdbfsmData*>(fuse_ctx->private_data);
         std::filesystem::remove_all(data.m_dir);
     }
 
@@ -78,6 +78,17 @@ void sigsegv_handler(int)
 
 void terminate_handler()
 {
+    auto exception = std::current_exception();
+    if (exception != nullptr) {
+        try {
+            std::rethrow_exception(exception);
+        } catch (const std::exception& e) {
+            fmt::print(stderr, "Termination reached, uncaught exception: {}\n", e.what());
+        } catch (...) {
+            fmt::print(stderr, "Termination reached, uncaught exception\n");
+        }
+    }
+
     auto array = std::array<void*, 10>{};
     auto size  = static_cast<int>(array.size());
 
@@ -85,12 +96,12 @@ void terminate_handler()
     size = backtrace(array.data(), array.size());
 
     // print out all the frames to stderr
-    fmt::print(stderr, "Termination reached, backtrace:\n");
+    fmt::print(stderr, "backtrace:\n");
     backtrace_symbols_fd(array.data(), size, STDERR_FILENO);
 
     // remove the temporary directory
     if (auto* fuse_ctx = fuse_get_context(); fuse_ctx != nullptr) {
-        auto& data = *static_cast<adbfs::AdbfsData*>(fuse_ctx->private_data);
+        auto& data = *static_cast<adbfsm::AdbfsmData*>(fuse_ctx->private_data);
         std::filesystem::remove_all(data.m_dir);
     }
 }
@@ -101,7 +112,7 @@ void show_help(const char* prog, bool err)
     fmt::print(out, "usage: {} [options] <mountpoint>\n\n", prog);
     fmt::print(
         out,
-        "Adbfs specific options:\n"
+        "Adbfsm specific options:\n"
         "    --serial=<s>        The serial number of the device to mount (REQUIRED)\n"
         "    --rescan            Perform rescan every (idk)\n"
         "    --help              Show this help message\n"
@@ -111,12 +122,12 @@ void show_help(const char* prog, bool err)
 
 SerialStatus check_serial(std::string_view serial)
 {
-    auto proc = adbfs::cmd::exec({ "adb", "devices" });
+    auto proc = adbfsm::cmd::exec({ "adb", "devices" });
     assert(proc.returncode == 0);
 
-    auto line_splitter = adbfs::util::StringSplitter{ proc.cout, { '\n' } };
+    auto line_splitter = adbfsm::util::StringSplitter{ proc.cout, { '\n' } };
     while (auto str = line_splitter.next()) {
-        auto splitter = adbfs::util::StringSplitter{ *str, { " \t" } };
+        auto splitter = adbfsm::util::StringSplitter{ *str, { " \t" } };
 
         auto supposedly_serial = splitter.next();
         auto status            = splitter.next();
@@ -143,10 +154,10 @@ SerialStatus check_serial(std::string_view serial)
 
 int main(int argc, char** argv)
 {
-    adbfs::log::init(spdlog::level::debug);
-    adbfs::log_i({ "starting adb server..." });
+    adbfsm::log::init(spdlog::level::debug);
+    adbfsm::log_i({ "starting adb server..." });
 
-    if (auto serv = adbfs::cmd::exec({ "adb", "start-server" }); serv.returncode != 0) {
+    if (auto serv = adbfsm::cmd::exec({ "adb", "start-server" }); serv.returncode != 0) {
         fmt::println(stderr, "error: failed to start adb server, make sure adb is installed and in PATH");
         fmt::println(stderr, "stderr:\n{}", serv.cerr);
         return 1;
@@ -155,44 +166,44 @@ int main(int argc, char** argv)
     std::signal(SIGSEGV, sigsegv_handler);
     std::set_terminate(terminate_handler);
 
-    auto adbfs_oper = fuse_operations{
-        .getattr     = adbfs::getattr,
-        .readlink    = adbfs::readlink,
+    auto adbfsm_oper = fuse_operations{
+        .getattr     = adbfsm::getattr,
+        .readlink    = adbfsm::readlink,
         .getdir      = nullptr,
-        .mknod       = adbfs::mknod,
-        .mkdir       = adbfs::mkdir,
-        .unlink      = adbfs::unlink,
-        .rmdir       = adbfs::rmdir,
+        .mknod       = adbfsm::mknod,
+        .mkdir       = adbfsm::mkdir,
+        .unlink      = adbfsm::unlink,
+        .rmdir       = adbfsm::rmdir,
         .symlink     = nullptr,
-        .rename      = adbfs::rename,
+        .rename      = adbfsm::rename,
         .link        = nullptr,
         .chmod       = nullptr,
         .chown       = nullptr,
-        .truncate    = adbfs::truncate,
+        .truncate    = adbfsm::truncate,
         .utime       = nullptr,
-        .open        = adbfs::open,
-        .read        = adbfs::read,
-        .write       = adbfs::write,
+        .open        = adbfsm::open,
+        .read        = adbfsm::read,
+        .write       = adbfsm::write,
         .statfs      = nullptr,
-        .flush       = adbfs::flush,
-        .release     = adbfs::release,
+        .flush       = adbfsm::flush,
+        .release     = adbfsm::release,
         .fsync       = nullptr,
         .setxattr    = nullptr,
         .getxattr    = nullptr,
         .listxattr   = nullptr,
         .removexattr = nullptr,
         .opendir     = nullptr,
-        .readdir     = adbfs::readdir,
+        .readdir     = adbfsm::readdir,
         .releasedir  = nullptr,
         .fsyncdir    = nullptr,
         .init        = nullptr,
-        .destroy     = adbfs::destroy,
-        .access      = adbfs::access,
+        .destroy     = adbfsm::destroy,
+        .access      = adbfsm::access,
         .create      = nullptr,
         .ftruncate   = nullptr,
         .fgetattr    = nullptr,
         .lock        = nullptr,
-        .utimens     = adbfs::utimens,
+        .utimens     = adbfsm::utimens,
         .bmap        = nullptr,
 
         .flag_nullpath_ok   = {},
@@ -209,7 +220,7 @@ int main(int argc, char** argv)
     };
 
     // don't set default value here
-    struct AdbfsOpt
+    struct AdbfsmOpt
     {
         const char* m_serial    = nullptr;
         int         m_rescan    = false;
@@ -219,28 +230,28 @@ int main(int argc, char** argv)
 
     fuse_args args = FUSE_ARGS_INIT(argc, argv);
 
-    fuse_opt adbfs_opt_spec[] = {
-        { "--serial=%s", offsetof(AdbfsOpt, m_serial), true },
-        { "--rescan", offsetof(AdbfsOpt, m_rescan), true },
-        { "-h", offsetof(AdbfsOpt, m_help), true },
-        { "--help", offsetof(AdbfsOpt, m_help), true },
-        { "--fuse-help", offsetof(AdbfsOpt, m_fuse_help), true },
+    fuse_opt adbfsm_opt_spec[] = {
+        { "--serial=%s", offsetof(AdbfsmOpt, m_serial), true },
+        { "--rescan", offsetof(AdbfsmOpt, m_rescan), true },
+        { "-h", offsetof(AdbfsmOpt, m_help), true },
+        { "--help", offsetof(AdbfsmOpt, m_help), true },
+        { "--fuse-help", offsetof(AdbfsmOpt, m_fuse_help), true },
         FUSE_OPT_END,
     };
 
-    auto adbfs_opt = AdbfsOpt{};
-    if (fuse_opt_parse(&args, &adbfs_opt, adbfs_opt_spec, NULL) != 0) {
+    auto adbfsm_opt = AdbfsmOpt{};
+    if (fuse_opt_parse(&args, &adbfsm_opt, adbfsm_opt_spec, NULL) != 0) {
         fmt::println(stderr, "error: failed to parse options\n");
         fmt::println(stderr, "try '{} --help' for more information", argv[0]);
         fmt::println(stderr, "try '{} --fuse-help' for full information", argv[0]);
         return 1;
     }
 
-    if (adbfs_opt.m_help) {
+    if (adbfsm_opt.m_help) {
         show_help(argv[0], false);
         fuse_opt_free_args(&args);
         return 0;
-    } else if (adbfs_opt.m_serial == nullptr and not adbfs_opt.m_fuse_help) {
+    } else if (adbfsm_opt.m_serial == nullptr and not adbfsm_opt.m_fuse_help) {
         fmt::println(stderr, "error: --serial is required");
         fmt::println(stderr, "run 'adb devices' command to get the desired device serial number\n");
         show_help(argv[0], true);
@@ -248,32 +259,32 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    if (adbfs_opt.m_fuse_help) {
+    if (adbfsm_opt.m_fuse_help) {
         show_help(argv[0], false);
         assert(fuse_opt_add_arg(&args, "--help") == 0);
         args.argv[0][0] = '\0';
 
-        auto ret = fuse_main(args.argc, args.argv, &adbfs_oper, NULL);
+        auto ret = fuse_main(args.argc, args.argv, &adbfsm_oper, NULL);
         fuse_opt_free_args(&args);
 
         return ret;
     }
 
-    if (auto status = check_serial(adbfs_opt.m_serial); status != SerialStatus::Device) {
-        fmt::println(stderr, "error: serial '{} 'is not valid ({})", adbfs_opt.m_serial, to_string(status));
+    if (auto status = check_serial(adbfsm_opt.m_serial); status != SerialStatus::Device) {
+        fmt::println(stderr, "error: serial '{} 'is not valid ({})", adbfsm_opt.m_serial, to_string(status));
         fuse_opt_free_args(&args);
         return 1;
     }
 
-    auto data = adbfs::AdbfsData{
+    auto data = adbfsm::AdbfsmData{
         .m_cache   = {},
         .m_dir     = make_temp_dir(),
-        .m_serial  = adbfs_opt.m_serial,
+        .m_serial  = adbfsm_opt.m_serial,
         .m_readdir = false,
-        .m_rescan  = static_cast<bool>(adbfs_opt.m_rescan),
+        .m_rescan  = static_cast<bool>(adbfsm_opt.m_rescan),
     };
 
-    auto ret = fuse_main(args.argc, args.argv, &adbfs_oper, (void*)&data);
+    auto ret = fuse_main(args.argc, args.argv, &adbfsm_oper, (void*)&data);
     fuse_opt_free_args(&args);
 
     return ret;
