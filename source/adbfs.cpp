@@ -277,11 +277,23 @@ namespace detail
         auto [to_be_stat, remainder] = *result;
 
         auto path = remainder;
-        auto link = std::string_view{};
+        auto link = std::string{};
 
         if (auto arrow = remainder.find(" -> "); arrow != std::string::npos) {
             path = remainder.substr(0, arrow);
-            link = remainder.substr(arrow + 4);
+
+            auto to_be_link  = remainder.substr(arrow + 4);
+            auto num_slashes = sr::count(path | sv::drop(1), '/');
+
+            auto pos = 0_usize;
+            while (to_be_link[pos] == '/') {
+                ++pos;
+            }
+            for (; num_slashes; --num_slashes) {
+                link.append("../");
+            }
+
+            link.append(to_be_link.data() + pos, to_be_link.size() - pos);
         }
 
         if (to_be_stat[0].find_first_of('?') != std::string::npos) {
@@ -308,7 +320,7 @@ namespace detail
             .m_size    = parse_fundamental<int>(to_be_stat[4]).value(),
             .m_mtime   = parse_time(to_be_stat[5], to_be_stat[6], to_be_stat[7]).value(),
             .m_age     = Clock::now(),
-            .m_link_to = std::string{ link },
+            .m_link_to = link,
         };
 
         if ((stat.m_mode & S_IFMT) == S_IFLNK and link.empty()) {
@@ -325,6 +337,14 @@ namespace detail
         auto basename = actual_path.filename();
         fn(ParsedStat{ .m_path = basename.c_str(), .m_stat = it->second });
         return true;
+    }
+
+    cmd::Out adb_rescan_file(Str path, Str serial)
+    {
+        auto file   = fmt::format("'file://{}'", path);
+        auto intent = "android.intent.action.MEDIA_SCANNER_SCAN_FILE";
+        auto cmd    = cmd::Cmd{ "am", "broadcast", "-a", intent, "-d", file };
+        return cmd::exec_adb(std::move(cmd), serial);
     }
 }
 
@@ -442,6 +462,7 @@ namespace adbfs
 
     int access(const char* path, int mask)
     {
+        // NOTE: empty
         return 0;
     }
 
@@ -472,6 +493,28 @@ namespace adbfs
 
     int utimens(const char* path, const timespec ts[2])
     {
+        log_i({ "readdir: {}" }, path);
+        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+
+        readdir_flag.wait(true);
+
+        // TODO: use the timedata from ts instead of the current time
+        auto touch = cmd::exec_adb({ "touch", detail::copy_escape(path) }, serial);
+        if (touch.returncode != 0) {
+            auto errn = to_errno(detail::parse_stderr(touch.cerr));
+            log_e({ "utimens: failed to touch file [{}] (err: {}) {}" }, touch.returncode, errn, touch.cerr);
+            cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
+            return -errn;
+        }
+
+        // If we forgot to mount -o rescan then we can remount and touch to trigger the scan.
+        if (rescan) {
+            auto out = detail::adb_rescan_file(path, serial);
+            if (out.returncode != 0) {
+                return -to_errno(detail::parse_stderr(out.cerr));
+            }
+        }
+
         return 0;
     }
 
@@ -541,8 +584,9 @@ namespace adbfs
             return -ENOSYS;
         }
 
-        std::memset(buf, 0, size);
-        std::memcpy(buf, stat.m_link_to.data(), stat.m_link_to.size());
+        log_d({ "readlink: [{}] -> [{}]" }, path, stat.m_link_to);
+
+        std::memcpy(buf, stat.m_link_to.c_str(), std::min(size, stat.m_link_to.size() + 1));
 
         return 0;
     }
