@@ -2,6 +2,7 @@
 
 #include "common.hpp"
 #include <atomic>
+#include <unordered_set>
 
 #define FUSE_USE_VERSION 26
 #include <fuse.h>
@@ -45,6 +46,7 @@ namespace adbfs
     struct Cache
     {
         std::unordered_map<std::string, Stat, StrHash, std::equal_to<>> m_file_stat;
+        std::unordered_set<std::string, StrHash, std::equal_to<>>       m_file_truncated;
         std::unordered_map<std::string, int, StrHash, std::equal_to<>>  m_uid;
         std::unordered_map<std::string, int, StrHash, std::equal_to<>>  m_gid;
 
@@ -59,6 +61,8 @@ namespace adbfs
         std::atomic<bool> m_readdir = false;
         bool              m_rescan  = false;
     };
+
+    void destroy(void* private_data);
 
     int readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_t offset, fuse_file_info* fi);
     int getattr(const char* path, struct stat* stbuf);

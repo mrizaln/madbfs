@@ -42,7 +42,9 @@ std::string_view to_string(SerialStatus status)
 std::filesystem::path make_temp_dir()
 {
     char adbfs_template[] = "/tmp/adbfs-XXXXXX";
-    return mkdtemp(adbfs_template);
+    auto temp             = mkdtemp(adbfs_template);
+    adbfs::log_i({ "created temporary directory: {:?}" }, temp);
+    return temp;
 }
 
 /**
@@ -184,7 +186,7 @@ int main(int argc, char** argv)
         .releasedir  = nullptr,
         .fsyncdir    = nullptr,
         .init        = nullptr,
-        .destroy     = nullptr,
+        .destroy     = adbfs::destroy,
         .access      = adbfs::access,
         .create      = nullptr,
         .ftruncate   = nullptr,

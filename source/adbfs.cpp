@@ -3,9 +3,10 @@
 #include "util.hpp"
 #include "adbfs.hpp"
 
-#include <cstring>
 #include <fuse.h>
+#include <fcntl.h>
 
+#include <cstring>
 #include <charconv>
 #include <cassert>
 
@@ -137,6 +138,13 @@ namespace detail
         return Error::Unknown;
     }
 
+    int parse_and_log_cmd_err(const cmd::Out& out, Str fun, Str msg)
+    {
+        auto errn = to_errno(parse_stderr(out.cerr));
+        log_e({ "{}: {} [{}] (errno: {}) {}" }, fun, msg, out.returncode, errn, out.cerr);
+        return errn;
+    }
+
     int parse_mode(Str str)
     {
         if (str.size() != 10) {
@@ -194,7 +202,7 @@ namespace detail
             }
         }
 
-        auto gid = cmd::exec_adb({ "id", "-g", std::string{ group } }, serial);
+        auto gid = cmd::exec_adb_shell({ "id", "-g", std::string{ group } }, serial);
         if (gid.returncode != 0) {
             log_e({ "get_gid: failed to get gid for [{}] (err: {}) {}" }, group, gid.returncode, gid.cerr);
         }
@@ -214,7 +222,7 @@ namespace detail
             }
         }
 
-        auto uid = cmd::exec_adb({ "id", "-u", std::string{ user } }, serial);
+        auto uid = cmd::exec_adb_shell({ "id", "-u", std::string{ user } }, serial);
         if (uid.returncode != 0) {
             log_e({ "get_uid: failed to get uid for [{}] (err: {}) {}" }, user, uid.returncode, uid.cerr);
         }
@@ -344,12 +352,19 @@ namespace detail
         auto file   = fmt::format("'file://{}'", path);
         auto intent = "android.intent.action.MEDIA_SCANNER_SCAN_FILE";
         auto cmd    = cmd::Cmd{ "am", "broadcast", "-a", intent, "-d", file };
-        return cmd::exec_adb(std::move(cmd), serial);
+        return cmd::exec_adb_shell(std::move(cmd), serial);
     }
 }
 
 namespace adbfs
 {
+    void destroy(void* private_data)
+    {
+        auto& data = *static_cast<AdbfsData*>(private_data);
+        fs::remove_all(data.m_dir);
+        adbfs::log_i({ "cleaned up temporary directory: {:?}" }, data.m_dir.c_str());
+    }
+
     int readdir(
         const char*                      path,
         void*                            buf,
@@ -370,10 +385,9 @@ namespace adbfs
             }
         }
 
-        auto ls = cmd::exec_adb({ "ls", "-lla", detail::copy_escape(path) }, serial);
+        auto ls = cmd::exec_adb_shell({ "ls", "-lla", detail::copy_escape(path) }, serial);
         if (ls.returncode != 0) {
-            auto errn = to_errno(detail::parse_stderr(ls.cerr));
-            log_e({ "readdir: failed to list directory [{}] (err: {}) {}" }, ls.returncode, errn, ls.cerr);
+            auto errn = detail::parse_and_log_cmd_err(ls, "readdir", "failed to list directory");
             cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
             return -errn;
         }
@@ -402,10 +416,9 @@ namespace adbfs
         readdir_flag.wait(true);
 
         if (auto found = cache.m_file_stat.find(path); found == cache.m_file_stat.end()) {
-            auto ls = cmd::exec_adb({ "ls", "-llad", detail::copy_escape(path) }, serial);
+            auto ls = cmd::exec_adb_shell({ "ls", "-llad", detail::copy_escape(path) }, serial);
             if (ls.returncode != 0) {
-                auto errn = to_errno(detail::parse_stderr(ls.cerr));
-                log_e({ "getattr: failed to get attribute [{}] (err: {}) {}" }, ls.returncode, errn, ls.cerr);
+                auto errn = detail::parse_and_log_cmd_err(ls, "getattr", "failed to get file info");
                 cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
                 return -errn;
             }
@@ -468,26 +481,53 @@ namespace adbfs
 
     int open(const char* path, fuse_file_info* fi)
     {
+        log_i({ "readdir: {}" }, path);
+        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+
+        readdir_flag.wait(true);
+
+        auto path_str   = detail::copy_escape(path);
+        auto local_path = temp / detail::copy_replace(path, '/', '-');
+
+        if (fs::exists(local_path)) {
+            fi->fh = ::open(local_path.c_str(), fi->flags);
+            return 0;
+        }
+
+        if (not cache.m_file_truncated.contains(path)) {
+            auto pull = cmd::exec_adb({ "pull", path_str, local_path }, serial);
+            if (pull.returncode != 0) {
+                auto errn = detail::parse_and_log_cmd_err(pull, "open", "failed to pull file");
+                cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
+                return -errn;
+            }
+        }
+
+        fi->fh = ::open(local_path.c_str(), fi->flags);
         return 0;
     }
 
     int flush(const char* path, fuse_file_info* fi)
     {
+        log_c({ "flush [unimplemented]: {}" }, path);
         return 0;
     }
 
     int release(const char* path, fuse_file_info* fi)
     {
+        log_c({ "release [unimplemented]: {}" }, path);
         return 0;
     }
 
     int read(const char* path, char* buf, size_t size, off_t offset, fuse_file_info* fi)
     {
+        log_c({ "read [unimplemented]: {}" }, path);
         return 0;
     }
 
     int write(const char* path, const char* buf, size_t size, off_t offset, fuse_file_info* fi)
     {
+        log_c({ "write [unimplemented]: {}" }, path);
         return 0;
     }
 
@@ -499,10 +539,9 @@ namespace adbfs
         readdir_flag.wait(true);
 
         // TODO: use the timedata from ts instead of the current time
-        auto touch = cmd::exec_adb({ "touch", detail::copy_escape(path) }, serial);
+        auto touch = cmd::exec_adb_shell({ "touch", detail::copy_escape(path) }, serial);
         if (touch.returncode != 0) {
-            auto errn = to_errno(detail::parse_stderr(touch.cerr));
-            log_e({ "utimens: failed to touch file [{}] (err: {}) {}" }, touch.returncode, errn, touch.cerr);
+            auto errn = detail::parse_and_log_cmd_err(touch, "utimens", "failed to touch file");
             cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
             return -errn;
         }
@@ -520,46 +559,51 @@ namespace adbfs
 
     int truncate(const char* path, off_t size)
     {
+        log_c({ "truncate [unimplemented]: {}" }, path);
         return 0;
     }
 
     int mknod(const char* path, mode_t mode, dev_t rdev)
     {
+        log_c({ "mknod [unimplemented]: {}" }, path);
         return 0;
     }
 
     int mkdir(const char* path, mode_t mode)
     {
+        log_c({ "mkdir [unimplemented]: {}" }, path);
         return 0;
     }
 
     int rename(const char* from, const char* to)
     {
+        log_c({ "rename [unimplemented]: {} -> {}" }, from, to);
         return 0;
     }
 
     int rmdir(const char* path)
     {
+        log_c({ "rmdir [unimplemented]: {}" }, path);
         return 0;
     }
 
     int unlink(const char* path)
     {
+        log_c({ "unlink [unimplemented]: {}" }, path);
         return 0;
     }
 
     int readlink(const char* path, char* buf, size_t size)
     {
-        log_i({ "readdir: {}" }, path);
+        log_i({ "readlink: {}" }, path);
         auto& [cache, temp, serial, readdir_flag, _] = detail::get_data();
 
         readdir_flag.wait(true);
 
         if (auto found = cache.m_file_stat.find(path); found == cache.m_file_stat.end()) {
-            auto ls = cmd::exec_adb({ "ls", "-llad", detail::copy_escape(path) }, serial);
+            auto ls = cmd::exec_adb_shell({ "ls", "-llad", detail::copy_escape(path) }, serial);
             if (ls.returncode != 0) {
-                auto errn = to_errno(detail::parse_stderr(ls.cerr));
-                log_e({ "readlink: failed to read info [{}] (err: {}) {}" }, ls.returncode, errn, ls.cerr);
+                auto errn = detail::parse_and_log_cmd_err(ls, "readlink", "failed to read file info");
                 cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
                 return -errn;
             }

@@ -22,7 +22,7 @@ namespace adbfs::cmd
      */
     [[nodiscard]] inline Out exec(Cmd cmd)
     {
-        log_d({ "exec_command: {}" }, cmd);
+        log_d({ "exec: {}" }, cmd);
 
         auto opt = Opt{
             .cout  = subprocess::PipeOption::pipe,
@@ -36,6 +36,31 @@ namespace adbfs::cmd
     }
 
     /**
+     * @brief Execute a command prefixed with `adb` and return the output (blocking).
+     *
+     * @param cmd The command to be ran on the adb shell.
+     *
+     * @return The output of the command.
+     */
+    [[nodiscard]] inline Out exec_adb(Cmd cmd, Str serial)
+    {
+        log_d({ "exec_adb [{}]: {}" }, serial, cmd);
+
+        auto opt = Opt{
+            .cout  = subprocess::PipeOption::pipe,
+            .cerr  = subprocess::PipeOption::pipe,
+            .cwd   = {},
+            .check = false,
+            .env   = { { std::string{ "ANDROID_SERIAL" }, std::string{ serial } } },
+        };
+
+        auto prefix = std::array{ "adb" };
+        cmd.insert(cmd.begin(), prefix.begin(), prefix.end());
+
+        return subprocess::run(cmd, opt);
+    }
+
+    /**
      * @brief Execute a command on the adb shell and return the output (blocking).
      *
      * @param cmd The command to be ran on the adb shell.
@@ -43,9 +68,9 @@ namespace adbfs::cmd
      *
      * @return The output of the command.
      */
-    [[nodiscard]] inline Out exec_adb(Cmd cmd, Str serial)
+    [[nodiscard]] inline Out exec_adb_shell(Cmd cmd, Str serial)
     {
-        log_d({ "adb_shell [{}]: {}" }, serial, cmd);
+        log_d({ "exec_adb_shell [{}]: {}" }, serial, cmd);
 
         auto opt = Opt{
             .cout  = subprocess::PipeOption::pipe,
