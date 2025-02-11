@@ -18,10 +18,10 @@ namespace detail
     static constexpr int   default_gid         = 98;
     static constexpr int   default_uid         = 98;
     static constexpr Str   no_device           = "adb: no devices/emulators found";
-    static constexpr Str   permission_denied   = "Permission denied";
-    static constexpr Str   no_such_file_or_dir = "No such file or directory";
-    static constexpr Str   not_a_directory     = "Not a directory";
-    static constexpr Str   inaccessible        = "inaccessible or not found";
+    static constexpr Str   permission_denied   = " Permission denied";
+    static constexpr Str   no_such_file_or_dir = " No such file or directory";
+    static constexpr Str   not_a_directory     = " Not a directory";
+    static constexpr Str   inaccessible        = " inaccessible or not found";
     static constexpr Str   bash_escapes        = " \t\n\'\"\\`$()<>;&|*?[#~=%";
 
     struct ParsedStat
@@ -130,8 +130,9 @@ namespace detail
                 return Error::NoDev;
             }
 
-            auto rev = std::string{ line->rbegin(), line->rend() };
-            auto err = util::StringSplitter{ rev, ':' }.next();
+            auto rev       = std::string{ line->rbegin(), line->rend() };
+            auto rev_strip = util::strip(rev);
+            auto err       = util::StringSplitter{ rev_strip, ':' }.next();
             if (not err) {
                 continue;
             }
@@ -155,7 +156,7 @@ namespace detail
     int parse_and_log_cmd_err(const cmd::Out& out, Str fun, Str msg)
     {
         auto errn = to_errno(parse_stderr(out.cerr));
-        log_e({ "{}: {} [{}] (errno: {}) {}" }, fun, msg, out.returncode, errn, out.cerr);
+        log_e({ "{}: {} [{}] (errno: {}) {}" }, fun, msg, out.returncode, errn, util::rstrip(out.cerr));
         return errn;
     }
 
@@ -499,71 +500,101 @@ namespace adbfsm
         auto path_str   = detail::copy_escape(path);
         auto local_path = temp / detail::copy_replace(path_str.c_str(), '/', '-');
 
-        if (fs::exists(local_path)) {
-            fi->fh = static_cast<u64>(::open(local_path.c_str(), fi->flags));
-            return 0;
-        }
-
-        if (not cache.m_file_truncated.contains(path)) {
+        if (not cache.m_file_truncated.contains(path) and not fs::exists(local_path)) {
             auto pull = cmd::exec_adb({ "pull", std::move(path_str), local_path }, serial);
             if (pull.returncode != 0) {
-                auto errn = detail::parse_and_log_cmd_err(pull, "open", "failed to pull file");
-                cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
-                return -errn;
+                return -detail::parse_and_log_cmd_err(pull, "open", "failed to pull file");
             }
         }
 
-        fi->fh = static_cast<u64>(::open(local_path.c_str(), fi->flags));
+        cache.m_file_truncated.erase(path);
+
+        auto handle = ::open(local_path.c_str(), fi->flags);
+        if (handle == -1) {
+            log_e({ "open: failed to open [{}] (errno: {}) {}" }, local_path.c_str(), errno, strerror(errno));
+            return -errno;
+        }
+
+        log_d({ "open: successfully open file [{}] with fd [{}]" }, local_path.c_str(), handle);
+        fi->fh = static_cast<u64>(handle);
+
         return 0;
     }
 
     int flush(const char* path, fuse_file_info* fi)
     {
-        log_c({ "flush [unimplemented]: {}" }, path);
-        return -ENOSYS;
+        log_i({ "flush: {:?}" }, path);
+
+        auto fd = static_cast<i32>(fi->fh);
+        ::fsync(fd);
+
+        return 0;
     }
 
     int release(const char* path, fuse_file_info* fi)
     {
-        log_i({ "release: {}" }, path);
+        log_i({ "release: {:?}" }, path);
         auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
 
-        auto local_path = temp / detail::copy_replace_escape(path, '/', '-');
+        auto path_str   = detail::copy_escape(path);
+        auto local_path = temp / detail::copy_replace(path, '/', '-');
 
-        // close file
         auto fd = static_cast<i32>(fi->fh);
-        cache.m_file_pending_write.erase(fd);
+
+        cache.m_file_stat.erase(path);
+
+        if (cache.m_file_pending_write.contains(fd)) {
+            cache.m_file_pending_write.erase(fd);
+
+            log_d({ "release: flushing file [{}] with fd [{}]" }, local_path, fd);
+            log_d({ "release: new size of file is [{}]" }, fs::file_size(local_path));
+
+            auto push = cmd::exec_adb({ "push", local_path, std::move(path_str) }, serial);
+            if (push.returncode != 0) {
+                log_d({ "release: push stdout\n{:?}" }, push.cout);
+                log_d({ "release: push stderr\n{:?}" }, push.cerr);
+                return -detail::parse_and_log_cmd_err(push, "flush", "failed to push file");
+            }
+
+            std::ignore = cmd::exec_adb_shell({ "sync" }, serial);
+            if (rescan) {
+                auto out = detail::adb_rescan_file(path, serial);
+                if (out.returncode != 0) {
+                    return -detail::parse_and_log_cmd_err(out, "flush", "failed to rescan file");
+                }
+            }
+        } else {
+            log_d({ "release: file [{}] with fd [{}] is not pending write" }, path, fd);
+        }
+
         auto res = ::close(fd);
         if (res == -1) {
-            log_e({ "release: failed to close file [{}] (errno: {})" }, path, errno);
+            log_e({ "release: failed to close file [{}] (errno: {}) {}" }, fd, errno, strerror(errno));
             return -errno;
         }
 
-        // remove local copy
-        // TODO: use heuristic to whether remove this local copy or not
-        res = ::unlink(local_path.c_str());
-        if (res == -1) {
-            log_e({ "release: failed to unlink file [{}] (errno: {})" }, path, errno);
-            return -errno;
-        }
+        cache.m_file_stat.erase(path);
+
+        // // remove local copy
+        // // TODO: use heuristic to whether remove this local copy or not
+        // res = ::unlink(local_path.c_str());
+        // if (res == -1) {
+        //     log_e({ "release: failed to unlink [{}] (errno: {}) {}" }, local_path, errno, strerror(errno));
+        //     return -errno;
+        // }
 
         return 0;
     }
 
     int read(const char* path, char* buf, size_t size, off_t offset, fuse_file_info* fi)
     {
-        log_i({ "read: {}" }, path);
-        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+        log_i({ "read: {:?}" }, path);
+        // auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
 
-        auto fd = static_cast<i32>(fi->fh);
-        if (fd == -1) {
-            log_e({ "read: invalid file descriptor" });
-            return -EBADF;
-        }
-
+        auto fd  = static_cast<i32>(fi->fh);
         auto res = pread(fd, buf, size, offset);
         if (res == -1) {
-            log_e({ "read: failed to read file [{}] (errno: {})" }, path, errno);
+            log_e({ "read: failed to read file [{}] (errno: {}) {}" }, path, errno, strerror(errno));
             return -errno;
         }
 
@@ -572,8 +603,24 @@ namespace adbfsm
 
     int write(const char* path, const char* buf, size_t size, off_t offset, fuse_file_info* fi)
     {
-        log_c({ "write [unimplemented]: {}" }, path);
-        return -ENOSYS;
+        log_i({ "write: {:?}" }, path);
+        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+
+        auto local_path = temp / detail::copy_replace_escape(path, '/', '-');
+
+        auto fd = static_cast<i32>(fi->fh);
+        cache.m_file_pending_write.insert(fd);
+
+        auto res = pwrite(fd, buf, size, offset);
+        if (res == -1) {
+            log_e({ "write: failed to write file [{}] (errno: {}) {}" }, local_path, errno, strerror(errno));
+            return -errno;
+        }
+
+        log_d({ "write: wrote [{}] bytes to file [{}] with fd [{}]" }, res, local_path, fd);
+        log_d({ "write: wrote {:?}" }, std::string_view{ buf, size });
+
+        return static_cast<i32>(res);
     }
 
     int utimens(const char* path, const timespec ts[2])
@@ -594,7 +641,7 @@ namespace adbfsm
         if (rescan) {
             auto out = detail::adb_rescan_file(path, serial);
             if (out.returncode != 0) {
-                return -to_errno(detail::parse_stderr(out.cerr));
+                return -detail::parse_and_log_cmd_err(out, "utimens", "failed to rescan file");
             }
         }
 
@@ -603,8 +650,25 @@ namespace adbfsm
 
     int truncate(const char* path, off_t size)
     {
-        log_c({ "truncate [unimplemented]: {}" }, path);
-        return -ENOSYS;
+        log_i({ "truncate: {:?}" }, path);
+        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+
+        auto path_str   = detail::copy_escape(path);
+        auto local_path = temp / detail::copy_replace(path_str.c_str(), '/', '-');
+
+        if (not fs::exists(local_path)) {
+            auto pull = cmd::exec_adb({ "pull", std::move(path_str), local_path }, serial);
+            if (pull.returncode != 0) {
+                return -detail::parse_and_log_cmd_err(pull, "open", "failed to pull file");
+            }
+        }
+
+        cache.m_file_truncated.insert(path);
+        cache.m_file_stat.erase(path);
+
+        log_d({ "truncate: [{}] to [{}]" }, local_path, size);
+
+        return ::truncate(local_path.c_str(), size);
     }
 
     int mknod(const char* path, mode_t mode, dev_t rdev)
@@ -633,6 +697,28 @@ namespace adbfsm
 
     int unlink(const char* path)
     {
+        // log_i({ "unlink: {:?}" }, path);
+        // auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+
+        // auto path_str   = detail::copy_escape(path);
+        // auto local_path = temp / detail::copy_replace(path_str.c_str(), '/', '-');
+
+        // auto rm = cmd::exec_adb_shell({ "rm", path_str }, serial);
+        // if (rm.returncode != 0) {
+        //     auto errn = detail::parse_and_log_cmd_err(rm, "unlink", "failed to remove file");
+        //     cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
+        //     return -errn;
+        // }
+        // if (rescan) {
+        //     auto out = detail::adb_rescan_file(path, serial);
+        //     if (out.returncode != 0) {
+        //         return -detail::parse_and_log_cmd_err(out, "flush", "failed to rescan file");
+        //     }
+        // }
+
+        // cache.m_file_stat.erase(path);
+        // return ::unlink(local_path.c_str());
+
         log_c({ "unlink [unimplemented]: {}" }, path);
         return -ENOSYS;
     }
