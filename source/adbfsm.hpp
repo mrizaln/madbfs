@@ -56,6 +56,8 @@ namespace adbfsm
         // return false if file is too big
         bool add(fs::path path)
         {
+            auto lock = std::unique_lock{ m_mutex };
+
             if (fs::file_size(path) > m_max_size) {
                 return false;
             }
@@ -65,12 +67,14 @@ namespace adbfsm
                 log_d({ "local copy: too big ({} > {}), removing oldest file" }, new_size, m_max_size);
                 new_size -= fs::file_size(m_files.front());
                 fs::remove(m_files.front());
+                m_files_set.erase(m_files.front());
                 m_files.pop_front();
             }
 
             log_d({ "local copy: adding file {:?} (size={}|max={})" }, path, new_size, m_max_size);
 
             m_files.push_back(std::move(path));
+            m_files_set.insert(m_files.back());
             m_current_size = new_size;
 
             return true;
@@ -78,31 +82,41 @@ namespace adbfsm
 
         bool exists(const fs::path& path)
         {
-            return sr::find(m_files.begin(), m_files.end(), path) != m_files.end();
+            auto lock = std::shared_lock{ m_mutex };
+            return m_files_set.contains(path);
         }
 
         void remove(const fs::path& path)
         {
+            auto lock = std::unique_lock{ m_mutex };
+
             auto erased = std::erase_if(m_files, [&](auto&& p) { return p == path; });
             if (erased) {
                 log_d({ "local copy: removing file {:?}" }, path);
                 m_current_size -= fs::file_size(path);
+                m_files_set.erase(path);
                 fs::remove(path);
             }
         }
 
         void rename(const fs::path& from, fs::path&& to)
         {
+            auto lock = std::unique_lock{ m_mutex };
+
             auto found = sr::find(m_files.begin(), m_files.end(), from);
             if (found != m_files.end()) {
+                m_files_set.erase(*found);
                 *found = std::move(to);
+                m_files_set.insert(*found);
             }
         }
 
         usize max_size() const { return m_max_size; }
 
     private:
-        std::deque<fs::path> m_files;
+        std::deque<fs::path>         m_files;
+        std::unordered_set<fs::path> m_files_set;
+        mutable std::shared_mutex    m_mutex;
 
         usize m_current_size = 0;
         usize m_max_size     = 0;
