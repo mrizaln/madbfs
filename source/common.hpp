@@ -6,6 +6,7 @@
 #include <span>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 namespace adbfsm
 {
@@ -27,8 +28,9 @@ namespace adbfsm
         using f32 = float;
         using f64 = double;
 
-        using Unit = std::monostate;
-        using Str  = std::string_view;
+        using Unit   = std::monostate;
+        using Str    = std::string_view;
+        using String = std::string;
 
         template <typename T>
         using Opt = std::optional<T>;
@@ -38,6 +40,12 @@ namespace adbfsm
 
         template <typename T>
         using Span = std::span<T>;
+
+        template <typename T, std::size_t N>
+        using Array = std::array<T, N>;
+
+        template <typename T>
+        using Vec = std::vector<T>;
 
         namespace sv = std::views;
         namespace sr = std::ranges;

@@ -1,7 +1,10 @@
 #pragma once
 
+#include "common.hpp"
+
 #include <spdlog/sinks/stdout_color_sinks.h>
-#include <spdlog/fmt/fmt.h>
+#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/fmt/std.h>
 #include <spdlog/fmt/ranges.h>    // to enable ranges formatting
 #include <spdlog/spdlog.h>
 
@@ -44,10 +47,22 @@ namespace adbfsm::log
      * @brief Initialize the logger at a specific log level with predefined pattern and sink.
      *
      * @param level The log level to use.
+     * @param log_file The log file to write to. If set to "-", the logger will write to stdout.
      */
-    inline void init(spdlog::level::level_enum level)
+    inline void init(spdlog::level::level_enum level, Str log_file)
     {
-        spdlog::set_default_logger(spdlog::stdout_color_mt("logger"));
+        constexpr auto max_size  = 10 * 1000 * 1000_usize;    // 10 MB
+        constexpr auto max_files = 3_usize;
+
+        auto logger = [&] {
+            if (log_file == "-") {
+                return spdlog::stdout_color_mt("logger", spdlog::color_mode::always);
+            } else {
+                return spdlog::rotating_logger_mt("logger", log_file.data(), max_size, max_files);
+            }
+        }();
+
+        spdlog::set_default_logger(logger);
         spdlog::set_pattern("[%Y-%m-%d|%H:%M:%S] [%^-%L-%$] [%s:%#] %v");
         spdlog::set_level(level);
     }

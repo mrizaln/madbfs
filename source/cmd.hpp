@@ -5,8 +5,6 @@
 
 #include <subprocess.hpp>
 
-#include <array>
-
 namespace adbfsm::cmd
 {
     using Out = subprocess::CompletedProcess;
@@ -51,10 +49,10 @@ namespace adbfsm::cmd
             .cerr  = subprocess::PipeOption::pipe,
             .cwd   = {},
             .check = false,
-            .env   = { { std::string{ "ANDROID_SERIAL" }, std::string{ serial } } },
+            .env   = { { String{ "ANDROID_SERIAL" }, String{ serial } } },
         };
 
-        auto prefix = std::array{ "adb" };
+        auto prefix = { "adb" };
         cmd.insert(cmd.begin(), prefix.begin(), prefix.end());
 
         return subprocess::run(cmd, opt);
@@ -77,10 +75,10 @@ namespace adbfsm::cmd
             .cerr  = subprocess::PipeOption::pipe,
             .cwd   = {},
             .check = false,
-            .env   = { { std::string{ "ANDROID_SERIAL" }, std::string{ serial } } },
+            .env   = { { String{ "ANDROID_SERIAL" }, String{ serial } } },
         };
 
-        auto prefix = std::array{ "adb", "shell" };
+        auto prefix = { "adb", "shell" };
         cmd.insert(cmd.begin(), prefix.begin(), prefix.end());
 
         return subprocess::run(cmd, opt);

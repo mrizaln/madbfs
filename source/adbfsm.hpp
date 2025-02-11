@@ -3,8 +3,8 @@
 #include "common.hpp"
 #include "log.hpp"
 
-#define FUSE_USE_VERSION 26
-#include <fuse.h>
+#define FUSE_USE_VERSION 31
+#include <fuse3/fuse.h>
 #include <fcntl.h>
 
 #include <atomic>
@@ -26,23 +26,23 @@ namespace adbfsm
     {
         using is_transparent = void;
 
-        size_t operator()(Str txt) const { return std::hash<Str>{}(txt); }
-        size_t operator()(const char* txt) const { return std::hash<Str>{}(txt); }
-        size_t operator()(const std::string& txt) const { return std::hash<std::string>{}(txt); }
+        usize operator()(Str txt) const { return std::hash<Str>{}(txt); }
+        usize operator()(const char* txt) const { return std::hash<Str>{}(txt); }
+        usize operator()(const String& txt) const { return std::hash<String>{}(txt); }
     };
 
     struct Stat
     {
-        int       m_mode  = 0;    // -rwxrwxrwx
-        int       m_links = 1;
-        int       m_uid   = 0;
-        int       m_gid   = 0;
-        int       m_size  = 0;
+        i32       m_mode  = 0;    // -rwxrwxrwx
+        i32       m_links = 1;
+        i32       m_uid   = 0;
+        i32       m_gid   = 0;
+        i32       m_size  = 0;
         Timestamp m_mtime = {};    // last modification time
         Timestamp m_age   = {};    // cache age
 
-        std::string m_link_to = {};    // only makes sense if (m_mode & S_IFLNK) is non-zero
-        int         m_err     = 0;
+        String m_link_to = {};    // only makes sense if (m_mode & S_IFLNK) is non-zero
+        i32    m_err     = 0;
     };
 
     class LocalCopy
@@ -122,14 +122,18 @@ namespace adbfsm
         usize m_max_size     = 0;
     };
 
+    template <typename Value>
+    using StringMap = std::unordered_map<String, Value, StrHash, std::equal_to<>>;
+    using StringSet = std::unordered_set<String, StrHash, std::equal_to<>>;
+
     struct Cache
     {
-        std::unordered_map<std::string, Stat, StrHash, std::equal_to<>> m_file_stat;
-        std::unordered_set<std::string, StrHash, std::equal_to<>>       m_file_truncated;
-        std::unordered_set<int>                                         m_file_pending_write;
+        StringMap<Stat>         m_file_stat;
+        StringSet               m_file_truncated;
+        std::unordered_set<i32> m_file_pending_write;
 
-        std::unordered_map<std::string, int, StrHash, std::equal_to<>> m_uid;
-        std::unordered_map<std::string, int, StrHash, std::equal_to<>> m_gid;
+        StringMap<i32> m_uid;
+        StringMap<i32> m_gid;
 
         std::shared_mutex m_mutex;
     };
@@ -139,27 +143,72 @@ namespace adbfsm
         Cache             m_cache;
         LocalCopy         m_local_copy;
         fs::path          m_dir;
-        std::string       m_serial;
+        String            m_serial;
         std::atomic<bool> m_readdir = false;
         bool              m_rescan  = false;
     };
 
     void destroy(void* private_data);
 
-    int readdir(const char* path, void* buf, fuse_fill_dir_t filler, off_t offset, fuse_file_info* fi);
-    int getattr(const char* path, struct stat* stbuf);
-    int access(const char* path, int mask);
-    int open(const char* path, fuse_file_info* fi);
-    int flush(const char* path, fuse_file_info* fi);
-    int release(const char* path, fuse_file_info* fi);
-    int read(const char* path, char* buf, size_t size, off_t offset, fuse_file_info* fi);
-    int write(const char* path, const char* buf, size_t size, off_t offset, fuse_file_info* fi);
-    int utimens(const char* path, const timespec ts[2]);
-    int truncate(const char* path, off_t size);
-    int mknod(const char* path, mode_t mode, dev_t rdev);
-    int mkdir(const char* path, mode_t mode);
-    int rename(const char* from, const char* to);
-    int rmdir(const char* path);
-    int unlink(const char* path);
-    int readlink(const char* path, char* buf, size_t size);
+    i32 getattr(const char*, struct stat*, fuse_file_info*);
+    i32 readlink(const char*, char*, usize);
+    i32 mknod(const char*, mode_t, dev_t);
+    i32 mkdir(const char*, mode_t);
+    i32 unlink(const char*);
+    i32 rmdir(const char*);
+    i32 rename(const char*, const char*, u32);
+    i32 truncate(const char*, off_t, fuse_file_info*);
+    i32 open(const char*, fuse_file_info*);
+    i32 read(const char*, char*, usize, off_t, fuse_file_info*);
+    i32 write(const char*, const char*, usize, off_t, fuse_file_info*);
+    i32 flush(const char*, fuse_file_info*);
+    i32 release(const char*, fuse_file_info*);
+    i32 readdir(const char*, void*, fuse_fill_dir_t, off_t, fuse_file_info*, fuse_readdir_flags);
+    i32 access(const char*, i32);
+    i32 utimens(const char*, const timespec tv[2], fuse_file_info*);
+
+    constexpr auto operations = fuse_operations{
+        .getattr         = adbfsm::getattr,
+        .readlink        = adbfsm::readlink,
+        .mknod           = adbfsm::mknod,
+        .mkdir           = adbfsm::mkdir,
+        .unlink          = adbfsm::unlink,
+        .rmdir           = adbfsm::rmdir,
+        .symlink         = nullptr,
+        .rename          = adbfsm::rename,
+        .link            = nullptr,
+        .chmod           = nullptr,
+        .chown           = nullptr,
+        .truncate        = adbfsm::truncate,
+        .open            = adbfsm::open,
+        .read            = adbfsm::read,
+        .write           = adbfsm::write,
+        .statfs          = nullptr,
+        .flush           = adbfsm::flush,
+        .release         = adbfsm::release,
+        .fsync           = nullptr,
+        .setxattr        = nullptr,
+        .getxattr        = nullptr,
+        .listxattr       = nullptr,
+        .removexattr     = nullptr,
+        .opendir         = nullptr,
+        .readdir         = adbfsm::readdir,
+        .releasedir      = nullptr,
+        .fsyncdir        = nullptr,
+        .init            = nullptr,
+        .destroy         = adbfsm::destroy,
+        .access          = adbfsm::access,
+        .create          = nullptr,
+        .lock            = nullptr,
+        .utimens         = adbfsm::utimens,
+        .bmap            = nullptr,
+        .ioctl           = nullptr,
+        .poll            = nullptr,
+        .write_buf       = nullptr,
+        .read_buf        = nullptr,
+        .flock           = nullptr,
+        .fallocate       = nullptr,
+        .copy_file_range = nullptr,
+        .lseek           = nullptr,
+    };
 }

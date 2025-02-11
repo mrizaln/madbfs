@@ -11,7 +11,7 @@ find_package(fmt REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(PkgConfig REQUIRED)
 
-pkg_check_modules(FUSE REQUIRED IMPORTED_TARGET fuse)
+pkg_check_modules(FUSE REQUIRED IMPORTED_TARGET fuse3)
 
 include(cmake/fetched-libs.cmake)       # emits fetch::*
 
@@ -20,6 +20,6 @@ target_include_directories(adbfsm PRIVATE source)
 target_link_libraries(adbfsm PRIVATE PkgConfig::FUSE fetch::subprocess fmt::fmt spdlog::spdlog)
 target_compile_options(adbfsm PRIVATE -Wall -Wextra -Wconversion)
 
-# sanitizer
-target_compile_options(adbfsm PRIVATE -fsanitize=address,leak,undefined)
-target_link_options(adbfsm PRIVATE -fsanitize=address,leak,undefined)
+# # sanitizer
+# target_compile_options(adbfsm PRIVATE -fsanitize=address,leak,undefined)
+# target_link_options(adbfsm PRIVATE -fsanitize=address,leak,undefined)
