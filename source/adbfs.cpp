@@ -96,6 +96,20 @@ namespace detail
         return new_str;
     }
 
+    std::string copy_replace_escape(const char* str, char replace, char with, Str escapes = bash_escapes)
+    {
+        auto  new_str = std::string{};
+        auto* ch      = str;
+        while (*ch != '\0') {
+            if (escapes.find(*ch) != std::string::npos) {
+                new_str.push_back('\\');
+            }
+            *ch == replace ? new_str.push_back(with) : new_str.push_back(*ch);
+            ++ch;
+        }
+        return new_str;
+    }
+
     template <typename T>
         requires std::is_fundamental_v<T>
     constexpr Opt<T> parse_fundamental(Str str)
@@ -325,7 +339,7 @@ namespace detail
             .m_links   = parse_fundamental<int>(to_be_stat[1]).value(),
             .m_uid     = get_uid(to_be_stat[2], cache, serial),
             .m_gid     = get_gid(to_be_stat[3], cache, serial),
-            .m_size    = parse_fundamental<int>(to_be_stat[4]).value(),
+            .m_size    = parse_fundamental<int>(to_be_stat[4]).value_or(0),
             .m_mtime   = parse_time(to_be_stat[5], to_be_stat[6], to_be_stat[7]).value(),
             .m_age     = Clock::now(),
             .m_link_to = link,
@@ -373,9 +387,8 @@ namespace adbfs
         [[maybe_unused]] fuse_file_info* fi
     )
     {
-        log_i({ "readdir: {}" }, path);
+        log_i({ "readdir: {:?}" }, path);
         auto& [cache, temp, serial, readdir_flag, _] = detail::get_data();
-
         readdir_flag.wait(true);
 
         if (auto found = cache.m_file_stat.find(path); found != cache.m_file_stat.end()) {
@@ -412,7 +425,6 @@ namespace adbfs
     {
         log_i({ "getattr: {:?}" }, path);
         auto& [cache, temp, serial, readdir_flag, _] = detail::get_data();
-
         readdir_flag.wait(true);
 
         if (auto found = cache.m_file_stat.find(path); found == cache.m_file_stat.end()) {
@@ -473,7 +485,7 @@ namespace adbfs
         return 0;
     }
 
-    int access(const char* path, int mask)
+    int access([[maybe_unused]] const char* path, [[maybe_unused]] int mask)
     {
         // NOTE: empty
         return 0;
@@ -481,21 +493,19 @@ namespace adbfs
 
     int open(const char* path, fuse_file_info* fi)
     {
-        log_i({ "readdir: {}" }, path);
+        log_i({ "open: {:?}" }, path);
         auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
 
-        readdir_flag.wait(true);
-
         auto path_str   = detail::copy_escape(path);
-        auto local_path = temp / detail::copy_replace(path, '/', '-');
+        auto local_path = temp / detail::copy_replace(path_str.c_str(), '/', '-');
 
         if (fs::exists(local_path)) {
-            fi->fh = ::open(local_path.c_str(), fi->flags);
+            fi->fh = static_cast<u64>(::open(local_path.c_str(), fi->flags));
             return 0;
         }
 
         if (not cache.m_file_truncated.contains(path)) {
-            auto pull = cmd::exec_adb({ "pull", path_str, local_path }, serial);
+            auto pull = cmd::exec_adb({ "pull", std::move(path_str), local_path }, serial);
             if (pull.returncode != 0) {
                 auto errn = detail::parse_and_log_cmd_err(pull, "open", "failed to pull file");
                 cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
@@ -503,39 +513,73 @@ namespace adbfs
             }
         }
 
-        fi->fh = ::open(local_path.c_str(), fi->flags);
+        fi->fh = static_cast<u64>(::open(local_path.c_str(), fi->flags));
         return 0;
     }
 
     int flush(const char* path, fuse_file_info* fi)
     {
         log_c({ "flush [unimplemented]: {}" }, path);
-        return 0;
+        return -ENOSYS;
     }
 
     int release(const char* path, fuse_file_info* fi)
     {
-        log_c({ "release [unimplemented]: {}" }, path);
+        log_i({ "release: {}" }, path);
+        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+
+        auto local_path = temp / detail::copy_replace_escape(path, '/', '-');
+
+        // close file
+        auto fd = static_cast<i32>(fi->fh);
+        cache.m_file_pending_write.erase(fd);
+        auto res = ::close(fd);
+        if (res == -1) {
+            log_e({ "release: failed to close file [{}] (errno: {})" }, path, errno);
+            return -errno;
+        }
+
+        // remove local copy
+        // TODO: use heuristic to whether remove this local copy or not
+        res = ::unlink(local_path.c_str());
+        if (res == -1) {
+            log_e({ "release: failed to unlink file [{}] (errno: {})" }, path, errno);
+            return -errno;
+        }
+
         return 0;
     }
 
     int read(const char* path, char* buf, size_t size, off_t offset, fuse_file_info* fi)
     {
-        log_c({ "read [unimplemented]: {}" }, path);
-        return 0;
+        log_i({ "read: {}" }, path);
+        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+
+        auto fd = static_cast<i32>(fi->fh);
+        if (fd == -1) {
+            log_e({ "read: invalid file descriptor" });
+            return -EBADF;
+        }
+
+        auto res = pread(fd, buf, size, offset);
+        if (res == -1) {
+            log_e({ "read: failed to read file [{}] (errno: {})" }, path, errno);
+            return -errno;
+        }
+
+        return static_cast<i32>(res);
     }
 
     int write(const char* path, const char* buf, size_t size, off_t offset, fuse_file_info* fi)
     {
         log_c({ "write [unimplemented]: {}" }, path);
-        return 0;
+        return -ENOSYS;
     }
 
     int utimens(const char* path, const timespec ts[2])
     {
-        log_i({ "readdir: {}" }, path);
+        log_i({ "utimens: {:?}" }, path);
         auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
-
         readdir_flag.wait(true);
 
         // TODO: use the timedata from ts instead of the current time
@@ -560,44 +604,43 @@ namespace adbfs
     int truncate(const char* path, off_t size)
     {
         log_c({ "truncate [unimplemented]: {}" }, path);
-        return 0;
+        return -ENOSYS;
     }
 
     int mknod(const char* path, mode_t mode, dev_t rdev)
     {
         log_c({ "mknod [unimplemented]: {}" }, path);
-        return 0;
+        return -ENOSYS;
     }
 
     int mkdir(const char* path, mode_t mode)
     {
         log_c({ "mkdir [unimplemented]: {}" }, path);
-        return 0;
+        return -ENOSYS;
     }
 
     int rename(const char* from, const char* to)
     {
         log_c({ "rename [unimplemented]: {} -> {}" }, from, to);
-        return 0;
+        return -ENOSYS;
     }
 
     int rmdir(const char* path)
     {
         log_c({ "rmdir [unimplemented]: {}" }, path);
-        return 0;
+        return -ENOSYS;
     }
 
     int unlink(const char* path)
     {
         log_c({ "unlink [unimplemented]: {}" }, path);
-        return 0;
+        return -ENOSYS;
     }
 
     int readlink(const char* path, char* buf, size_t size)
     {
-        log_i({ "readlink: {}" }, path);
+        log_i({ "readlink: {:?}" }, path);
         auto& [cache, temp, serial, readdir_flag, _] = detail::get_data();
-
         readdir_flag.wait(true);
 
         if (auto found = cache.m_file_stat.find(path); found == cache.m_file_stat.end()) {

@@ -47,8 +47,10 @@ namespace adbfs
     {
         std::unordered_map<std::string, Stat, StrHash, std::equal_to<>> m_file_stat;
         std::unordered_set<std::string, StrHash, std::equal_to<>>       m_file_truncated;
-        std::unordered_map<std::string, int, StrHash, std::equal_to<>>  m_uid;
-        std::unordered_map<std::string, int, StrHash, std::equal_to<>>  m_gid;
+        std::unordered_set<int>                                         m_file_pending_write;
+
+        std::unordered_map<std::string, int, StrHash, std::equal_to<>> m_uid;
+        std::unordered_map<std::string, int, StrHash, std::equal_to<>> m_gid;
 
         std::shared_mutex m_mutex;
     };
