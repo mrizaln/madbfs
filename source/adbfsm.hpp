@@ -1,17 +1,19 @@
 #pragma once
 
 #include "common.hpp"
-#include <atomic>
-#include <unordered_set>
+#include "log.hpp"
 
 #define FUSE_USE_VERSION 26
 #include <fuse.h>
 #include <fcntl.h>
 
+#include <atomic>
 #include <chrono>
+#include <deque>
+#include <filesystem>
 #include <shared_mutex>
 #include <unordered_map>
-#include <filesystem>
+#include <unordered_set>
 
 namespace adbfsm
 {
@@ -43,6 +45,69 @@ namespace adbfsm
         int         m_err     = 0;
     };
 
+    class LocalCopy
+    {
+    public:
+        LocalCopy(usize max_size)
+            : m_max_size(max_size)
+        {
+        }
+
+        // return false if file is too big
+        bool add(fs::path path)
+        {
+            if (fs::file_size(path) > m_max_size) {
+                return false;
+            }
+
+            auto new_size = m_current_size + fs::file_size(path);
+            while (new_size > m_max_size) {
+                log_d({ "local copy: too big ({} > {}), removing oldest file" }, new_size, m_max_size);
+                new_size -= fs::file_size(m_files.front());
+                fs::remove(m_files.front());
+                m_files.pop_front();
+            }
+
+            log_d({ "local copy: adding file {:?} (size={}|max={})" }, path, new_size, m_max_size);
+
+            m_files.push_back(std::move(path));
+            m_current_size = new_size;
+
+            return true;
+        }
+
+        bool exists(const fs::path& path)
+        {
+            return sr::find(m_files.begin(), m_files.end(), path) != m_files.end();
+        }
+
+        void remove(const fs::path& path)
+        {
+            auto erased = std::erase_if(m_files, [&](auto&& p) { return p == path; });
+            if (erased) {
+                log_d({ "local copy: removing file {:?}" }, path);
+                m_current_size -= fs::file_size(path);
+                fs::remove(path);
+            }
+        }
+
+        void rename(const fs::path& from, fs::path&& to)
+        {
+            auto found = sr::find(m_files.begin(), m_files.end(), from);
+            if (found != m_files.end()) {
+                *found = std::move(to);
+            }
+        }
+
+        usize max_size() const { return m_max_size; }
+
+    private:
+        std::deque<fs::path> m_files;
+
+        usize m_current_size = 0;
+        usize m_max_size     = 0;
+    };
+
     struct Cache
     {
         std::unordered_map<std::string, Stat, StrHash, std::equal_to<>> m_file_stat;
@@ -58,6 +123,7 @@ namespace adbfsm
     struct AdbfsmData
     {
         Cache             m_cache;
+        LocalCopy         m_local_copy;
         fs::path          m_dir;
         std::string       m_serial;
         std::atomic<bool> m_readdir = false;

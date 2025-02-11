@@ -114,6 +114,7 @@ void show_help(const char* prog, bool err)
         out,
         "Adbfsm specific options:\n"
         "    --serial=<s>        The serial number of the device to mount (REQUIRED)\n"
+        "    --cachesize=<n>     The maximum size of the cache in MB (default: 500)\n"
         "    --rescan            Perform rescan every (idk)\n"
         "    --help              Show this help message\n"
         "    --fuse-help         Show full help message\n\n"
@@ -223,6 +224,7 @@ int main(int argc, char** argv)
     struct AdbfsmOpt
     {
         const char* m_serial    = nullptr;
+        int         m_cachesize = 500;
         int         m_rescan    = false;
         int         m_help      = false;
         int         m_fuse_help = false;
@@ -232,6 +234,7 @@ int main(int argc, char** argv)
 
     fuse_opt adbfsm_opt_spec[] = {
         { "--serial=%s", offsetof(AdbfsmOpt, m_serial), true },
+        { "--cachesize=%d", offsetof(AdbfsmOpt, m_cachesize), true },
         { "--rescan", offsetof(AdbfsmOpt, m_rescan), true },
         { "-h", offsetof(AdbfsmOpt, m_help), true },
         { "--help", offsetof(AdbfsmOpt, m_help), true },
@@ -276,13 +279,18 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    auto cache_mb = static_cast<std::size_t>(std::max(adbfsm_opt.m_cachesize, 500));
+
     auto data = adbfsm::AdbfsmData{
-        .m_cache   = {},
-        .m_dir     = make_temp_dir(),
-        .m_serial  = adbfsm_opt.m_serial,
-        .m_readdir = false,
-        .m_rescan  = static_cast<bool>(adbfsm_opt.m_rescan),
+        .m_cache      = {},
+        .m_local_copy = { cache_mb * 1000 * 1000 },
+        .m_dir        = make_temp_dir(),
+        .m_serial     = adbfsm_opt.m_serial,
+        .m_readdir    = false,
+        .m_rescan     = static_cast<bool>(adbfsm_opt.m_rescan),
     };
+
+    adbfsm::log_i({ "mounting device with serial '{}' and cache size {} MB" }, data.m_serial, cache_mb);
 
     auto ret = fuse_main(args.argc, args.argv, &adbfsm_oper, (void*)&data);
     fuse_opt_free_args(&args);

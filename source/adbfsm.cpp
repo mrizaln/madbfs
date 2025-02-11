@@ -52,6 +52,7 @@ namespace detail
         case Error::NotADir: return ENOTDIR;
         case Error::Inaccessible: return ENOMEDIUM;    // program not accessible means no medium, right?
         case Error::ReadOnly: return EROFS;
+        default: std::terminate();
         }
     }
 
@@ -65,6 +66,7 @@ namespace detail
         case Error::NotADir: return "Not a directory";
         case Error::Inaccessible: return "Inaccessible or not found";
         case Error::ReadOnly: return "Read-only file system";
+        default: std::terminate();
         }
     }
 
@@ -397,7 +399,7 @@ namespace adbfsm
     )
     {
         log_i({ "readdir: {:?}" }, path);
-        auto& [cache, temp, serial, readdir_flag, _] = detail::get_data();
+        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
         readdir_flag.wait(true);
 
         if (auto found = cache.m_file_stat.find(path); found != cache.m_file_stat.end()) {
@@ -433,7 +435,7 @@ namespace adbfsm
     int getattr(const char* path, struct stat* stbuf)
     {
         log_i({ "getattr: {:?}" }, path);
-        auto& [cache, temp, serial, readdir_flag, _] = detail::get_data();
+        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
         readdir_flag.wait(true);
 
         if (auto found = cache.m_file_stat.find(path); found == cache.m_file_stat.end()) {
@@ -508,15 +510,24 @@ namespace adbfsm
     int open(const char* path, fuse_file_info* fi)
     {
         log_i({ "open: {:?}" }, path);
-        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
 
         auto path_str   = detail::copy_escape(path);
         auto local_path = temp / detail::copy_replace(path_str.c_str(), '/', '-');
 
-        if (not cache.m_file_truncated.contains(path) and not fs::exists(local_path)) {
+        if (auto found = cache.m_file_stat.find(path); found != cache.m_file_stat.end()) {
+            if (static_cast<usize>(found->second.m_size) > local.max_size()) {
+                return -EFBIG;
+            }
+        }
+
+        if (not cache.m_file_truncated.contains(path) and not local.exists(local_path)) {
             auto pull = cmd::exec_adb({ "pull", std::move(path_str), local_path }, serial);
             if (pull.returncode != 0) {
                 return -detail::parse_and_log_cmd_err(pull, "open", "failed to pull file");
+            }
+            if (not local.add(local_path)) {
+                return -EFBIG;
             }
         }
 
@@ -546,7 +557,7 @@ namespace adbfsm
     int release(const char* path, fuse_file_info* fi)
     {
         log_i({ "release: {:?}" }, path);
-        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
 
         auto path_str   = detail::copy_escape(path);
         auto local_path = temp / detail::copy_replace(path, '/', '-');
@@ -584,21 +595,13 @@ namespace adbfsm
 
         cache.m_file_stat.erase(path);
 
-        // // remove local copy
-        // // TODO: use heuristic to whether remove this local copy or not
-        // res = ::unlink(local_path.c_str());
-        // if (res == -1) {
-        //     log_e({ "release: failed to unlink [{}] (errno: {}) {}" }, local_path, errno, strerror(errno));
-        //     return -errno;
-        // }
-
         return 0;
     }
 
     int read(const char* path, char* buf, size_t size, off_t offset, fuse_file_info* fi)
     {
         log_i({ "read: {:?}" }, path);
-        // auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+        // auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
 
         auto fd  = static_cast<i32>(fi->fh);
         auto res = pread(fd, buf, size, offset);
@@ -613,7 +616,7 @@ namespace adbfsm
     int write(const char* path, const char* buf, size_t size, off_t offset, fuse_file_info* fi)
     {
         log_i({ "write: {:?}" }, path);
-        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
 
         auto local_path = temp / detail::copy_replace_escape(path, '/', '-');
 
@@ -629,10 +632,10 @@ namespace adbfsm
         return static_cast<i32>(res);
     }
 
-    int utimens(const char* path, const timespec ts[2])
+    int utimens(const char* path, [[maybe_unused]] const timespec ts[2])
     {
         log_i({ "utimens: {:?}" }, path);
-        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
         readdir_flag.wait(true);
 
         // TODO: use the timedata from ts instead of the current time
@@ -665,15 +668,24 @@ namespace adbfsm
     int truncate(const char* path, off_t size)
     {
         log_i({ "truncate: {:?}" }, path);
-        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
 
         auto path_str   = detail::copy_escape(path);
         auto local_path = temp / detail::copy_replace(path_str.c_str(), '/', '-');
 
-        if (not fs::exists(local_path)) {
+        if (auto found = cache.m_file_stat.find(path); found != cache.m_file_stat.end()) {
+            if (static_cast<usize>(found->second.m_size) > local.max_size()) {
+                return -EFBIG;
+            }
+        }
+
+        if (not local.exists(local_path)) {
             auto pull = cmd::exec_adb({ "pull", std::move(path_str), local_path }, serial);
             if (pull.returncode != 0) {
                 return -detail::parse_and_log_cmd_err(pull, "open", "failed to pull file");
+            }
+            if (not local.add(local_path)) {
+                return -EFBIG;
             }
         }
 
@@ -686,7 +698,7 @@ namespace adbfsm
     int mknod(const char* path, mode_t mode, [[maybe_unused]] dev_t rdev)
     {
         log_i({ "mknod: {:?}" }, path);
-        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
 
         auto path_str   = detail::copy_escape(path);
         auto local_path = temp / detail::copy_replace(path_str.c_str(), '/', '-');
@@ -714,7 +726,7 @@ namespace adbfsm
     int mkdir(const char* path, [[maybe_unused]] mode_t mode)
     {
         log_i({ "mkdir: {:?}" }, path);
-        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
 
         auto mkdir = cmd::exec_adb_shell({ "mkdir", detail::copy_escape(path) }, serial);
         if (mkdir.returncode != 0) {
@@ -729,12 +741,17 @@ namespace adbfsm
     int rename(const char* from, const char* to)
     {
         log_i({ "rename: {:?} -> {:?}" }, from, to);
-        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
 
         auto mv = cmd::exec_adb_shell({ "mv", detail::copy_escape(from), detail::copy_escape(to) }, serial);
         if (mv.returncode != 0) {
             return -detail::parse_and_log_cmd_err(mv, "rename", "failed to rename file");
         }
+
+        auto local_from = temp / detail::copy_replace(from, '/', '-');
+        auto local_to   = temp / detail::copy_replace(to, '/', '-');
+
+        local.rename(local_from, std::move(local_to));
 
         cache.m_file_stat.erase(from);
         cache.m_file_stat.erase(to);
@@ -745,7 +762,7 @@ namespace adbfsm
     int rmdir(const char* path)
     {
         log_i({ "rmdir: {:?}" }, path);
-        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
 
         auto rmdir = cmd::exec_adb_shell({ "rmdir", detail::copy_escape(path) }, serial);
         if (rmdir.returncode != 0) {
@@ -760,7 +777,7 @@ namespace adbfsm
     int unlink(const char* path)
     {
         log_i({ "unlink: {:?}" }, path);
-        auto& [cache, temp, serial, readdir_flag, rescan] = detail::get_data();
+        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
 
         auto path_str   = detail::copy_escape(path);
         auto local_path = temp / detail::copy_replace(path_str.c_str(), '/', '-');
@@ -771,6 +788,7 @@ namespace adbfsm
             cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
             return -errn;
         }
+
         if (rescan) {
             auto out = detail::adb_rescan_file(path, serial);
             if (out.returncode != 0) {
@@ -779,9 +797,7 @@ namespace adbfsm
         }
 
         cache.m_file_stat.erase(path);
-        if (fs::exists(local_path)) {
-            return ::unlink(local_path.c_str());
-        }
+        local.remove(local_path);
 
         return 0;
     }
@@ -789,7 +805,7 @@ namespace adbfsm
     int readlink(const char* path, char* buf, size_t size)
     {
         log_i({ "readlink: {:?}" }, path);
-        auto& [cache, temp, serial, readdir_flag, _] = detail::get_data();
+        auto& [cache, local, temp, serial, readdir_flag, _] = detail::get_data();
         readdir_flag.wait(true);
 
         if (auto found = cache.m_file_stat.find(path); found == cache.m_file_stat.end()) {
