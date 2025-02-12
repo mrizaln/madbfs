@@ -7,11 +7,11 @@
 #include <execinfo.h>
 #include <unistd.h>
 
+#include <array>
 #include <cassert>
 #include <csignal>
 #include <cstddef>
 #include <cstdlib>
-#include <array>
 
 enum class SerialStatus
 {
@@ -41,7 +41,7 @@ std::string_view to_string(SerialStatus status)
 std::filesystem::path make_temp_dir()
 {
     char adbfsm_template[] = "/tmp/adbfsm-XXXXXX";
-    auto temp              = mkdtemp(adbfsm_template);
+    auto temp              = ::mkdtemp(adbfsm_template);
     adbfsm::log_i({ "created temporary directory: {:?}" }, temp);
     return temp;
 }
@@ -58,15 +58,15 @@ void sigsegv_handler(int)
     auto size  = static_cast<int>(array.size());
 
     // get void*'s for all entries on the stack
-    size = backtrace(array.data(), array.size());
+    size = ::backtrace(array.data(), array.size());
 
     // print out all the frames to stderr
     fmt::print(stderr, "SEGFAULT signal raised, backtrace:\n");
-    backtrace_symbols_fd(array.data(), size, STDERR_FILENO);
+    ::backtrace_symbols_fd(array.data(), size, STDERR_FILENO);
 
     // print out all the frames to logger as well
     adbfsm::log_c({ "backtrace:" });
-    auto names = backtrace_symbols(array.data(), size);
+    auto names = ::backtrace_symbols(array.data(), size);
     for (auto i : adbfsm::sv::iota(0, size)) {
         adbfsm::log_c({ "{}" }, names[i]);
     }
@@ -101,15 +101,15 @@ void terminate_handler()
     auto size  = static_cast<int>(array.size());
 
     // get void*'s for all entries on the stack
-    size = backtrace(array.data(), array.size());
+    size = ::backtrace(array.data(), array.size());
 
     // print out all the frames to stderr
     fmt::print(stderr, "backtrace:\n");
-    backtrace_symbols_fd(array.data(), size, STDERR_FILENO);
+    ::backtrace_symbols_fd(array.data(), size, STDERR_FILENO);
 
     // print out all the frames to logger as well
     adbfsm::log_c({ "backtrace:" });
-    auto names = backtrace_symbols(array.data(), size);
+    auto names = ::backtrace_symbols(array.data(), size);
     for (auto i : adbfsm::sv::iota(0, size)) {
         adbfsm::log_c({ "{}" }, names[i]);
     }
@@ -280,13 +280,13 @@ int main(int argc, char** argv)
 
     if (adbfsm_opt.m_help) {
         show_help(false);
-        fuse_opt_free_args(&args);
+        ::fuse_opt_free_args(&args);
         return 0;
     } else if (adbfsm_opt.m_full_help) {
         show_help(false);
         fmt::println(stdout, "Options for libfuse:");
-        fuse_lib_help(&args);
-        fuse_opt_free_args(&args);
+        ::fuse_lib_help(&args);
+        ::fuse_opt_free_args(&args);
         return 0;
     }
 
@@ -294,7 +294,7 @@ int main(int argc, char** argv)
     if (not log_level.has_value()) {
         fmt::println(stderr, "error: invalid log level '{}'", adbfsm_opt.m_log_level);
         fmt::println(stderr, "valid log levels: trace, debug, info, warn, error, critical, off");
-        fuse_opt_free_args(&args);
+        ::fuse_opt_free_args(&args);
         return 1;
     }
 
@@ -311,13 +311,13 @@ int main(int argc, char** argv)
         auto serial = get_serial();
         if (serial.empty()) {
             fmt::println(stderr, "error: no device found, make sure a device is connected and authorized");
-            fuse_opt_free_args(&args);
+            ::fuse_opt_free_args(&args);
             return 1;
         }
         adbfsm_opt.m_serial = ::strdup(serial.c_str());
     } else if (auto status = check_serial(adbfsm_opt.m_serial); status != SerialStatus::Device) {
         fmt::println(stderr, "error: serial '{} 'is not valid ({})", adbfsm_opt.m_serial, to_string(status));
-        fuse_opt_free_args(&args);
+        ::fuse_opt_free_args(&args);
         return 1;
     }
 
@@ -332,10 +332,19 @@ int main(int argc, char** argv)
         .m_rescan     = static_cast<bool>(adbfsm_opt.m_rescan),
     };
 
-    adbfsm::log_i({ "mounting device with serial '{}' and cache size {} MB" }, data.m_serial, cache_mb);
+    if (std::strcmp(adbfsm_opt.m_log_file, "-") == 0) {
+        fmt::println(stdout, "mounting device with serial '{}' and cache size {}MB", data.m_serial, cache_mb);
+    } else {
+        adbfsm::log_i({ "mounting device with serial '{}' and cache size {}MB" }, data.m_serial, cache_mb);
+    }
+
+    if (::setenv("ANDROID_SERIAL", data.m_serial.c_str(), 1) < 0) {
+        fmt::println(stderr, "error: failed to set env variable 'ANDROID_SERIAL' ({})", strerror(errno));
+        return 1;
+    }
 
     auto ret = fuse_main(args.argc, args.argv, &adbfsm::operations, (void*)&data);
-    fuse_opt_free_args(&args);
+    ::fuse_opt_free_args(&args);
 
     // on invalid argument (1) and no mount point specified (2)
     if (ret == 1 or ret == 2) {

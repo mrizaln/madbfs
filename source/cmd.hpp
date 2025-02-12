@@ -1,6 +1,5 @@
 #pragma once
 
-#include "common.hpp"
 #include "log.hpp"
 
 #include <subprocess.hpp>
@@ -40,16 +39,16 @@ namespace adbfsm::cmd
      *
      * @return The output of the command.
      */
-    [[nodiscard]] inline Out exec_adb(Cmd cmd, Str serial)
+    [[nodiscard]] inline Out exec_adb(Cmd cmd)
     {
-        log_d({ "exec_adb [{}]: {}" }, serial, cmd);
+        log_d({ "exec_adb: {::?}" }, cmd);
 
         auto opt = Opt{
             .cout  = subprocess::PipeOption::pipe,
             .cerr  = subprocess::PipeOption::pipe,
             .cwd   = {},
             .check = false,
-            .env   = { { String{ "ANDROID_SERIAL" }, String{ serial } } },
+            .env   = {},
         };
 
         auto prefix = { "adb" };
@@ -66,16 +65,16 @@ namespace adbfsm::cmd
      *
      * @return The output of the command.
      */
-    [[nodiscard]] inline Out exec_adb_shell(Cmd cmd, Str serial)
+    [[nodiscard]] inline Out exec_adb_shell(Cmd cmd)
     {
-        log_d({ "exec_adb_shell [{}]: {}" }, serial, cmd);
+        log_d({ "exec_adb_shell: {::?}" }, cmd);
 
         auto opt = Opt{
             .cout  = subprocess::PipeOption::pipe,
             .cerr  = subprocess::PipeOption::pipe,
             .cwd   = {},
             .check = false,
-            .env   = { { String{ "ANDROID_SERIAL" }, String{ serial } } },
+            .env   = {},
         };
 
         auto prefix = { "adb", "shell" };

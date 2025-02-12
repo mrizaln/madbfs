@@ -53,48 +53,61 @@ namespace adbfsm
         {
         }
 
-        // return false if file is too big
-        bool add(fs::path path)
+        // return 0 on success, errno on failure
+        i32 add(fs::path path)
         {
-            auto lock = std::unique_lock{ m_mutex };
-
-            if (fs::file_size(path) > m_max_size) {
-                return false;
+            if (exists(path)) {
+                log_d({ "local_copy: adding file {:?} already exists" }, path);
+                return 0;
             }
 
-            auto new_size = m_current_size + fs::file_size(path);
-            while (new_size > m_max_size) {
-                log_d({ "local copy: too big ({} > {}), removing oldest file" }, new_size, m_max_size);
-                new_size -= fs::file_size(m_files.front());
-                fs::remove(m_files.front());
-                m_files_set.erase(m_files.front());
+            auto lock      = std::unique_lock{ m_mutex };
+            auto file_size = fs::file_size(path);
+
+            if (not fs::exists(path)) {
+                return ENOENT;
+            }
+            if (file_size > m_max_size) {
+                return EFBIG;
+            }
+
+            auto new_size = m_current_size + file_size;
+            while (new_size > m_max_size and not m_files.empty()) {
+                auto file = std::move(m_files.front());
                 m_files.pop_front();
+
+                log_d({ "local_copy: too big ({} > {}), removing: {:?}" }, new_size, m_max_size, file);
+
+                fs::remove(file);
+                new_size -= m_files_map.extract(file).mapped();
             }
 
-            log_d({ "local copy: adding file {:?} (size={}|max={})" }, path, new_size, m_max_size);
+            if (new_size > m_max_size) {
+                return EFBIG;
+            }
+
+            log_d({ "local_copy: adding file {:?} (size={}|max={})" }, path, new_size, m_max_size);
 
             m_files.push_back(std::move(path));
-            m_files_set.insert(m_files.back());
+            m_files_map.emplace(m_files.back(), file_size);
             m_current_size = new_size;
 
-            return true;
+            return 0;
         }
 
         bool exists(const fs::path& path)
         {
             auto lock = std::shared_lock{ m_mutex };
-            return m_files_set.contains(path);
+            return m_files_map.contains(path);
         }
 
         void remove(const fs::path& path)
         {
             auto lock = std::unique_lock{ m_mutex };
-
-            auto erased = std::erase_if(m_files, [&](auto&& p) { return p == path; });
-            if (erased) {
-                log_d({ "local copy: removing file {:?}" }, path);
-                m_current_size -= fs::file_size(path);
-                m_files_set.erase(path);
+            if (auto found = sr::find(m_files, path); found != m_files.end()) {
+                log_d({ "local_copy: removing file {:?}" }, path);
+                m_current_size -= m_files_map.extract(*found).mapped();
+                m_files.erase(found);
                 fs::remove(path);
             }
         }
@@ -103,20 +116,22 @@ namespace adbfsm
         {
             auto lock = std::unique_lock{ m_mutex };
 
-            auto found = sr::find(m_files.begin(), m_files.end(), from);
-            if (found != m_files.end()) {
-                m_files_set.erase(*found);
-                *found = std::move(to);
-                m_files_set.insert(*found);
+            if (auto found = sr::find(m_files, from); found != m_files.end()) {
+                log_d({ "local_copy: renaming file {:?} -> {:?}" }, from, to);
+                fs::rename(from, to);
+                auto node  = m_files_map.extract(*found);
+                *found     = std::move(to);
+                node.key() = *found;
+                m_files_map.insert(std::move(node));
             }
         }
 
         usize max_size() const { return m_max_size; }
 
     private:
-        std::deque<fs::path>         m_files;
-        std::unordered_set<fs::path> m_files_set;
-        mutable std::shared_mutex    m_mutex;
+        std::deque<fs::path>                m_files;
+        std::unordered_map<fs::path, usize> m_files_map;
+        mutable std::shared_mutex           m_mutex;
 
         usize m_current_size = 0;
         usize m_max_size     = 0;

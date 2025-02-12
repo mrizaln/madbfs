@@ -17,12 +17,13 @@ namespace detail
     static constexpr i32   default_gid         = 98;
     static constexpr i32   default_uid         = 98;
     static constexpr Str   no_device           = "adb: no devices/emulators found";
+    static constexpr Str   device_offline      = "adb: device offline";
     static constexpr Str   permission_denied   = " Permission denied";
     static constexpr Str   no_such_file_or_dir = " No such file or directory";
     static constexpr Str   not_a_directory     = " Not a directory";
     static constexpr Str   inaccessible        = " inaccessible or not found";
     static constexpr Str   read_only           = " Read-only file system";
-    static constexpr Str   bash_escapes        = " \t\n\'\"\\`$()<>;&|*?[#~=%";
+    static constexpr Str   bash_escapes        = " \t\n\\\"'`$()<>;&|*?[#~=%";
 
     struct ParsedStat
     {
@@ -71,7 +72,7 @@ namespace detail
 
     AdbfsmData& get_data()
     {
-        auto ctx = fuse_get_context()->private_data;
+        auto ctx = ::fuse_get_context()->private_data;
         assert(ctx != nullptr);
         return *static_cast<AdbfsmData*>(ctx);
     }
@@ -131,7 +132,7 @@ namespace detail
     {
         auto splitter = util::StringSplitter{ str, '\n' };
         while (auto line = splitter.next()) {
-            if (*line == no_device) {
+            if (*line == no_device or *line == device_offline) {
                 return Error::NoDev;
             }
 
@@ -142,21 +143,16 @@ namespace detail
                 continue;
             }
 
-            auto eq = [](auto lhs, auto rhs) { return sr::equal(lhs, rhs | sv::reverse); };
+            auto eq = [&](auto rhs) { return sr::equal(*err, rhs | sv::reverse); };
 
-            if (eq(*err, permission_denied)) {
-                return Error::PermDenied;
-            } else if (eq(*err, no_such_file_or_dir)) {
-                return Error::NoSuchFileOrDir;
-            } else if (eq(*err, not_a_directory)) {
-                return Error::NotADir;
-            } else if (eq(*err, inaccessible)) {
-                return Error::Inaccessible;
-            } else if (eq(*err, read_only)) {
-                return Error::ReadOnly;
-            } else {
-                return Error::Unknown;
-            }
+            // clang-format off
+            if      (eq(permission_denied))     return Error::PermDenied;
+            else if (eq(no_such_file_or_dir))   return Error::NoSuchFileOrDir;
+            else if (eq(not_a_directory))       return Error::NotADir;
+            else if (eq(inaccessible))          return Error::Inaccessible;
+            else if (eq(read_only))             return Error::ReadOnly;
+            else                                return Error::Unknown;
+            // clang-format on
         }
 
         return Error::Unknown;
@@ -164,8 +160,9 @@ namespace detail
 
     i32 parse_and_log_err(const cmd::Out& out, Str fun, Str msg)
     {
-        auto errn = to_errno(parse_stderr(out.cerr));
-        log_e({ "{}: {} [{}] (errno: {}) {}" }, fun, msg, out.returncode, errn, util::rstrip(out.cerr));
+        auto& errmsg = util::strip(out.cerr).empty() ? out.cout : out.cerr;
+        auto  errn   = to_errno(parse_stderr(errmsg));
+        log_e({ "{}: {} [{}] (errno: {}) {}" }, fun, msg, out.returncode, errn, util::strip(errmsg));
         return errn;
     }
 
@@ -217,7 +214,7 @@ namespace detail
         return fmode;
     }
 
-    i32 get_gid(Str group, Cache& cache, Str serial)
+    i32 get_gid(Str group, Cache& cache)
     {
         {
             auto lock = std::shared_lock{ cache.m_mutex };
@@ -226,18 +223,18 @@ namespace detail
             }
         }
 
-        auto gid = cmd::exec_adb_shell({ "id", "-g", String{ group } }, serial);
+        auto gid = cmd::exec_adb_shell({ "id", "-g", String{ group } });
         if (gid.returncode != 0) {
             log_e({ "get_gid: failed to get gid for [{}] (err: {}) {}" }, group, gid.returncode, gid.cerr);
         }
 
         auto lock     = std::unique_lock{ cache.m_mutex };
-        auto real_gid = parse_fundamental<i32>(util::strip(gid.cout, '\n')).value_or(default_gid);
+        auto real_gid = parse_fundamental<i32>(util::strip(gid.cout)).value_or(default_gid);
 
         return cache.m_gid[String{ group }] = real_gid;
     }
 
-    i32 get_uid(Str user, Cache& cache, Str serial)
+    i32 get_uid(Str user, Cache& cache)
     {
         {
             auto lock = std::shared_lock{ cache.m_mutex };
@@ -246,13 +243,13 @@ namespace detail
             }
         }
 
-        auto uid = cmd::exec_adb_shell({ "id", "-u", String{ user } }, serial);
+        auto uid = cmd::exec_adb_shell({ "id", "-u", String{ user } });
         if (uid.returncode != 0) {
             log_e({ "get_uid: failed to get uid for [{}] (err: {}) {}" }, user, uid.returncode, uid.cerr);
         }
 
         auto lock     = std::unique_lock{ cache.m_mutex };
-        auto real_uid = parse_fundamental<i32>(util::strip(uid.cout, '\n')).value_or(default_uid);
+        auto real_uid = parse_fundamental<i32>(util::strip(uid.cout)).value_or(default_uid);
 
         return cache.m_uid[String{ user }] = real_uid;
     }
@@ -297,9 +294,11 @@ namespace detail
      *
      * file with unknown stat field will not be parsed:
      *  d?????????   ? ?      ?             ?                             ? metadata
+     *
+     * TODO: implement different parsing strategy for non-regular files
      */
     template <std::invocable<ParsedStat> Fn>
-    bool parse_file_stat(Str parent, Str str, Cache& cache, Str serial, Fn&& fn)
+    bool parse_file_stat(Str parent, Str str, Cache& cache, Fn&& fn)
     {
         auto result = util::split_n<8>(str, ' ');
         if (not result) {
@@ -347,8 +346,8 @@ namespace detail
         auto stat = Stat{
             .m_mode    = parse_mode(to_be_stat[0]),
             .m_links   = parse_fundamental<i32>(to_be_stat[1]).value(),
-            .m_uid     = get_uid(to_be_stat[2], cache, serial),
-            .m_gid     = get_gid(to_be_stat[3], cache, serial),
+            .m_uid     = get_uid(to_be_stat[2], cache),
+            .m_gid     = get_gid(to_be_stat[3], cache),
             .m_size    = parse_fundamental<i32>(to_be_stat[4]).value_or(0),
             .m_mtime   = parse_time(to_be_stat[5], to_be_stat[6], to_be_stat[7]).value(),
             .m_age     = Clock::now(),
@@ -356,7 +355,7 @@ namespace detail
         };
 
         if ((stat.m_mode & S_IFMT) == S_IFLNK and link.empty()) {
-            log_c({ "parse_file_stat: link is empty for [{}] when it should not be" }, path);
+            log_e({ "parse_file_stat: link is empty for [{}] when it should not be" }, path);
         }
 
         auto it          = cache.m_file_stat.begin();
@@ -371,12 +370,11 @@ namespace detail
         return true;
     }
 
-    cmd::Out adb_rescan_file(Str path, Str serial)
+    cmd::Out adb_rescan_file(Str path)
     {
         auto file   = fmt::format("'file://{}'", path);
         auto intent = "android.intent.action.MEDIA_SCANNER_SCAN_FILE";
-        auto cmd    = cmd::Cmd{ "am", "broadcast", "-a", intent, "-d", file };
-        return cmd::exec_adb_shell(std::move(cmd), serial);
+        return cmd::exec_adb_shell({ "am", "broadcast", "-a", intent, "-d", file });
     }
 }
 
@@ -396,14 +394,15 @@ namespace adbfsm
         readdir_flag.wait(true);
 
         if (auto found = cache.m_file_stat.find(path); found == cache.m_file_stat.end()) {
-            auto ls = cmd::exec_adb_shell({ "ls", "-llad", detail::copy_escape(path) }, serial);
+            // INFO: exec_adb_shell file args need to be escaped
+            auto ls = cmd::exec_adb_shell({ "ls", "-llad", detail::copy_escape(path) });
             if (ls.returncode != 0) {
                 auto errn = detail::parse_and_log_err(ls, "getattr", "failed to get file info");
                 cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
                 return -errn;
             }
 
-            auto success = detail::parse_file_stat("/", util::strip(ls.cout), cache, serial, [&](auto) { });
+            auto success = detail::parse_file_stat("/", util::strip(ls.cout), cache, [&](auto) { });
             if (not success) {
                 log_e({ "getattr: failed to parse file stat [{}]" }, ls.cout);
                 return -EIO;
@@ -465,14 +464,15 @@ namespace adbfsm
         readdir_flag.wait(true);
 
         if (auto found = cache.m_file_stat.find(path); found == cache.m_file_stat.end()) {
-            auto ls = cmd::exec_adb_shell({ "ls", "-llad", detail::copy_escape(path) }, serial);
+            // INFO: exec_adb_shell file args need to be escaped
+            auto ls = cmd::exec_adb_shell({ "ls", "-llad", detail::copy_escape(path) });
             if (ls.returncode != 0) {
                 auto errn = detail::parse_and_log_err(ls, "readlink", "failed to read file info");
                 cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
                 return -errn;
             }
 
-            auto success = detail::parse_file_stat("/", util::strip(ls.cout), cache, serial, [&](auto) { });
+            auto success = detail::parse_file_stat("/", util::strip(ls.cout), cache, [&](auto) { });
             if (not success) {
                 log_e({ "readdir: failed to parse file stat [{}]" }, ls.cout);
                 return -EIO;
@@ -506,21 +506,20 @@ namespace adbfsm
     {
         log_i({ "mknod: {:?}" }, path);
         auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
-
-        auto path_str   = detail::copy_escape(path);
-        auto local_path = temp / detail::copy_replace(path_str.c_str(), '/', '-');
+        auto local_path = temp / detail::copy_replace(path, '/', '-');
 
         if ((mode & S_IFMT) != S_IFREG) {
             log_e({ "mknod: [{}] is not a regular file" }, path);
             return -EACCES;
         }
 
-        auto touch = cmd::exec_adb_shell({ "touch", path_str }, serial);
+        // INFO: exec_adb_shell file args need to be escaped
+        auto touch = cmd::exec_adb_shell({ "touch", detail::copy_escape(path) });
         if (touch.returncode != 0) {
             return -detail::parse_and_log_err(touch, "mknod", "failed to create file");
         }
 
-        auto pull = cmd::exec_adb({ "pull", path_str, local_path }, serial);
+        auto pull = cmd::exec_adb({ "pull", path, local_path });
         if (pull.returncode != 0) {
             return -detail::parse_and_log_err(pull, "mknod", fmt::format("failed to pull {:?}", path));
         }
@@ -535,7 +534,8 @@ namespace adbfsm
         log_i({ "mkdir: {:?}" }, path);
         auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
 
-        auto mkdir = cmd::exec_adb_shell({ "mkdir", detail::copy_escape(path) }, serial);
+        // INFO: exec_adb_shell file args need to be escaped
+        auto mkdir = cmd::exec_adb_shell({ "mkdir", detail::copy_escape(path) });
         if (mkdir.returncode != 0) {
             return -detail::parse_and_log_err(mkdir, "mkdir", "failed to create directory");
         }
@@ -550,10 +550,13 @@ namespace adbfsm
         log_i({ "unlink: {:?}" }, path);
         auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
 
-        auto path_str   = detail::copy_escape(path);
-        auto local_path = temp / detail::copy_replace(path_str.c_str(), '/', '-');
+        auto local_path = temp / detail::copy_replace(path, '/', '-');
 
-        auto rm = cmd::exec_adb_shell({ "rm", path_str }, serial);
+        cache.m_file_stat.erase(path);
+        local.remove(local_path);
+
+        // INFO: exec_adb_shell file args need to be escaped
+        auto rm = cmd::exec_adb_shell({ "rm", detail::copy_escape(path) });
         if (rm.returncode != 0) {
             auto errn = detail::parse_and_log_err(rm, "unlink", "failed to remove file");
             cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
@@ -561,14 +564,11 @@ namespace adbfsm
         }
 
         if (rescan) {
-            auto out = detail::adb_rescan_file(path, serial);
+            auto out = detail::adb_rescan_file(path);
             if (out.returncode != 0) {
                 return -detail::parse_and_log_err(out, "flush", "failed to rescan file");
             }
         }
-
-        cache.m_file_stat.erase(path);
-        local.remove(local_path);
 
         return 0;
     }
@@ -578,7 +578,8 @@ namespace adbfsm
         log_i({ "rmdir: {:?}" }, path);
         auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
 
-        auto rmdir = cmd::exec_adb_shell({ "rmdir", detail::copy_escape(path) }, serial);
+        // INFO: exec_adb_shell file args need to be escaped
+        auto rmdir = cmd::exec_adb_shell({ "rmdir", detail::copy_escape(path) });
         if (rmdir.returncode != 0) {
             return -detail::parse_and_log_err(rmdir, "rmdir", "failed to remove directory");
         }
@@ -594,7 +595,8 @@ namespace adbfsm
         log_i({ "rename: {:?} -> {:?}" }, from, to);
         auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
 
-        auto mv = cmd::exec_adb_shell({ "mv", detail::copy_escape(from), detail::copy_escape(to) }, serial);
+        // INFO: exec_adb_shell file args need to be escaped
+        auto mv = cmd::exec_adb_shell({ "mv", detail::copy_escape(from), detail::copy_escape(to) });
         if (mv.returncode != 0) {
             return -detail::parse_and_log_err(mv, "rename", "failed to rename file");
         }
@@ -614,9 +616,7 @@ namespace adbfsm
     {
         log_i({ "truncate: {:?}" }, path);
         auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
-
-        auto path_str   = detail::copy_escape(path);
-        auto local_path = temp / detail::copy_replace(path_str.c_str(), '/', '-');
+        auto local_path = temp / detail::copy_replace(path, '/', '-');
 
         if (auto found = cache.m_file_stat.find(path); found != cache.m_file_stat.end()) {
             if (static_cast<usize>(found->second.m_size) > local.max_size()) {
@@ -625,12 +625,12 @@ namespace adbfsm
         }
 
         if (not local.exists(local_path)) {
-            auto pull = cmd::exec_adb({ "pull", std::move(path_str), local_path }, serial);
+            auto pull = cmd::exec_adb({ "pull", path, local_path });
             if (pull.returncode != 0) {
                 return -detail::parse_and_log_err(pull, "truncate", fmt::format("failed to pull {:?}", path));
             }
-            if (not local.add(local_path)) {
-                return -EFBIG;
+            if (auto res = local.add(local_path); res != 0) {
+                return -res;
             }
         }
 
@@ -644,23 +644,22 @@ namespace adbfsm
     {
         log_i({ "open: {:?}" }, path);
         auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
-
-        auto path_str   = detail::copy_escape(path);
-        auto local_path = temp / detail::copy_replace(path_str.c_str(), '/', '-');
+        auto local_path = temp / detail::copy_replace(path, '/', '-');
 
         if (auto found = cache.m_file_stat.find(path); found != cache.m_file_stat.end()) {
             if (static_cast<usize>(found->second.m_size) > local.max_size()) {
+                log_i({ "open: file size is too large [{}]" }, path);
                 return -EFBIG;
             }
         }
 
         if (not cache.m_file_truncated.contains(path) and not local.exists(local_path)) {
-            auto pull = cmd::exec_adb({ "pull", std::move(path_str), local_path }, serial);
+            auto pull = cmd::exec_adb({ "pull", path, local_path });
             if (pull.returncode != 0) {
                 return -detail::parse_and_log_err(pull, "open", fmt::format("failed to pull {:?}", path));
             }
-            if (not local.add(local_path)) {
-                return -EFBIG;
+            if (auto res = local.add(local_path); res != 0) {
+                return -res;
             }
         }
 
@@ -683,9 +682,9 @@ namespace adbfsm
         // auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
 
         auto fd  = static_cast<i32>(fi->fh);
-        auto res = pread(fd, buf, size, offset);
+        auto res = ::pread(fd, buf, size, offset);
         if (res == -1) {
-            log_e({ "read: failed to read file [{}] (errno: {}) {}" }, path, errno, strerror(errno));
+            log_e({ "read: failed to read [{}] (errno: {}) {}" }, path, errno, strerror(errno));
             return -errno;
         }
 
@@ -696,13 +695,12 @@ namespace adbfsm
     {
         log_i({ "write: {:?}" }, path);
         auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
-
-        auto local_path = temp / detail::copy_replace_escape(path, '/', '-');
+        auto local_path = temp / detail::copy_replace(path, '/', '-');
 
         auto fd = static_cast<i32>(fi->fh);
         cache.m_file_pending_write.insert(fd);
 
-        auto res = pwrite(fd, buf, size, offset);
+        auto res = ::pwrite(fd, buf, size, offset);
         if (res == -1) {
             log_e({ "write: failed to write file [{}] (errno: {}) {}" }, local_path, errno, strerror(errno));
             return -errno;
@@ -725,27 +723,29 @@ namespace adbfsm
     {
         log_i({ "release: {:?}" }, path);
         auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
-
-        auto path_str   = detail::copy_escape(path);
         auto local_path = temp / detail::copy_replace(path, '/', '-');
 
+        cache.m_file_stat.erase(path);
         auto fd = static_cast<i32>(fi->fh);
 
-        cache.m_file_stat.erase(path);
+        if (::close(fd) == -1) {
+            log_e({ "release: failed to close file [{}] (errno: {}) {}" }, fd, errno, strerror(errno));
+            return -errno;
+        }
 
         if (cache.m_file_pending_write.contains(fd)) {
             cache.m_file_pending_write.erase(fd);
 
             log_d({ "release: new size of file is [{}]" }, fs::file_size(local_path));
 
-            auto push = cmd::exec_adb({ "push", local_path, std::move(path_str) }, serial);
+            auto push = cmd::exec_adb({ "push", local_path, path });
             if (push.returncode != 0) {
                 return -detail::parse_and_log_err(push, "flush", fmt::format("failed to push {:?}", path));
             }
 
-            std::ignore = cmd::exec_adb_shell({ "sync" }, serial);
+            std::ignore = cmd::exec_adb_shell({ "sync" });
             if (rescan) {
-                auto out = detail::adb_rescan_file(path, serial);
+                auto out = detail::adb_rescan_file(path);
                 if (out.returncode != 0) {
                     return -detail::parse_and_log_err(out, "flush", "failed to rescan file");
                 }
@@ -753,14 +753,6 @@ namespace adbfsm
         } else {
             log_d({ "release: file [{}] with fd [{}] is not pending write" }, path, fd);
         }
-
-        auto res = ::close(fd);
-        if (res == -1) {
-            log_e({ "release: failed to close file [{}] (errno: {}) {}" }, fd, errno, strerror(errno));
-            return -errno;
-        }
-
-        cache.m_file_stat.erase(path);
 
         return 0;
     }
@@ -785,7 +777,8 @@ namespace adbfsm
             }
         }
 
-        auto ls = cmd::exec_adb_shell({ "ls", "-lla", detail::copy_escape(path) }, serial);
+        // INFO: exec_adb_shell file args need to be escaped
+        auto ls = cmd::exec_adb_shell({ "ls", "-lla", detail::copy_escape(path) });
         if (ls.returncode != 0) {
             auto errn = detail::parse_and_log_err(ls, "readdir", "failed to list directory");
             cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
@@ -796,7 +789,7 @@ namespace adbfsm
             if (line.size() < detail::minimum_path_size) {    // skip lines too short to process
                 return;
             }
-            detail::parse_file_stat(path, line, cache, serial, [&](detail::ParsedStat parsed) {
+            detail::parse_file_stat(path, line, cache, [&](detail::ParsedStat parsed) {
                 auto& [path, stat] = parsed;
                 filler(buf, path.data(), nullptr, 0, FUSE_FILL_DIR_PLUS);
             });
@@ -822,7 +815,8 @@ namespace adbfsm
         readdir_flag.wait(true);
 
         // TODO: use the timedata from ts instead of the current time
-        auto touch = cmd::exec_adb_shell({ "touch", detail::copy_escape(path) }, serial);
+        // NOTE: this command also need escaping
+        auto touch = cmd::exec_adb_shell({ "touch", detail::copy_escape(path) });
         if (touch.returncode != 0) {
             auto errn = detail::parse_and_log_err(touch, "utimens", "failed to touch file");
             cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
@@ -839,7 +833,7 @@ namespace adbfsm
 
         // If we forgot to mount -o rescan then we can remount and touch to trigger the scan.
         if (rescan) {
-            auto out = detail::adb_rescan_file(path, serial);
+            auto out = detail::adb_rescan_file(path);
             if (out.returncode != 0) {
                 return -detail::parse_and_log_err(out, "utimens", "failed to rescan file");
             }
@@ -847,5 +841,4 @@ namespace adbfsm
 
         return 0;
     }
-
 }
