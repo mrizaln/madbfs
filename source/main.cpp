@@ -24,10 +24,10 @@ enum class SerialStatus
 std::string_view to_string(SerialStatus status)
 {
     switch (status) {
-    case SerialStatus::NotExist: return "not exist";
-    case SerialStatus::Offline: return "offline";
-    case SerialStatus::Unauthorized: return "unauthorized";
-    case SerialStatus::Device: return "device";
+    case SerialStatus::NotExist: return "device not exist";
+    case SerialStatus::Offline: return "device offline";
+    case SerialStatus::Unauthorized: return "device unauthorized";
+    case SerialStatus::Device: return "device ok";
     }
     return "Unknown";
 }
@@ -184,11 +184,11 @@ std::string get_serial()
         return serials[0];
     }
 
-    fmt::println("[adbfsm] multiple devices detected, please specify which one you would like to use:");
+    fmt::println("[adbfsm] multiple devices detected,");
     for (auto i : adbfsm::sv::iota(0u, serials.size())) {
         fmt::println("         - {}: {}", i + 1, serials[i]);
     }
-    fmt::print("\n[adbfsm] enter the number of the device you would like to use: ");
+    fmt::print("[adbfsm] please specify which one you would like to use: ");
 
     auto choice = 1u;
     while (true) {
@@ -257,16 +257,26 @@ int main(int argc, char** argv)
             out,
             "Options for adbfsm:\n"
             "    --serial=<s>        serial number of the device to mount\n"
+            "                        (default: <auto> [detection is similar to adb])\n"
             "    --log-level=<l>     log level to use (default: warn)\n"
             "    --log-file=<f>      log file to write to (default: - for stdout)\n"
             "    --cachesize=<n>     maximum size of the cache in MB (default: 500)\n"
             "    --rescan            perform rescan every (idk)\n"
-            "    --help              show this help message\n"
-            "    --full-help         show full help message (includes libfuse options)\n\n"
+            "    -h, --help          show this help message\n"
+            "    --full-help         show full help message (includes libfuse options)\n"
         );
     };
 
+    auto get_serial_env = []() -> const char* {
+        if (auto serial = ::getenv("ANDROID_SERIAL"); serial != nullptr) {
+            fmt::println("[adbfsm] using serial '{}' from env variable 'ANDROID_SERIAL'", serial);
+            return ::strdup(serial);
+        }
+        return nullptr;
+    };
+
     auto adbfsm_opt = AdbfsmOpt{
+        .m_serial    = get_serial_env(),
         .m_log_level = ::strdup("warn"),
         .m_log_file  = ::strdup("-"),
     };
@@ -333,9 +343,9 @@ int main(int argc, char** argv)
     };
 
     if (std::strcmp(adbfsm_opt.m_log_file, "-") == 0) {
-        fmt::println(stdout, "mounting device with serial '{}' and cache size {}MB", data.m_serial, cache_mb);
+        fmt::println("[adbfsm] mount device '{}' with cache size {}MB", data.m_serial, cache_mb);
     } else {
-        adbfsm::log_i({ "mounting device with serial '{}' and cache size {}MB" }, data.m_serial, cache_mb);
+        adbfsm::log_i({ "mount device '{}' with cache size {}MB" }, data.m_serial, cache_mb);
     }
 
     if (::setenv("ANDROID_SERIAL", data.m_serial.c_str(), 1) < 0) {
