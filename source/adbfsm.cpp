@@ -1,3 +1,4 @@
+#include "args.hpp"
 #include "cmd.hpp"
 #include "common.hpp"
 #include "util.hpp"
@@ -68,6 +69,20 @@ namespace detail
         case Error::ReadOnly: return "Read-only file system";
         default: std::terminate();
         }
+    }
+
+    /**
+     * @brief Create a temporary directory.
+     * @return The path to the temporary directory.
+     *
+     * The created directory handling, including its removal, is up to the caller.
+     */
+    std::filesystem::path make_temp_dir()
+    {
+        char adbfsm_template[] = "/tmp/adbfsm-XXXXXX";
+        auto temp              = ::mkdtemp(adbfsm_template);
+        adbfsm::log_i({ "created temporary directory: {:?}" }, temp);
+        return temp;
     }
 
     AdbfsmData& get_data()
@@ -380,11 +395,31 @@ namespace detail
 
 namespace adbfsm
 {
+    void* init(fuse_conn_info*, fuse_config*)
+    {
+        auto* args = static_cast<args::ParsedOpt*>(::fuse_get_context()->private_data);
+        assert(args != nullptr and "data should not be empty!");
+
+        auto temp = detail::make_temp_dir();
+        return new AdbfsmData{
+            .m_cache      = Cache{},
+            .m_local_copy = LocalCopy{ args->m_cachesize * 1000 * 1000 },
+            .m_dir        = detail::make_temp_dir(),
+            .m_serial     = args->m_serial,
+            .m_readdir    = false,
+            .m_rescan     = args->m_rescan,
+        };
+    }
+
     void destroy(void* private_data)
     {
-        auto& data = *static_cast<AdbfsmData*>(private_data);
-        fs::remove_all(data.m_dir);
-        adbfsm::log_i({ "cleaned up temporary directory: {:?}" }, data.m_dir.c_str());
+        auto* data = static_cast<AdbfsmData*>(private_data);
+        assert(data != nullptr and "data should not be empty!");
+
+        fs::remove_all(data->m_dir);
+        adbfsm::log_i({ "cleaned up temporary directory: {:?}" }, data->m_dir.c_str());
+
+        delete data;
     }
 
     i32 getattr(const char* path, struct stat* stbuf, [[maybe_unused]] fuse_file_info* fi)

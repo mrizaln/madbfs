@@ -163,7 +163,8 @@ namespace adbfsm
         bool              m_rescan  = false;
     };
 
-    void destroy(void* private_data);
+    void* init(fuse_conn_info*, fuse_config*);
+    void  destroy(void*);
 
     i32 getattr(const char*, struct stat*, fuse_file_info*);
     i32 readlink(const char*, char*, usize);
@@ -182,7 +183,7 @@ namespace adbfsm
     i32 access(const char*, i32);
     i32 utimens(const char*, const timespec tv[2], fuse_file_info*);
 
-    constexpr auto operations = fuse_operations{
+    static constexpr auto operations = fuse_operations{
         .getattr         = adbfsm::getattr,
         .readlink        = adbfsm::readlink,
         .mknod           = adbfsm::mknod,
@@ -210,7 +211,7 @@ namespace adbfsm
         .readdir         = adbfsm::readdir,
         .releasedir      = nullptr,
         .fsyncdir        = nullptr,
-        .init            = nullptr,
+        .init            = adbfsm::init,
         .destroy         = adbfsm::destroy,
         .access          = adbfsm::access,
         .create          = nullptr,

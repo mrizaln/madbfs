@@ -56,9 +56,9 @@ namespace adbfsm::log
 
         auto logger = [&] {
             if (log_file == "-") {
-                return spdlog::stdout_color_mt("logger", spdlog::color_mode::always);
+                return spdlog::stdout_color_mt("logger-stdout", spdlog::color_mode::always);
             } else {
-                return spdlog::rotating_logger_mt("logger", log_file.data(), max_size, max_files);
+                return spdlog::rotating_logger_mt("logger-file", log_file.data(), max_size, max_files);
             }
         }();
 
