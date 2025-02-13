@@ -9,15 +9,13 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(fmt REQUIRED)
 find_package(spdlog REQUIRED)
-find_package(PkgConfig REQUIRED)
-
-pkg_check_modules(FUSE REQUIRED IMPORTED_TARGET fuse3)
+find_package(libfuse REQUIRED)
 
 include(cmake/fetched-libs.cmake)       # emits fetch::*
 
 add_executable(adbfsm source/main.cpp source/adbfsm.cpp)
 target_include_directories(adbfsm PRIVATE source)
-target_link_libraries(adbfsm PRIVATE PkgConfig::FUSE fetch::subprocess fmt::fmt spdlog::spdlog)
+target_link_libraries(adbfsm PRIVATE libfuse::libfuse fetch::subprocess fmt::fmt spdlog::spdlog)
 target_compile_options(adbfsm PRIVATE -Wall -Wextra -Wconversion)
 
 # # sanitizer
