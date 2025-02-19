@@ -2,6 +2,7 @@
 
 #define FUSE_USE_VERSION 31
 #include <fuse3/fuse.h>
+#include <fuse3/fuse_lowlevel.h>
 
 #include "cmd.hpp"
 #include "util.hpp"
@@ -81,7 +82,7 @@ namespace adbfsm::args
             "    --loglevel=<l>      log level to use (default: warn)\n"
             "    --logfile=<f>       log file to write to (default: - for stdout)\n"
             "    --cachesize=<n>     maximum size of the cache in MB (default: 500)\n"
-            "    -h, --help          show this help message\n"
+            "    -h   --help         show this help message\n"
             "    --full-help         show full help message (includes libfuse options)\n"
         );
     };
@@ -234,8 +235,9 @@ namespace adbfsm::args
             return 0;
         } else if (adbfsm_opt.m_full_help) {
             show_help(argv[0], false);
-            fmt::println(stdout, "Options for libfuse:");
-            ::fuse_lib_help(&args);
+            fmt::println(stdout, "\nOptions for libfuse:");
+            ::fuse_cmdline_help();
+            ::fuse_lowlevel_help();
             ::fuse_opt_free_args(&args);
             return 0;
         }
