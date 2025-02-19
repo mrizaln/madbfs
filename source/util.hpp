@@ -60,16 +60,20 @@ namespace adbfsm::util
                 return m_delim.is_delim(ch);
             });
 
-            if (it == m_str.end()) {
-                auto res = m_str.substr(m_idx);
-                m_idx    = m_str.size();    // mark end of line
+            if (it != m_str.end()) {
+                auto pos = static_cast<usize>(it - m_str.begin());
+                auto res = m_str.substr(m_idx, pos - m_idx);
+                m_idx    = pos + 1;
+
                 return res;
             }
 
-            auto pos = static_cast<usize>(it - m_str.begin());
-            auto res = m_str.substr(m_idx, pos - m_idx);
-            m_idx    = pos + 1;
+            if (m_idx >= m_str.size()) {
+                return std::nullopt;
+            }
 
+            auto res = m_str.substr(m_idx);
+            m_idx    = m_str.size();    // mark end of line
             return res;
         }
 
