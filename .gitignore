@@ -1,4 +1,5 @@
 **/build/
 **/*.json
+**/*.log
 .cache/
 mount/

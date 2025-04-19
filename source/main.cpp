@@ -1,6 +1,6 @@
-#include "adbfsm.hpp"
-#include "args.hpp"
-#include "cmd.hpp"
+#include "adbfsm/adbfsm.hpp"
+#include "adbfsm/args.hpp"
+#include "adbfsm/cmd.hpp"
 
 #include <execinfo.h>
 #include <unistd.h>

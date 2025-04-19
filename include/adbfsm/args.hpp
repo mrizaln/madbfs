@@ -1,11 +1,11 @@
 #pragma once
 
+#include "adbfsm/cmd.hpp"
+#include "adbfsm/util.hpp"
+
 #define FUSE_USE_VERSION 31
 #include <fuse3/fuse.h>
 #include <fuse3/fuse_lowlevel.h>
-
-#include "cmd.hpp"
-#include "util.hpp"
 
 namespace adbfsm::args
 {

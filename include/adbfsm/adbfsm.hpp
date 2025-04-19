@@ -1,11 +1,11 @@
 #pragma once
 
-#include "common.hpp"
-#include "log.hpp"
+#include "adbfsm/common.hpp"
+#include "adbfsm/log.hpp"
 
 #define FUSE_USE_VERSION 31
-#include <fuse3/fuse.h>
 #include <fcntl.h>
+#include <fuse3/fuse.h>
 
 #include <atomic>
 #include <chrono>

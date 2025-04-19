@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <expected>
+#include <filesystem>
+#include <memory>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -32,6 +35,12 @@ namespace adbfsm
         using Str    = std::string_view;
         using String = std::string;
 
+        template <typename T, typename U>
+        using Pair = std::pair<T, U>;
+
+        template <typename... Ts>
+        using Tup = std::tuple<Ts...>;
+
         template <typename T>
         using Opt = std::optional<T>;
 
@@ -47,8 +56,21 @@ namespace adbfsm
         template <typename T>
         using Vec = std::vector<T>;
 
-        namespace sv = std::views;
+        template <typename T>
+        using Uniq = std::unique_ptr<T>;
+
+        template <typename T>
+        using Shared = std::shared_ptr<T>;
+
+        template <typename T>
+        using Expect = std::expected<T, std::errc>;
+
+        using Clock     = std::chrono::system_clock;
+        using Timestamp = Clock::time_point;
+
+        namespace fs = std::filesystem;
         namespace sr = std::ranges;
+        namespace sv = std::views;
     }
 
     inline namespace literals
