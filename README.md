@@ -117,6 +117,7 @@ $ ./adbfsm --logfile=- --loglevel=debug -d <mountpoint> 2> /dev/null        # th
 
 ## TODO
 
+- [ ] Automatic unmount on device disconnect.
 - [ ] Periodic cache invalidation: current implementation only look at the size of current cache and only invalidate oldest entry when newest entry is added and the size exceed the `cachesize` limit.
 - [ ] IPC to talk to the `adbfsm` to control when invalidation happen (force the invalidation to happen for example).
 - [ ] Implement the filesystem as actual tree for caching the stat.
