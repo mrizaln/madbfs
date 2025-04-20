@@ -13,6 +13,14 @@ namespace adbfsm::tree::util
     class Lock
     {
     public:
+        Lock() = delete;
+
+        Lock(Lock&&)            = delete;
+        Lock& operator=(Lock&&) = delete;
+
+        Lock(const Lock&)            = delete;
+        Lock& operator=(const Lock&) = delete;
+
         Lock(std::atomic<bool>& lock)
             : m_lock{ lock }
         {

@@ -4,13 +4,13 @@ namespace adbfsm::tree
 {
     Node* Directory::find(Str name) const
     {
-        auto found = sr::find_if(m_children, [&](const Uniq<Node>& n) { return n->name == name; });
+        auto found = sr::find_if(m_children, [&](const Uniq<Node>& n) { return n->name() == name; });
         return found != m_children.end() ? found->get() : nullptr;
     }
 
     Expect<Pair<Node*, bool>> Directory::add_node(Uniq<Node> node, bool overwrite)
     {
-        auto found = sr::find_if(m_children, [&](const Uniq<Node>& n) { return n->name == node->name; });
+        auto found = sr::find_if(m_children, [&](const Uniq<Node>& n) { return n->name() == node->name(); });
 
         if (found == m_children.end()) {
             m_children.push_back(std::move(node));
@@ -46,7 +46,7 @@ namespace adbfsm::tree
         }
 
         if (auto* node = dir->find(name)) {
-            node->stat.mtime = Clock::now();
+            node->refresh_stat();
         }
 
         auto node = std::make_unique<Node>(name, this, File{});

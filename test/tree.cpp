@@ -8,9 +8,41 @@
 #include <fmt/base.h>
 #include <fmt/format.h>
 
-namespace ut = boost::ext::ut;
+#include <source_location>
 
+namespace ut = boost::ext::ut;
 using namespace adbfsm::aliases;
+
+// NOTE: extra newline at the start of this string is intentional (make sure to take it into account)
+constexpr auto expected = R"(
+- /
+    - hello/
+        - world.txt
+        - foo.txt
+        - movie.mp4
+        - bar/
+            - baz.txt
+            - qux.txt
+            - quux.txt
+        - wife    ->    /bye/friends/work/loughshinny <3.txt
+    - bye/
+        - world.txt
+        - movie.mp4
+        - music.mp3
+        - family/
+            - dad.txt
+            - mom.txt
+        - friends/
+            - bob.txt
+            - school/
+                - kal'tsit.txt
+                - closure.txt
+                - hehe    ->    /bye/friends/work
+            - work/
+                - loughshinny <3.txt
+                - eblana?.mp4
+        - theresa.txt
+)";
 
 template <>
 struct fmt::formatter<adbfsm::tree::Node> : fmt::formatter<std::string_view>
@@ -35,8 +67,8 @@ struct fmt::formatter<adbfsm::tree::Node> : fmt::formatter<std::string_view>
             });
 
             // if root, don't print the name since additional will print dir mark (/)
-            auto name = node->name == "/" ? "" : node->name;
-            fmt::format_to(ctx.out(), "- [{}] {}{}\n", node->id, name, additional);
+            auto name = node->name() == "/" ? "" : node->name();
+            fmt::format_to(ctx.out(), "- {}{}\n", name, additional);
 
             node->visit(util::Overload{
                 [&](const Directory& dir) {
@@ -53,6 +85,27 @@ struct fmt::formatter<adbfsm::tree::Node> : fmt::formatter<std::string_view>
         return ctx.out();
     }
 };
+
+class ExpectError : public std::runtime_error
+{
+public:
+    ExpectError(std::errc errc, std::source_location loc = std::source_location::current())
+        : runtime_error{ fmt::format(
+              "{}:{}:{} [{}]",
+              loc.file_name(),
+              loc.line(),
+              loc.column(),
+              std::make_error_code(errc).message()
+          ) }
+    {
+    }
+};
+
+template <typename T>
+Expect<T> raise_expect_error(std::errc errc, std::source_location loc = std::source_location::current())
+{
+    throw ExpectError{ errc, loc };
+}
 
 String diff_str(Str str1, Str str2)
 {
@@ -73,89 +126,103 @@ int main()
 
     auto _ = std::ignore;
 
-    "constructed tree have same shape"_test = [&] {
+    "constructed tree from raw node have same shape"_test = [&] {
         using namespace adbfsm::tree;
 
-        // NOTE: extra newline at the start of this string is intentional (make sure to take it into account)
-        constexpr auto expected = R"(
-- [1] /
-    - [2] hello/
-        - [3] world.txt
-        - [4] foo.txt
-        - [5] movie.mp4
-        - [6] bar/
-            - [7] baz.txt
-            - [8] qux.txt
-            - [9] quux.txt
-        - [26] wife    ->    /bye/friends/work/loughshinny <3.txt
-    - [10] bye/
-        - [11] world.txt
-        - [12] movie.mp4
-        - [13] music.mp3
-        - [14] family/
-            - [15] dad.txt
-            - [16] mom.txt
-        - [17] friends/
-            - [18] bob.txt
-            - [19] school/
-                - [20] kal'tsit.txt
-                - [21] closure.txt
-                - [25] hehe    ->    /bye/friends/work
-            - [22] work/
-                - [23] loughshinny <3.txt
-                - [24] eblana?.mp4
-        - [27] theresa.txt
-)";
+#define unwrap() or_else([](auto e) { return raise_expect_error<Node*>(e); }).value()
 
         auto root = Node{ "/", nullptr, Directory{} };
 
-        auto* hello = root.mkdir("hello").value();
+        auto* hello = root.mkdir("hello").unwrap();
 
-        _ = hello->touch("world.txt");
-        _ = hello->touch("foo.txt");
-        _ = hello->touch("movie.mp4");
+        _ = hello->touch("world.txt").unwrap();
+        _ = hello->touch("foo.txt").unwrap();
+        _ = hello->touch("movie.mp4").unwrap();
 
-        auto* bar = hello->mkdir("bar").value();
+        auto* bar = hello->mkdir("bar").unwrap();
 
-        _ = bar->touch("baz.txt");
-        _ = bar->touch("qux.txt");
-        _ = bar->touch("quux.txt");
+        _ = bar->touch("baz.txt").unwrap();
+        _ = bar->touch("qux.txt").unwrap();
+        _ = bar->touch("quux.txt").unwrap();
 
-        auto* bye = root.mkdir("bye").value();
+        auto* bye = root.mkdir("bye").unwrap();
 
-        _ = bye->touch("world.txt");
-        _ = bye->touch("movie.mp4");
-        _ = bye->touch("music.mp3");
+        _ = bye->touch("world.txt").unwrap();
+        _ = bye->touch("movie.mp4").unwrap();
+        _ = bye->touch("music.mp3").unwrap();
 
-        auto* family = bye->mkdir("family").value();
+        auto* family = bye->mkdir("family").unwrap();
 
-        _ = family->touch("dad.txt");
-        _ = family->touch("mom.txt");
+        _ = family->touch("dad.txt").unwrap();
+        _ = family->touch("mom.txt").unwrap();
 
-        auto* friends = bye->mkdir("friends").value();
+        auto* friends = bye->mkdir("friends").unwrap();
 
-        _ = friends->touch("bob.txt");
+        _ = friends->touch("bob.txt").unwrap();
 
-        auto* school = friends->mkdir("school").value();
+        auto* school = friends->mkdir("school").unwrap();
 
-        _ = school->touch("kal'tsit.txt");
-        _ = school->touch("closure.txt");
+        _ = school->touch("kal'tsit.txt").unwrap();
+        _ = school->touch("closure.txt").unwrap();
 
-        auto* work = friends->mkdir("work").value();
+        auto* work = friends->mkdir("work").unwrap();
 
-        auto* wife = work->touch("loughshinny <3.txt").value();
+        auto* wife = work->touch("loughshinny <3.txt").unwrap();
 
-        _ = work->touch("eblana?.mp4");
-
-        _ = school->link("hehe", work);
-
-        _ = hello->link("wife", wife);
-
-        _ = bye->touch("theresa.txt");
+        _ = work->touch("eblana?.mp4").unwrap();
+        _ = school->link("hehe", work).unwrap();
+        _ = hello->link("wife", wife).unwrap();
+        _ = bye->touch("theresa.txt").unwrap();
 
         // NOTE: taking into account the extra newline at the start
         auto tree_str = fmt::format("\n{}", root);
 
         expect(expected == tree_str) << diff_str(expected, tree_str);
+
+#undef unwrap
+    };
+
+    "constructed FileTree have same shape"_test = [&] {
+        using namespace adbfsm::tree;
+
+        auto tree = FileTree{};
+
+#define unwrap() or_else([](auto e) { return raise_expect_error<void>(e); }).value()
+
+        tree.mkdir("/hello").unwrap();
+        tree.touch("/hello/world.txt").unwrap();
+        tree.touch("/hello/foo.txt").unwrap();
+        tree.touch("/hello/movie.mp4").unwrap();
+        tree.mkdir("/hello/bar").unwrap();
+        tree.touch("/hello/bar/baz.txt").unwrap();
+        tree.touch("/hello/bar/qux.txt").unwrap();
+        tree.touch("/hello/bar/quux.txt").unwrap();
+        tree.mkdir("/bye").unwrap();
+        tree.touch("/bye/world.txt").unwrap();
+        tree.touch("/bye/movie.mp4").unwrap();
+        tree.touch("/bye/music.mp3").unwrap();
+        tree.mkdir("/bye/family").unwrap();
+        tree.touch("/bye/family/dad.txt").unwrap();
+        tree.touch("/bye/family/mom.txt").unwrap();
+        tree.mkdir("/bye/friends").unwrap();
+        tree.touch("/bye/friends/bob.txt").unwrap();
+        tree.mkdir("/bye/friends/school").unwrap();
+        tree.touch("/bye/friends/school/kal'tsit.txt").unwrap();
+        tree.touch("/bye/friends/school/closure.txt").unwrap();
+        tree.mkdir("/bye/friends/work").unwrap();
+        tree.touch("/bye/friends/work/loughshinny <3.txt").unwrap();
+        tree.touch("/bye/friends/work/eblana?.mp4").unwrap();
+
+        tree.link("/bye/friends/school/hehe", "/bye/friends/work").unwrap();
+        tree.link("/hello/wife", "/bye/friends/work/loughshinny <3.txt").unwrap();
+
+        tree.touch("/bye/theresa.txt").unwrap();
+
+        // NOTE: taking into account the extra newline at the start
+        auto tree_str = fmt::format("\n{}", tree.root());
+
+        expect(expected == tree_str) << diff_str(expected, tree_str);
+
+#undef unwrap
     };
 }

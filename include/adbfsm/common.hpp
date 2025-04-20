@@ -73,6 +73,12 @@ namespace adbfsm
         namespace sv = std::views;
     }
 
+    inline namespace util_functions
+    {
+        inline constexpr auto sink_void = [](auto&&) { };
+        inline constexpr auto sink_unit = [](auto&&) { return Unit{}; };
+    }
+
     inline namespace literals
     {
         // clang-format off

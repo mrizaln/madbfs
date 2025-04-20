@@ -61,6 +61,7 @@ namespace adbfsm::tree
         Vec<Uniq<Node>> m_children;
     };
 
+    // TODO: add a way to check if the link is broken
     class Link
     {
     public:
@@ -90,14 +91,25 @@ namespace adbfsm::tree
     class Node
     {
     public:
+        friend class FileTree;
+
         Node(Str name, Node* parent, File value)
-            : id{ ++s_id_counter }    // start from 1
-            , name{ name }
-            , parent{ parent }
-            , stat{ .mtime = Clock::now() }
+            : m_id{ ++s_id_counter }    // start from 1
+            , m_name{ name }
+            , m_parent{ parent }
+            , m_stat{ .mtime = Clock::now() }
             , m_value{ std::move(value) }
         {
         }
+
+        Node(Node&& other)
+            : Node{ std::move(other), util::Lock{ other.m_operated } }
+        {
+        }
+
+        Node& operator=(Node&& other) = delete;
+        Node& operator=(const Node&)  = delete;
+        Node(const Node&)             = delete;
 
         template <typename T>
         bool is() const;
@@ -114,22 +126,45 @@ namespace adbfsm::tree
         template <typename... Fs>
         decltype(auto) visit(util::Overload<Fs...>&& visitor) const;
 
+        u64   id() const { return m_id; }
+        Str   name() const { return m_name; }
+        Node* parent() const { return m_parent; }
+
+        const Stat& stat() const { return m_stat; }
+
         Str    printable_type() const;
         String build_path() const;
+
+        void refresh_stat()
+        {
+            auto lock    = util::Lock{ m_operated };
+            m_stat.mtime = Clock::now();
+        }
 
         Expect<Node*> touch(Str name);
         Expect<Node*> mkdir(Str name);
         Expect<Node*> link(Str name, Node* target);
 
-        const u64         id     = 0;
-        const std::string name   = {};
-        Node*             parent = nullptr;
-        Stat              stat   = {};
-
     private:
         inline static std::atomic<u64> s_id_counter = 0;
 
-        File                      m_value;
+        // proxy move constructor, with lock
+        Node(Node&& other, util::Lock)
+            : m_id{ other.m_id }
+            , m_name{ std::move(other.m_name) }
+            , m_parent{ other.m_parent }
+            , m_stat{ other.m_stat }
+            , m_value{ std::move(other.m_value) }
+        {
+            other.m_parent = nullptr;
+        }
+
+        u64         m_id     = 0;
+        std::string m_name   = {};
+        Node*       m_parent = nullptr;
+        Stat        m_stat   = {};
+        File        m_value;
+
         mutable std::atomic<bool> m_operated = false;
     };
 }
@@ -184,12 +219,12 @@ namespace adbfsm::tree
 
     inline String Node::build_path() const
     {
-        auto path = name | sv::reverse | sr::to<std::string>();
+        auto path = m_name | sv::reverse | sr::to<std::string>();
         auto iter = std::back_inserter(path);
 
-        for (auto current = parent; current != nullptr; current = current->parent) {
+        for (auto current = m_parent; current != nullptr; current = current->m_parent) {
             *iter = '/';
-            sr::copy(current->name | sv::reverse, iter);
+            sr::copy(current->m_name | sv::reverse, iter);
         }
 
         // if the last path is root, we need to remove the last /
