@@ -29,22 +29,22 @@ constexpr auto constructible_testcases = std::array{
     TestCase{
         .input    = "/",
         .parent   = "/",
-        .filename = "",
+        .filename = "/",
     },
     TestCase{
         .input    = "//",
         .parent   = "/",
-        .filename = "",
+        .filename = "/",
     },
     TestCase{
         .input    = "//////",
         .parent   = "/",
-        .filename = "",
+        .filename = "/",
     },
     TestCase{
         .input    = "//////////////////",
         .parent   = "/",
-        .filename = "",
+        .filename = "/",
     },
     TestCase{
         .input    = "/home",

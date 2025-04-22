@@ -24,7 +24,7 @@ namespace adbfsm::path
         Str parent() const { return m_dirname; }
         Str fullpath() const { return { m_dirname.begin(), m_basename.end() }; }
 
-        bool is_root() const { return m_dirname == "/" and m_basename == ""; }
+        bool is_root() const { return m_dirname == "/" and m_basename == "/"; }
 
     private:
         Path(Str dirname, Str name)
@@ -33,7 +33,7 @@ namespace adbfsm::path
         {
         }
 
-        Str m_dirname;    // can be empty string
+        Str m_dirname;
         Str m_basename;
     };
 
@@ -58,7 +58,7 @@ namespace adbfsm::path
         }
 
         if (path == "/") {
-            return Path{ "/", "" };
+            return Path{ "/", "/" };
         }
 
         auto prev    = 1uz;
