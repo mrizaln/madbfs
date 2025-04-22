@@ -25,7 +25,12 @@ target_sources(
 )
 target_link_libraries(
     adbfsm-lib
-    PUBLIC libfuse::libfuse fetch::subprocess fmt::fmt spdlog::spdlog
+    PUBLIC
+        libfuse::libfuse
+        fetch::subprocess
+        fetch::opt-iter
+        fmt::fmt
+        spdlog::spdlog
 )
 target_include_directories(adbfsm-lib PUBLIC include)
 target_include_directories(adbfsm-lib PRIVATE source)

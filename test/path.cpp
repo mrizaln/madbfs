@@ -146,26 +146,25 @@ int main()
 
     using adbfsm::path::create;
 
-    "path must be correctly constructed"_test = [](TestCase testcase) {
-        auto path = create(testcase.input);
+    "path must be correctly constructed"_test = [](TestCase test) {
+        auto path = create(test.input);
 
-        // ut can't show custom message on fatal assertion
-        expect(path.has_value());
+        expect(path.has_value()) << "can't construct: " << test.input;
 
         if (path.has_value()) {
-            expect(testcase.parent == path->parent()) << testcase;
-            expect(testcase.filename == path->filename()) << testcase;
-        } else {
-            ut::log << "Fatal on case: " << testcase;
+            expect(test.parent == path->parent()) << test;
+            expect(test.filename == path->filename()) << test;
         }
     } | constructible_testcases;
 
-    "path must not be constructed"_test = [](Str testcase) {
-        auto path = create(testcase);
+    "path must not be constructed"_test = [](Str test) {
+        auto path = create(test);
         expect(not path.has_value());
 
         if (path.has_value()) {
-            ut::log << fmt::format("on case: {} -- {} | {}", testcase, path->parent(), path->filename());
+            ut::log << fmt::format(
+                "somehow has value? case: {} -- {} | {}", test, path->parent(), path->filename()
+            );
         }
     } | non_constructible_testcases;
 }
