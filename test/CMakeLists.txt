@@ -15,9 +15,10 @@ function(create_test_exe name)
 
     # register test and post-build command
     add_test(name ${name} COMMAND $<TARGET_FILE:${name}>)
-    # add_custom_command(TARGET ${name} POST_BUILD COMMAND $<TARGET_FILE:${name}>)
+    add_custom_command(TARGET ${name} POST_BUILD COMMAND $<TARGET_FILE:${name}>)
 endfunction()
 
 enable_testing()
 
 create_test_exe(tree)
+create_test_exe(path)
