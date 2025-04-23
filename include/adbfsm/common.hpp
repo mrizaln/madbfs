@@ -1,8 +1,8 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <expected>
-#include <filesystem>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -68,7 +68,6 @@ namespace adbfsm
         using Clock     = std::chrono::system_clock;
         using Timestamp = Clock::time_point;
 
-        namespace fs = std::filesystem;
         namespace sr = std::ranges;
         namespace sv = std::views;
     }

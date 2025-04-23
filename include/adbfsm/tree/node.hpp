@@ -46,6 +46,14 @@ namespace adbfsm::tree
         Node* find(Str name) const;
 
         /**
+         * @brief Erase a file by its name.
+         *
+         * @param name The file name.
+         * @return True if file deleted, false if the file does not exist.
+         */
+        bool erase(Str name);
+
+        /**
          * @brief Add a new node.
          *
          * @param node The node to add.
@@ -141,9 +149,34 @@ namespace adbfsm::tree
             m_stat.mtime = Clock::now();
         }
 
+        /**
+         * @brief Create a new child node as RegularFile or touch an existing one.
+         *
+         * @param name The name of the child node.
+         */
         Expect<Node*> touch(Str name);
+
+        /**
+         * @brief Create a new child node as Directory.
+         *
+         * @param name The name of the directory.
+         */
         Expect<Node*> mkdir(Str name);
+
+        /**
+         * @brief Create a new child node as Link.
+         *
+         * @param name The name of the link.
+         * @param target The target of the link.
+         */
         Expect<Node*> link(Str name, Node* target);
+
+        /**
+         * @brief Remove a child node by its name.
+         *
+         * @param name The name of the child node.
+         */
+        Expect<void> remove(Str name);
 
     private:
         inline static std::atomic<u64> s_id_counter = 0;

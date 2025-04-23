@@ -45,6 +45,28 @@ constexpr auto expected = R"(
         - theresa.txt
 )";
 
+constexpr auto expected_rm = R"(
+- /
+    - hello/
+        - foo.txt
+        - movie.mp4
+        - wife    ->    /bye/friends/work/loughshinny <3.txt
+    - bye/
+        - world.txt
+        - movie.mp4
+        - family/
+            - dad.txt
+            - mom.txt
+        - friends/
+            - school/
+                - kal'tsit.txt
+                - closure.txt
+            - work/
+                - loughshinny <3.txt
+                - eblana?.mp4
+        - theresa.txt
+)";
+
 template <>
 struct fmt::formatter<adbfsm::tree::Node> : fmt::formatter<std::string_view>
 {
@@ -115,7 +137,6 @@ String diff_str(Str str1, Str str2)
     auto right = fmt::format("{:r}", dtl_modern::extra::display_pretty(res.m_ses));
 
     auto sep = [](Str name) { return fmt::format("{:-^80}\n", name); };
-
     return '\n' + sep("[ expect ]") + left + sep("[ actual ]") + right;
 }
 
@@ -175,9 +196,7 @@ int main()
         _ = hello->link("wife", wife).unwrap();
         _ = bye->touch("theresa.txt").unwrap();
 
-        // NOTE: taking into account the extra newline at the start
         auto tree_str = fmt::format("\n{}", root);
-
         expect(expected == tree_str) << diff_str(expected, tree_str);
 
 #undef unwrap
@@ -221,10 +240,17 @@ int main()
 
         tree.touch("/bye/theresa.txt"_path).unwrap();
 
-        // NOTE: taking into account the extra newline at the start
         auto tree_str = fmt::format("\n{}", tree.root());
-
         expect(expected == tree_str) << diff_str(expected, tree_str);
+
+        tree.rm("/hello/world.txt"_path, false).unwrap();
+        tree.rm("/hello/bar"_path, true).unwrap();
+        tree.rm("/bye/music.mp3"_path, false).unwrap();
+        tree.rm("/bye/friends/bob.txt"_path, false).unwrap();
+        tree.rm("/bye/friends/school/hehe"_path, false).unwrap();
+
+        tree_str = fmt::format("\n{}", tree.root());
+        expect(expected_rm == tree_str) << diff_str(expected_rm, tree_str);
 
 #undef unwrap
     };

@@ -8,6 +8,11 @@ namespace adbfsm::tree
         return found != m_children.end() ? found->get() : nullptr;
     }
 
+    bool Directory::erase(Str name)
+    {
+        return std::erase_if(m_children, [&](const Uniq<Node>& n) { return n->name() == name; }) > 0;
+    }
+
     Expect<Pair<Node*, bool>> Directory::add_node(Uniq<Node> node, bool overwrite)
     {
         auto found = sr::find_if(m_children, [&](const Uniq<Node>& n) { return n->name() == node->name(); });
@@ -36,7 +41,7 @@ namespace adbfsm::tree
         return current;
     }
 
-    Expect<Node*> Node::touch(std::string_view name)
+    Expect<Node*> Node::touch(Str name)
     {
         auto lock = util::Lock{ m_operated };
 
@@ -49,7 +54,7 @@ namespace adbfsm::tree
             node->refresh_stat();
         }
 
-        auto node = std::make_unique<Node>(name, this, File{});
+        auto node = std::make_unique<Node>(name, this, RegularFile{});
         auto res  = dir->add_node(std::move(node), false);
 
         return res.transform([](auto& pair) {
@@ -59,7 +64,7 @@ namespace adbfsm::tree
         });
     }
 
-    Expect<Node*> Node::mkdir(std::string_view name)
+    Expect<Node*> Node::mkdir(Str name)
     {
         auto lock = util::Lock{ m_operated };
 
@@ -82,7 +87,7 @@ namespace adbfsm::tree
         });
     }
 
-    Expect<Node*> Node::link(std::string_view name, Node* target)
+    Expect<Node*> Node::link(Str name, Node* target)
     {
         auto lock = util::Lock{ m_operated };
 
@@ -103,5 +108,21 @@ namespace adbfsm::tree
             assert(not overwrite);
             return node;
         });
+    }
+
+    Expect<void> Node::remove(Str name)
+    {
+        auto lock = util::Lock{ m_operated };
+
+        auto* dir = as<Directory>();
+        if (dir == nullptr) {
+            return std::unexpected{ std::errc::not_a_directory };
+        }
+
+        if (not dir->erase(name)) {
+            return std::unexpected{ std::errc::no_such_file_or_directory };
+        }
+
+        return {};
     }
 }
