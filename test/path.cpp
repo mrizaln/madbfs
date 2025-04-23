@@ -225,6 +225,7 @@ int main()
     using ut::expect, ut::fatal, ut::log, ut::that;
 
     using adbfsm::path::create;
+    using adbfsm::path::operator""_path;
 
     "path must be correctly constructed"_test = [](const TestConstruct& test) {
         auto path = create(test.input);
@@ -261,4 +262,18 @@ int main()
         expected.size() > 1 ? expected.pop_back() : void();
         expect(that % expected == iterated) << fmt::format("On input: {:?}", test.input);
     } | iter_testcases;
+
+    "path can be constructed using literals"_test = [] {
+        auto path = "/home/user/projects/cpp/adbfsm"_path;
+        expect(path.parent() == "/home/user/projects/cpp");
+        expect(path.filename() == "adbfsm");
+        expect(path.fullpath() == "/home/user/projects/cpp/adbfsm");
+
+        path = "/////home//user/projects////cpp/adbfsm////"_path;
+        expect(path.parent() == "/home//user/projects////cpp");
+        expect(path.filename() == "adbfsm");
+        expect(path.fullpath() == "/home//user/projects////cpp/adbfsm");
+
+        // path = "C:/Users/user0/Documents/Work and School/D"_path;      // won't compile
+    };
 }

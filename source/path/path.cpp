@@ -47,48 +47,6 @@ namespace adbfsm::path
         return iter_path_impl(parent());
     }
 
-    Opt<Path> create(Str path)
-    {
-        if (path.empty() or path.front() != '/') {
-            return std::nullopt;
-        }
-
-        while (path.size() > 2 and path[0] == '/' and path[1] == '/') {
-            path.remove_prefix(1);
-        }
-        while (path.size() > 1 and path.back() == '/') {
-            path.remove_suffix(1);
-        }
-
-        if (path == "/") {
-            return Path{ "/", "/" };
-        }
-
-        auto prev    = 1uz;
-        auto current = 1uz;
-
-        while (current < path.size()) {
-            while (current < path.size() and path[current] == '/') {
-                ++current;
-            }
-            current = path.find('/', current);
-            if (current == Str::npos) {
-                break;
-            }
-            prev = current;
-        }
-
-        const auto dirname_end = prev;
-
-        // in case the basename contains repeated '//' like in the case '/home/user/documents/////note.md'
-        auto basename_start = prev;
-        while (path[basename_start] == '/') {
-            ++basename_start;
-        }
-
-        return Path{ path.substr(0, dirname_end), path.substr(basename_start) };
-    }
-
     Opt<std::generator<Str>> iter_str(Str path)
     {
         if (path.empty() or path.front() != '/') {

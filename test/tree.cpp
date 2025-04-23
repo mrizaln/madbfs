@@ -1,3 +1,4 @@
+#include "adbfsm/path/path.hpp"
 #include "adbfsm/tree/node.hpp"
 #include "adbfsm/tree/util.hpp"
 #include <adbfsm/tree/file_tree.hpp>
@@ -189,34 +190,36 @@ int main()
 
 #define unwrap() or_else([](auto e) { return raise_expect_error<void>(e); }).value()
 
-        tree.mkdir("/hello").unwrap();
-        tree.touch("/hello/world.txt").unwrap();
-        tree.touch("/hello/foo.txt").unwrap();
-        tree.touch("/hello/movie.mp4").unwrap();
-        tree.mkdir("/hello/bar").unwrap();
-        tree.touch("/hello/bar/baz.txt").unwrap();
-        tree.touch("/hello/bar/qux.txt").unwrap();
-        tree.touch("/hello/bar/quux.txt").unwrap();
-        tree.mkdir("/bye").unwrap();
-        tree.touch("/bye/world.txt").unwrap();
-        tree.touch("/bye/movie.mp4").unwrap();
-        tree.touch("/bye/music.mp3").unwrap();
-        tree.mkdir("/bye/family").unwrap();
-        tree.touch("/bye/family/dad.txt").unwrap();
-        tree.touch("/bye/family/mom.txt").unwrap();
-        tree.mkdir("/bye/friends").unwrap();
-        tree.touch("/bye/friends/bob.txt").unwrap();
-        tree.mkdir("/bye/friends/school").unwrap();
-        tree.touch("/bye/friends/school/kal'tsit.txt").unwrap();
-        tree.touch("/bye/friends/school/closure.txt").unwrap();
-        tree.mkdir("/bye/friends/work").unwrap();
-        tree.touch("/bye/friends/work/loughshinny <3.txt").unwrap();
-        tree.touch("/bye/friends/work/eblana?.mp4").unwrap();
+        using adbfsm::path::operator""_path;
 
-        tree.link("/bye/friends/school/hehe", "/bye/friends/work").unwrap();
-        tree.link("/hello/wife", "/bye/friends/work/loughshinny <3.txt").unwrap();
+        tree.mkdir("/hello"_path).unwrap();
+        tree.touch("/hello/world.txt"_path).unwrap();
+        tree.touch("/hello/foo.txt"_path).unwrap();
+        tree.touch("/hello/movie.mp4"_path).unwrap();
+        tree.mkdir("/hello/bar"_path).unwrap();
+        tree.touch("/hello/bar/baz.txt"_path).unwrap();
+        tree.touch("/hello/bar/qux.txt"_path).unwrap();
+        tree.touch("/hello/bar/quux.txt"_path).unwrap();
+        tree.mkdir("/bye"_path).unwrap();
+        tree.touch("/bye/world.txt"_path).unwrap();
+        tree.touch("/bye/movie.mp4"_path).unwrap();
+        tree.touch("/bye/music.mp3"_path).unwrap();
+        tree.mkdir("/bye/family"_path).unwrap();
+        tree.touch("/bye/family/dad.txt"_path).unwrap();
+        tree.touch("/bye/family/mom.txt"_path).unwrap();
+        tree.mkdir("/bye/friends"_path).unwrap();
+        tree.touch("/bye/friends/bob.txt"_path).unwrap();
+        tree.mkdir("/bye/friends/school"_path).unwrap();
+        tree.touch("/bye/friends/school/kal'tsit.txt"_path).unwrap();
+        tree.touch("/bye/friends/school/closure.txt"_path).unwrap();
+        tree.mkdir("/bye/friends/work"_path).unwrap();
+        tree.touch("/bye/friends/work/loughshinny <3.txt"_path).unwrap();
+        tree.touch("/bye/friends/work/eblana?.mp4"_path).unwrap();
 
-        tree.touch("/bye/theresa.txt").unwrap();
+        tree.link("/bye/friends/school/hehe"_path, "/bye/friends/work"_path).unwrap();
+        tree.link("/hello/wife"_path, "/bye/friends/work/loughshinny <3.txt"_path).unwrap();
+
+        tree.touch("/bye/theresa.txt"_path).unwrap();
 
         // NOTE: taking into account the extra newline at the start
         auto tree_str = fmt::format("\n{}", tree.root());
