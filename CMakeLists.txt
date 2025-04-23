@@ -21,14 +21,17 @@ include(cmake/fetched-libs.cmake) # emits fetch::*
 add_library(adbfsm-lib STATIC)
 target_sources(
     adbfsm-lib
-    PRIVATE source/tree/file_tree.cpp source/tree/node.cpp source/adbfsm.cpp
+    PRIVATE
+        source/path/path.cpp
+        source/tree/file_tree.cpp
+        source/tree/node.cpp
+        source/adbfsm.cpp
 )
 target_link_libraries(
     adbfsm-lib
     PUBLIC
         libfuse::libfuse
         fetch::subprocess
-        fetch::opt-iter
         fmt::fmt
         spdlog::spdlog
 )

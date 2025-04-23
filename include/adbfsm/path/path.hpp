@@ -3,6 +3,7 @@
 #include "adbfsm/common.hpp"
 
 #include <cassert>
+#include <generator>
 #include <print>
 
 namespace adbfsm::path
@@ -20,11 +21,21 @@ namespace adbfsm::path
 
         Path() = default;
 
+        bool is_root() const { return m_dirname == "/" and m_basename == "/"; }
+
         Str filename() const { return m_basename; }
         Str parent() const { return m_dirname; }
         Str fullpath() const { return { m_dirname.begin(), m_basename.end() }; }
 
-        bool is_root() const { return m_dirname == "/" and m_basename == "/"; }
+        /**
+         * @brief Creates generator that iterates over the path.
+         */
+        std::generator<Str> iter() const;
+
+        /**
+         * @brief Creates generator that iterates over the path up till the parent directory.
+         */
+        std::generator<Str> iter_parent() const;
 
     private:
         Path(Str dirname, Str name)
@@ -44,45 +55,15 @@ namespace adbfsm::path
      * Repeating '/' on the leading and trailing edge are ignored. If the repeating '/' is on the middle
      * however, it will be preserved.
      */
-    inline Opt<Path> create(Str path)
-    {
-        if (path.size() == 0 or path.front() != '/') {
-            return std::nullopt;
-        }
+    Opt<Path> create(Str path);
 
-        while (path.size() > 2 and path[0] == '/' and path[1] == '/') {
-            path.remove_prefix(1);
-        }
-        while (path.size() > 1 and path.back() == '/') {
-            path.remove_suffix(1);
-        }
-
-        if (path == "/") {
-            return Path{ "/", "/" };
-        }
-
-        auto prev    = 1uz;
-        auto current = 1uz;
-
-        while (current < path.size()) {
-            while (current < path.size() and path[current] == '/') {
-                ++current;
-            }
-            current = path.find('/', current);
-            if (current == Str::npos) {
-                break;
-            }
-            prev = current;
-        }
-
-        const auto dirname_end = prev;
-
-        // in case the basename contains repeated '//' like in the case '/home/user/documents/////note.md'
-        auto basename_start = prev;
-        while (path[basename_start] == '/') {
-            ++basename_start;
-        }
-
-        return Path{ path.substr(0, dirname_end), path.substr(basename_start) };
-    }
+    /**
+     * @brief Creates a generator that iterates over the path in the given string.
+     *
+     * @param path The path to iterate over.
+     *
+     * This function is here to give a way to opt-out of needing to create `Path` first before iterating
+     * over path string.
+     */
+    Opt<std::generator<Str>> iter_str(Str path);
 }

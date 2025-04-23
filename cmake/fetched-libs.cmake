@@ -13,15 +13,3 @@ FetchContent_MakeAvailable(subprocess)
 
 add_library(fetch::subprocess ALIAS subprocess)
 # ----------
-
-# opt-iter
-# --------
-FetchContent_Declare(
-    opt-iter
-    GIT_REPOSITORY https://github.com/mrizaln/opt-iter
-    GIT_TAG v0.1.0
-)
-FetchContent_MakeAvailable(opt-iter)
-
-add_library(fetch::opt-iter ALIAS opt-iter)
-# -------

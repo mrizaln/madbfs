@@ -22,4 +22,3 @@ enable_testing()
 
 create_test_exe(tree)
 create_test_exe(path)
-create_test_exe(path_iter)
