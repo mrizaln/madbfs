@@ -140,6 +140,42 @@ String diff_str(Str str1, Str str2)
     return '\n' + sep("[ expect ]") + left + sep("[ actual ]") + right;
 }
 
+namespace mock
+{
+    using namespace adbfsm;
+    using namespace adbfsm::data;
+
+    class DummyConnection : public IConnection
+    {
+    public:
+        Expect<std::generator<ParsedStat>> stat_dir(path::Path) override    // unused
+        {
+            return std::unexpected{ std::errc::inappropriate_io_control_operation };
+        }
+
+        Expect<ParsedStat> stat(path::Path path) override
+        {
+            return ParsedStat{ .stat = {}, .path = path.fullpath(), .link_to = {} };
+        }
+
+        Expect<void> touch(path::Path) override { return {}; }
+        Expect<void> mkdir(path::Path) override { return {}; }
+        Expect<void> rm(path::Path, bool) override { return {}; }
+        Expect<void> rmdir(path::Path) override { return {}; }
+        Expect<void> mv(path::Path, path::Path) override { return {}; }
+        Expect<void> pull(path::Path, path::Path) override { return {}; }
+        Expect<void> push(path::Path, path::Path) override { return {}; }
+    };
+
+    class DummyCache : public ICache
+    {
+    public:
+        const Entry*         get(Id) const override { return nullptr; }
+        Expect<const Entry*> add(IConnection&, path::Path) override { return nullptr; };
+        bool                 remove(Id) override { return true; }
+    };
+}
+
 int main()
 {
     using namespace ut::literals;
@@ -153,48 +189,54 @@ int main()
 
 #define unwrap() or_else([](auto e) { return raise_expect_error<Node*>(e); }).value()
 
-        auto root = Node{ "/", nullptr, Directory{} };
+        using adbfsm::path::operator""_path;
 
-        auto* hello = root.mkdir("hello").unwrap();
+        auto connection = mock::DummyConnection{};
+        auto cache      = mock::DummyCache{};
+        auto context    = Node::Context{ connection, cache, "/dummy"_path };
 
-        _ = hello->touch("world.txt").unwrap();
-        _ = hello->touch("foo.txt").unwrap();
-        _ = hello->touch("movie.mp4").unwrap();
+        auto root = Node{ "/", nullptr, {}, Directory{} };
 
-        auto* bar = hello->mkdir("bar").unwrap();
+        auto* hello = root.mkdir("hello", context).unwrap();
 
-        _ = bar->touch("baz.txt").unwrap();
-        _ = bar->touch("qux.txt").unwrap();
-        _ = bar->touch("quux.txt").unwrap();
+        _ = hello->touch("world.txt", context).unwrap();
+        _ = hello->touch("foo.txt", context).unwrap();
+        _ = hello->touch("movie.mp4", context).unwrap();
 
-        auto* bye = root.mkdir("bye").unwrap();
+        auto* bar = hello->mkdir("bar", context).unwrap();
 
-        _ = bye->touch("world.txt").unwrap();
-        _ = bye->touch("movie.mp4").unwrap();
-        _ = bye->touch("music.mp3").unwrap();
+        _ = bar->touch("baz.txt", context).unwrap();
+        _ = bar->touch("qux.txt", context).unwrap();
+        _ = bar->touch("quux.txt", context).unwrap();
 
-        auto* family = bye->mkdir("family").unwrap();
+        auto* bye = root.mkdir("bye", context).unwrap();
 
-        _ = family->touch("dad.txt").unwrap();
-        _ = family->touch("mom.txt").unwrap();
+        _ = bye->touch("world.txt", context).unwrap();
+        _ = bye->touch("movie.mp4", context).unwrap();
+        _ = bye->touch("music.mp3", context).unwrap();
 
-        auto* friends = bye->mkdir("friends").unwrap();
+        auto* family = bye->mkdir("family", context).unwrap();
 
-        _ = friends->touch("bob.txt").unwrap();
+        _ = family->touch("dad.txt", context).unwrap();
+        _ = family->touch("mom.txt", context).unwrap();
 
-        auto* school = friends->mkdir("school").unwrap();
+        auto* friends = bye->mkdir("friends", context).unwrap();
 
-        _ = school->touch("kal'tsit.txt").unwrap();
-        _ = school->touch("closure.txt").unwrap();
+        _ = friends->touch("bob.txt", context).unwrap();
 
-        auto* work = friends->mkdir("work").unwrap();
+        auto* school = friends->mkdir("school", context).unwrap();
 
-        auto* wife = work->touch("loughshinny <3.txt").unwrap();
+        _ = school->touch("kal'tsit.txt", context).unwrap();
+        _ = school->touch("closure.txt", context).unwrap();
 
-        _ = work->touch("eblana?.mp4").unwrap();
-        _ = school->link("hehe", work).unwrap();
-        _ = hello->link("wife", wife).unwrap();
-        _ = bye->touch("theresa.txt").unwrap();
+        auto* work = friends->mkdir("work", context).unwrap();
+
+        auto* wife = work->touch("loughshinny <3.txt", context).unwrap();
+
+        _ = work->touch("eblana?.mp4", context).unwrap();
+        _ = school->link("hehe", work, context).unwrap();
+        _ = hello->link("wife", wife, context).unwrap();
+        _ = bye->touch("theresa.txt", context).unwrap();
 
         auto tree_str = fmt::format("\n{}", root);
         expect(expected == tree_str) << diff_str(expected, tree_str);
@@ -205,7 +247,10 @@ int main()
     "constructed FileTree have same shape"_test = [&] {
         using namespace adbfsm::tree;
 
-        auto tree = FileTree{};
+        auto connection = mock::DummyConnection{};
+        auto cache      = mock::DummyCache{};
+
+        auto tree = FileTree{ connection, cache };
 
 #define unwrap() or_else([](auto e) { return raise_expect_error<void>(e); }).value()
 
