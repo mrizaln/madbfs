@@ -13,30 +13,36 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(fmt REQUIRED)
-find_package(spdlog REQUIRED)
 find_package(libfuse REQUIRED)
+find_package(rapidhash REQUIRED)
+find_package(reproc++ REQUIRED)
+find_package(spdlog REQUIRED)
 
-include(cmake/fetched-libs.cmake) # emits fetch::*
+include(cmake/fetched-libs.cmake)
 
 add_library(adbfsm-lib STATIC)
 target_sources(
     adbfsm-lib
     PRIVATE
+        source/adbfsm.cpp
+        source/data/cache.cpp
+        source/data/connection.cpp
         source/path/path.cpp
         source/tree/file_tree.cpp
         source/tree/node.cpp
-        source/adbfsm.cpp
+        source/tree/node.cpp
 )
 target_link_libraries(
     adbfsm-lib
     PUBLIC
-        libfuse::libfuse
-        fetch::subprocess
         fmt::fmt
+        libfuse::libfuse
+        rapidhash::rapidhash
+        reproc::reproc
         spdlog::spdlog
+        fetch::subprocess
 )
 target_include_directories(adbfsm-lib PUBLIC include)
-target_include_directories(adbfsm-lib PRIVATE source)
 
 add_executable(adbfsm source/main.cpp)
 target_link_libraries(adbfsm PRIVATE adbfsm-lib)
