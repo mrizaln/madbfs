@@ -18,11 +18,13 @@ namespace adbfsm::path
     class Path
     {
     public:
+        friend class PathBuf;
         friend constexpr Opt<Path> create(Str path);
 
         constexpr Path() = default;
 
         constexpr bool is_root() const { return m_dirname == "/" and m_basename == "/"; }
+        constexpr bool is_dir() const { return m_is_dir; }
 
         constexpr Str filename() const { return m_basename; }
         constexpr Str parent() const { return m_dirname; }
@@ -39,14 +41,40 @@ namespace adbfsm::path
         std::generator<Str> iter_parent() const;
 
     private:
-        constexpr Path(Str dirname, Str name)
+        constexpr Path(Str dirname, Str name, bool is_dir)
             : m_dirname{ dirname }
             , m_basename{ name }
+            , m_is_dir{ is_dir }
         {
         }
 
-        Str m_dirname;
-        Str m_basename;
+        Str  m_dirname;
+        Str  m_basename;
+        bool m_is_dir = false;
+    };
+
+    /**
+     * @class PathBuf
+     * @brief Represent a file path in Linux system that owns its path buffer.
+     */
+    class PathBuf
+    {
+    public:
+        PathBuf(Path path)
+            : m_buf{ path.fullpath() }
+            , m_path{
+                { m_buf.data(), path.parent().size() },
+                { m_buf.data() + (path.filename().data() - path.fullpath().data()), path.filename().size() },
+                path.is_dir(),
+            }
+        {
+        }
+
+        Path as_path() { return m_path; }
+
+    private:
+        String m_buf;
+        Path   m_path;
     };
 
     /**
@@ -62,15 +90,17 @@ namespace adbfsm::path
             return std::nullopt;
         }
 
+        auto is_dir = false;
+        while (path.size() > 1 and path.back() == '/') {
+            is_dir = true;
+            path.remove_suffix(1);
+        }
         while (path.size() > 2 and path[0] == '/' and path[1] == '/') {
             path.remove_prefix(1);
         }
-        while (path.size() > 1 and path.back() == '/') {
-            path.remove_suffix(1);
-        }
 
         if (path == "/") {
-            return Path{ "/", "/" };
+            return Path{ "/", "/", true };
         }
 
         auto prev    = 1uz;
@@ -104,7 +134,7 @@ namespace adbfsm::path
             ++basename_start;
         }
 
-        return Path{ path.substr(0, dirname_end), path.substr(basename_start) };
+        return Path{ path.substr(0, dirname_end), path.substr(basename_start), is_dir };
     }
 
     /**
