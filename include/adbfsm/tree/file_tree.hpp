@@ -1,5 +1,6 @@
 #pragma once
 
+#include "adbfsm/data/connection.hpp"
 #include "adbfsm/path/path.hpp"
 #include "adbfsm/tree/node.hpp"
 
@@ -14,15 +15,13 @@ namespace adbfsm::tree
     class FileTree
     {
     public:
-        FileTree()
-            : m_root{ "/", nullptr, Directory{} }
-        {
-        }
+        FileTree(data::IConnection& connection, data::ICache& cache);
 
-        FileTree(Node&& root)
-            : m_root{ std::move(root) }
-        {
-        }
+        FileTree(Node&& root)            = delete;
+        FileTree& operator=(Node&& root) = delete;
+
+        FileTree(const Node& root)            = delete;
+        FileTree& operator=(const Node& root) = delete;
 
         /**
          * @brief Get a node by the given path.
@@ -61,11 +60,21 @@ namespace adbfsm::tree
          */
         Expect<void> rm(path::Path path, bool recursive);
 
+        /**
+         * @brief Remove a directory by its path
+         *
+         * @param path The path to the file.
+         * @param recursive Set to true to allow deleting file even if it's not the leaf node.
+         */
+        Expect<void> rmdir(path::Path path);
+
         const Node& root() const { return m_root; }
 
     private:
         Expect<Node*> traverse_parent(path::Path path);
 
-        Node m_root;
+        Node               m_root;
+        data::ICache&      m_cache;
+        data::IConnection& m_connection;
     };
 }
