@@ -1,6 +1,9 @@
 #pragma once
 
 #include "adbfsm/common.hpp"
+#include "adbfsm/data/cache.hpp"
+#include "adbfsm/data/connection.hpp"
+#include "adbfsm/data/stat.hpp"
 #include "adbfsm/tree/util.hpp"
 
 #include <sys/types.h>
@@ -19,18 +22,11 @@ namespace adbfsm::tree
 
     using File = Var<RegularFile, Directory, Link, Other>;
 
-    struct Stat
-    {
-        mode_t    mode  = 0;    // -rwxrwxrwx
-        nlink_t   links = 1;
-        uid_t     uid   = 0;
-        gid_t     gid   = 0;
-        off_t     size  = 0;
-        Timestamp mtime = {};    // last modification time
-    };
-
     class RegularFile
     {
+    public:
+    private:
+        i32 m_fd = -1;    // negative means not opened
     };
 
     class Directory
@@ -99,13 +95,17 @@ namespace adbfsm::tree
     class Node
     {
     public:
-        friend class FileTree;
+        struct Context
+        {
+            data::IConnection& connection;
+            data::ICache&      cache;
+            path::Path         path;    // path for connection
+        };
 
-        Node(Str name, Node* parent, File value)
-            : m_id{ ++s_id_counter }    // start from 1
-            , m_name{ name }
+        Node(Str name, Node* parent, data::Stat stat, File value)
+            : m_name{ name }
             , m_parent{ parent }
-            , m_stat{ .mtime = Clock::now() }
+            , m_stat{ std::move(stat) }
             , m_value{ std::move(value) }
         {
         }
@@ -134,11 +134,11 @@ namespace adbfsm::tree
         template <typename... Fs>
         decltype(auto) visit(util::Overload<Fs...>&& visitor) const;
 
-        u64   id() const { return m_id; }
-        Str   name() const { return m_name; }
-        Node* parent() const { return m_parent; }
+        data::Id id() const { return m_id; }
+        Str      name() const { return m_name; }
+        Node*    parent() const { return m_parent; }
 
-        const Stat& stat() const { return m_stat; }
+        const data::Stat& stat() const { return m_stat; }
 
         Str    printable_type() const;
         String build_path() const;
@@ -146,37 +146,50 @@ namespace adbfsm::tree
         void refresh_stat()
         {
             auto lock    = util::Lock{ m_operated };
-            m_stat.mtime = Clock::now();
+            m_stat.mtime = Clock::to_time_t(Clock::now());
         }
 
         /**
          * @brief Create a new child node as RegularFile or touch an existing one.
          *
          * @param name The name of the child node.
+         * @param context Context needed to communicate with device and local.
          */
-        Expect<Node*> touch(Str name);
+        Expect<Node*> touch(Str name, Context context);
 
         /**
          * @brief Create a new child node as Directory.
          *
          * @param name The name of the directory.
+         * @param context Context needed to communicate with device and local.
          */
-        Expect<Node*> mkdir(Str name);
+        Expect<Node*> mkdir(Str name, Context context);
 
         /**
          * @brief Create a new child node as Link.
          *
          * @param name The name of the link.
          * @param target The target of the link.
+         * @param context Context needed to communicate with device and local.
          */
-        Expect<Node*> link(Str name, Node* target);
+        Expect<Node*> link(Str name, Node* target, Context context);
 
         /**
-         * @brief Remove a child node by its name.
+         * @brief Remove a child node by its name (RegularFile or Directory).
          *
          * @param name The name of the child node.
+         * @param recursive Whether to remove recursively or not.
+         * @param context Context needed to communicate with device and local.
          */
-        Expect<void> remove(Str name);
+        Expect<void> rm(Str name, bool recursive, Context context);
+
+        /**
+         * @brief Remove a child node by its name (Directory).
+         *
+         * @param name The name of the child node.
+         * @param context Context needed to communicate with device and local.
+         */
+        Expect<void> rmdir(Str name, Context context);
 
     private:
         inline static std::atomic<u64> s_id_counter = 0;
@@ -192,10 +205,10 @@ namespace adbfsm::tree
             other.m_parent = nullptr;
         }
 
-        u64         m_id     = 0;
+        data::Id    m_id     = {};
         std::string m_name   = {};
         Node*       m_parent = nullptr;
-        Stat        m_stat   = {};
+        data::Stat  m_stat   = {};
         File        m_value;
 
         mutable std::atomic<bool> m_operated = false;
