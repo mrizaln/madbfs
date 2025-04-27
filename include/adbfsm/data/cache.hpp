@@ -57,8 +57,7 @@ namespace adbfsm::data
         virtual Expect<const Entry*> add(IConnection& connection, path::Path path) = 0;
         virtual bool                 remove(Id id)                                 = 0;
 
-    protected:
-        ~ICache() = default;
+        virtual ~ICache() = default;
     };
 
     /**

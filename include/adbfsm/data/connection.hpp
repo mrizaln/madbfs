@@ -33,8 +33,7 @@ namespace adbfsm::data
         virtual Expect<void>                       pull(path::Path from, path::Path to) = 0;
         virtual Expect<void>                       push(path::Path from, path::Path to) = 0;
 
-    protected:
-        ~IConnection() = default;
+        virtual ~IConnection() = default;
     };
 
     class Connection : public IConnection
