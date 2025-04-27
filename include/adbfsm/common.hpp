@@ -1,5 +1,7 @@
 #pragma once
 
+#include <rapidhash.h>
+
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -99,3 +101,11 @@ namespace adbfsm
         // clang-format on
     }
 }
+
+// enable hashing for any type that has unique object representation
+template <typename T>
+    requires std::has_unique_object_representations_v<T>
+struct std::hash<T>
+{
+    std::size_t operator()(const T& value) const noexcept { return rapidhash(&value, sizeof(T)); }
+};
