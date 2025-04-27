@@ -45,6 +45,21 @@ namespace adbfsm::tree
         return current;
     }
 
+    Expect<Node*> Node::build(Str name, data::Stat stat, File file)
+    {
+        auto* dir = as<Directory>();
+        if (dir == nullptr) {
+            return std::unexpected{ std::errc::not_a_directory };
+        }
+
+        auto node = std::make_unique<Node>(name, this, std::move(stat), std::move(file));
+        return dir->add_node(std::move(node), false).transform([](auto&& pair) {
+            auto [node, overwrite] = pair;
+            assert(not overwrite);    // NOTE: overwriting the value is not allowed on build mode,
+            return node;
+        });
+    }
+
     Expect<Node*> Node::touch(Str name, Context context)
     {
         auto lock = util::Lock{ m_operated };

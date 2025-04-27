@@ -88,6 +88,12 @@ namespace adbfsm::tree
         Node* m_target;    // how do I signal node not exist anymore?
     };
 
+    /**
+     * @class Other
+     * @brief For files other than regular file, directory, or link.
+     *
+     * Block files, character files, socket file, etc. should use this type.
+     */
     class Other
     {
     };
@@ -148,6 +154,19 @@ namespace adbfsm::tree
             auto lock    = util::Lock{ m_operated };
             m_stat.mtime = Clock::to_time_t(Clock::now());
         }
+
+        /**
+         * @brief Create a new node without any call to connection or cache with this node as its parent.
+         *
+         * @param name The name of the new node.
+         * @param stat Stat of the new node.
+         * @param file The kind of the node.
+         *
+         * This function is used to build a new node from existing filetree on the device. Instead of
+         * operating on the file on the device itself, this function just modify the nodes. This function
+         * assume that the build process won't overwrite any node.
+         */
+        Expect<Node*> build(Str name, data::Stat stat, File file);
 
         /**
          * @brief Create a new child node as RegularFile or touch an existing one.

@@ -4,6 +4,8 @@
 #include "adbfsm/path/path.hpp"
 #include "adbfsm/tree/node.hpp"
 
+#include <mutex>
+
 namespace adbfsm::tree
 {
     /**
@@ -22,6 +24,13 @@ namespace adbfsm::tree
 
         FileTree(const Node& root)            = delete;
         FileTree& operator=(const Node& root) = delete;
+
+        /**
+         * @brief Traverse the node or build a new node.
+         *
+         * @param path Path to the node.
+         */
+        Expect<Node*> traverse_or_build(path::Path path);
 
         /**
          * @brief Get a node by the given path.
@@ -76,5 +85,7 @@ namespace adbfsm::tree
         Node               m_root;
         data::ICache&      m_cache;
         data::IConnection& m_connection;
+
+        std::mutex m_mutex;
     };
 }
