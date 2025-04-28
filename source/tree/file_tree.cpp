@@ -4,8 +4,6 @@
 
 namespace
 {
-    static constexpr auto bash_escapes = { "<>|*?\"\\" };
-
     // dumb unescape function, it will skip '\' in a string
     adbfsm::String& unescape(adbfsm::String& str)
     {
@@ -54,29 +52,6 @@ namespace adbfsm::tree
     {
     }
 
-    Expect<Node*> FileTree::traverse_parent(path::Path path)
-    {
-        if (path.is_root() or path.parent() == "/") {
-            return &m_root;
-        }
-
-        auto* current = &m_root;
-
-        for (auto name : path.iter_parent() | sv::drop(1)) {
-            auto* dir = current->as<Directory>();
-            if (dir == nullptr) {
-                return std::unexpected{ std::errc::not_a_directory };
-            }
-            auto* node = dir->find(name);
-            if (node == nullptr) {
-                return std::unexpected{ std::errc::no_such_file_or_directory };
-            }
-            current = node;
-        }
-
-        return current;
-    }
-
     Expect<Node*> FileTree::traverse(path::Path path)
     {
         if (path.is_root()) {
@@ -90,11 +65,11 @@ namespace adbfsm::tree
             if (dir == nullptr) {
                 return std::unexpected{ std::errc::not_a_directory };
             }
-            auto* node = dir->find(name);
-            if (node == nullptr) {
-                return std::unexpected{ std::errc::no_such_file_or_directory };
+            auto node = dir->find(name);
+            if (not node.has_value()) {
+                return std::unexpected{ node.error() };
             }
-            current = node;
+            current = node.value();
         }
 
         return current;
@@ -109,18 +84,16 @@ namespace adbfsm::tree
         auto* current      = &m_root;
         auto  current_path = String{};
 
-        auto lock = std::scoped_lock{ m_mutex };
-
         // iterate until parent
-        for (auto name : path.iter_parent() | sv::drop(1)) {
+        for (auto name : path.parent_path().iter() | sv::drop(1)) {
             auto* dir = current->as<Directory>();
             if (dir == nullptr) {
                 return std::unexpected{ std::errc::not_a_directory };
             }
 
-            auto* node = dir->find(name);
-            if (node != nullptr) {
-                current = node;
+            auto node = dir->find(name);
+            if (node.has_value()) {
+                current = node.value();
                 continue;
             }
 
@@ -183,27 +156,91 @@ namespace adbfsm::tree
         return std::unexpected{ std::errc::no_such_file_or_directory };
     }
 
-    Expect<void> FileTree::touch(path::Path path)
+    Expect<const data::Stat*> FileTree::getattr(path::Path path)
     {
         auto lock = std::scoped_lock{ m_mutex };
 
-        auto context = Node::Context{ m_connection, m_cache, path };
-        return traverse_parent(path)
-            .and_then([&](Node* node) { return node->touch(path.filename(), context); })
-            .transform(sink_void);
+        return traverse_or_build(path)    //
+            .transform([](Node* node) { return &node->stat(); });
     }
 
-    Expect<void> FileTree::mkdir(path::Path path)
+    Expect<Node*> FileTree::readlink(path::Path path)
     {
         auto lock = std::scoped_lock{ m_mutex };
 
-        auto context = Node::Context{ m_connection, m_cache, path };
-        return traverse_parent(path)
-            .and_then([&](Node* node) { return node->mkdir(path.filename(), context); })
+        return traverse_or_build(path)    //
+            .and_then([](Node* node) { return ptr_ok_or(node->as<Link>(), std::errc::invalid_argument); })
+            .transform([](Link* node) { return node->target(); });
+    }
+
+    Expect<Node*> FileTree::mknod(path::Path path)
+    {
+        auto lock = std::scoped_lock{ m_mutex };
+
+        auto parent = path.parent_path();
+        return traverse_or_build(parent)    //
+            .and_then([&](Node* node) {
+                return node->touch(path.filename(), { m_connection, m_cache, path });
+            });
+    }
+
+    Expect<Node*> FileTree::mkdir(path::Path path)
+    {
+        auto lock = std::scoped_lock{ m_mutex };
+
+        auto parent = path.parent_path();
+        return traverse_or_build(parent)    //
+            .and_then([&](Node* node) {
+                return node->mkdir(path.filename(), { m_connection, m_cache, path });
+            });
+    }
+
+    Expect<void> FileTree::unlink(path::Path path)
+    {
+        auto lock = std::scoped_lock{ m_mutex };
+
+        auto parent = path.parent_path();
+        return traverse_or_build(parent)    //
+            .and_then([&](Node* node) {
+                return node->rm(path.filename(), false, { m_connection, m_cache, path });
+            });
+    }
+
+    Expect<void> FileTree::rmdir(path::Path path)
+    {
+        auto lock = std::scoped_lock{ m_mutex };
+
+        auto parent = path.parent_path();
+        return traverse_or_build(parent)    //
+            .and_then([&](Node* node) {
+                return node->rmdir(path.filename(), { m_connection, m_cache, path });
+            });
+    }
+
+    Expect<void> FileTree::rename(path::Path from, path::Path to)
+    {
+        auto lock = std::scoped_lock{ m_mutex };
+
+        auto from_node = traverse_or_build(from);
+        if (not from_node.has_value()) {
+            return std::unexpected{ from_node.error() };
+        }
+
+        // TODO: manage cache also
+        return m_connection.mv(from, to)
+            .and_then([&] { return traverse(from.parent_path()); })
+            .and_then([&](Node* node) { return node->extract(from.filename()); })
+            .and_then([&](Uniq<Node>&& node) {
+                return traverse(to.parent_path()).and_then([&](Node* to_parent) {
+                    node->set_name(to.filename());
+                    node->set_parent(to_parent);
+                    return to_parent->insert(std::move(node), true);
+                });
+            })
             .transform(sink_void);
     }
 
-    Expect<void> FileTree::link(path::Path path, path::Path target)
+    Expect<void> FileTree::symlink(path::Path path, path::Path target)
     {
         auto lock = std::scoped_lock{ m_mutex };
 
@@ -214,28 +251,8 @@ namespace adbfsm::tree
         }
 
         auto context = Node::Context{ m_connection, m_cache, path };
-        return traverse_parent(path)
+        return traverse(path.parent_path())
             .and_then([&](Node* node) { return node->link(path.filename(), *target_node, context); })
             .transform(sink_void);
-    }
-
-    Expect<void> FileTree::rm(path::Path path, bool recursive)
-    {
-        auto lock = std::scoped_lock{ m_mutex };
-
-        auto context = Node::Context{ m_connection, m_cache, path };
-        return traverse_parent(path).and_then([&](Node* parent) {
-            return parent->rm(path.filename(), recursive, context);
-        });
-    }
-
-    Expect<void> FileTree::rmdir(path::Path path)
-    {
-        auto lock = std::scoped_lock{ m_mutex };
-
-        auto context = Node::Context{ m_connection, m_cache, path };
-        return traverse_parent(path).and_then([&](Node* parent) {
-            return parent->rmdir(path.filename(), context);
-        });
     }
 }

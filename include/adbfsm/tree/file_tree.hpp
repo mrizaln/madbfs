@@ -26,61 +26,30 @@ namespace adbfsm::tree
         FileTree& operator=(const Node& root) = delete;
 
         /**
-         * @brief Traverse the node or build a new node.
-         *
-         * @param path Path to the node.
-         */
-        Expect<Node*> traverse_or_build(path::Path path);
-
-        /**
          * @brief Get a node by the given path.
          *
          * @param path The path to the node.
          */
         Expect<Node*> traverse(path::Path path);
 
-        /**
-         * @brief Create a new file at the given path.
-         *
-         * @param path The path to the file.
-         */
-        Expect<void> touch(path::Path path);
-
-        /**
-         * @brief Create a new directory at the given path.
-         *
-         * @param path The path to the directory.
-         */
-        Expect<void> mkdir(path::Path path);
-
-        /**
-         * @brief Create a new symbolic link at the given path.
-         *
-         * @param path The path to the symbolic link.
-         * @param target The target of the symbolic link.
-         */
-        Expect<void> link(path::Path path, path::Path target);
-
-        /**
-         * @brief Remove a file by its path
-         *
-         * @param path The path to the file.
-         * @param recursive Set to true to allow deleting file even if it's not the leaf node.
-         */
-        Expect<void> rm(path::Path path, bool recursive);
-
-        /**
-         * @brief Remove a directory by its path
-         *
-         * @param path The path to the file.
-         * @param recursive Set to true to allow deleting file even if it's not the leaf node.
-         */
-        Expect<void> rmdir(path::Path path);
+        Expect<const data::Stat*> getattr(path::Path path);
+        Expect<Node*>             readlink(path::Path path);
+        Expect<Node*>             mknod(path::Path path);
+        Expect<Node*>             mkdir(path::Path path);
+        Expect<void>              unlink(path::Path path);
+        Expect<void>              rmdir(path::Path path);
+        Expect<void>              rename(path::Path from, path::Path to);
+        Expect<void>              symlink(path::Path path, path::Path target);
 
         const Node& root() const { return m_root; }
 
     private:
-        Expect<Node*> traverse_parent(path::Path path);
+        /**
+         * @brief Traverse the node or build a new node.
+         *
+         * @param path Path to the node.
+         */
+        Expect<Node*> traverse_or_build(path::Path path);
 
         Node               m_root;
         data::ICache&      m_cache;
