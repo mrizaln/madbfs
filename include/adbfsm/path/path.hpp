@@ -30,15 +30,34 @@ namespace adbfsm::path
         constexpr Str parent() const { return m_dirname; }
         constexpr Str fullpath() const { return { m_dirname.begin(), m_basename.end() }; }
 
+        constexpr Path parent_path() const
+        {
+            if (m_dirname == "/") {
+                return { "/", "/", true };
+            }
+
+            auto base_start = m_dirname.size();
+            while (m_dirname[--base_start] != '/') { }
+
+            auto dir_end = base_start;
+            while (dir_end > 0 and m_dirname[dir_end] == '/') {
+                --dir_end;
+            }
+
+            auto begin = m_dirname.begin();
+            auto end   = m_dirname.end();
+
+            if (dir_end == 0) {
+                return { { begin, begin + base_start + 1 }, { begin + base_start + 1, end }, true };
+            }
+
+            return { { begin, begin + dir_end + 1 }, { begin + base_start + 1, end }, true };
+        }
+
         /**
          * @brief Creates generator that iterates over the path.
          */
         std::generator<Str> iter() const;
-
-        /**
-         * @brief Creates generator that iterates over the path up till the parent directory.
-         */
-        std::generator<Str> iter_parent() const;
 
     private:
         constexpr Path(Str dirname, Str name, bool is_dir)
@@ -136,16 +155,6 @@ namespace adbfsm::path
 
         return Path{ path.substr(0, dirname_end), path.substr(basename_start), is_dir };
     }
-
-    /**
-     * @brief Creates a generator that iterates over the path in the given string.
-     *
-     * @param path The path to iterate over.
-     *
-     * This function is here to give a way to opt-out of needing to create `Path` first before iterating
-     * over path string.
-     */
-    Opt<std::generator<Str>> iter_str(Str path);
 }
 
 namespace adbfsm::path::inline literals
