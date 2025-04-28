@@ -39,7 +39,7 @@ namespace adbfsm::tree
          *
          * @param name The name of the node to check.
          */
-        Node* find(Str name) const;
+        Expect<Node*> find(Str name) const;
 
         /**
          * @brief Erase a file by its name.
@@ -55,9 +55,16 @@ namespace adbfsm::tree
          * @param node The node to add.
          * @param overwrite If true, overwrite the existing node with the same name.
          *
-         * @return A pair containing the added node and a boolean indicating if it was overwritten.
+         * @return A pair containing the added node and overwriten node if overwrite happens.
          */
-        Expect<Pair<Node*, bool>> add_node(Uniq<Node> node, bool overwrite);
+        Expect<Opt<Uniq<Node>>> insert(Uniq<Node> node, bool overwrite);
+
+        /**
+         * @brief Extract a node.
+         *
+         * @param name The name of the node.
+         */
+        Expect<Uniq<Node>> extract(Str name);
 
         Span<const Uniq<Node>> children() const { return m_children; }
 
@@ -116,14 +123,20 @@ namespace adbfsm::tree
         {
         }
 
-        Node(Node&& other)
-            : Node{ std::move(other), util::Lock{ other.m_operated } }
-        {
-        }
-
+        Node(Node&&)                  = delete;
         Node& operator=(Node&& other) = delete;
-        Node& operator=(const Node&)  = delete;
-        Node(const Node&)             = delete;
+
+        Node(const Node&)            = delete;
+        Node& operator=(const Node&) = delete;
+
+        void swap(Node& other) noexcept
+        {
+            std::swap(m_id, other.m_id);
+            std::swap(m_name, other.m_name);
+            std::swap(m_parent, other.m_parent);
+            std::swap(m_stat, other.m_stat);
+            std::swap(m_value, other.m_value);
+        }
 
         template <typename T>
         bool is() const;
@@ -134,26 +147,21 @@ namespace adbfsm::tree
         template <typename T>
         const T* as() const;
 
-        template <typename... Fs>
-        decltype(auto) visit(util::Overload<Fs...>&& visitor);
+        void set_id(data::Id id) { m_id = id; }
+        void set_name(Str name) { m_name = name; }
+        void set_parent(Node* parent) { m_parent = parent; }
 
-        template <typename... Fs>
-        decltype(auto) visit(util::Overload<Fs...>&& visitor) const;
-
-        data::Id id() const { return m_id; }
-        Str      name() const { return m_name; }
-        Node*    parent() const { return m_parent; }
+        data::Id    id() const { return m_id; }
+        Str         name() const { return m_name; }
+        Node*       parent() const { return m_parent; }
+        const File& value() const { return m_value; }
 
         const data::Stat& stat() const { return m_stat; }
 
         Str    printable_type() const;
         String build_path() const;
 
-        void refresh_stat()
-        {
-            auto lock    = util::Lock{ m_operated };
-            m_stat.mtime = Clock::to_time_t(Clock::now());
-        }
+        void refresh_stat() { m_stat.mtime = Clock::to_time_t(Clock::now()); }
 
         /**
          * @brief Create a new node without any call to connection or cache with this node as its parent.
@@ -167,6 +175,26 @@ namespace adbfsm::tree
          * assume that the build process won't overwrite any node.
          */
         Expect<Node*> build(Str name, data::Stat stat, File file);
+
+        /**
+         * @brief Extract a child node.
+         *
+         * @param name The name of the node.
+         *
+         * Since it extracts a child node, it only works on Directory.
+         */
+        Expect<Uniq<Node>> extract(Str name);
+
+        /**
+         * @brief Insert a node into another node.
+         *
+         * @param node The node to be inserted.
+         *
+         * @return Overwritten node if overwrite happen, else nullopt.
+         *
+         * Since the insertion is basically adding a child node, it only works on Directory.
+         */
+        Expect<Opt<Uniq<Node>>> insert(Uniq<Node> node, bool overwrite);
 
         /**
          * @brief Create a new child node as RegularFile or touch an existing one.
@@ -213,24 +241,11 @@ namespace adbfsm::tree
     private:
         inline static std::atomic<u64> s_id_counter = 0;
 
-        // proxy move constructor, with lock
-        Node(Node&& other, util::Lock)
-            : m_id{ other.m_id }
-            , m_name{ std::move(other.m_name) }
-            , m_parent{ other.m_parent }
-            , m_stat{ other.m_stat }
-            , m_value{ std::move(other.m_value) }
-        {
-            other.m_parent = nullptr;
-        }
-
         data::Id    m_id     = {};
         std::string m_name   = {};
         Node*       m_parent = nullptr;
         data::Stat  m_stat   = {};
         File        m_value;
-
-        mutable std::atomic<bool> m_operated = false;
     };
 }
 
@@ -258,28 +273,15 @@ namespace adbfsm::tree
         return std::get_if<T>(&m_value);
     }
 
-    template <typename... Fs>
-    decltype(auto) Node::visit(util::Overload<Fs...>&& visitor)
-    {
-        auto lock = util::Lock{ m_operated };
-        return std::visit(std::forward<decltype(visitor)>(visitor), m_value);
-    }
-
-    template <typename... Fs>
-    decltype(auto) Node::visit(util::Overload<Fs...>&& visitor) const
-    {
-        auto lock = util::Lock{ m_operated };
-        return std::visit(std::forward<decltype(visitor)>(visitor), m_value);
-    }
-
     inline Str Node::printable_type() const
     {
-        return visit(util::Overload{
+        auto visitor = util::Overload{
             [](const RegularFile&) { return "file"; },
             [](const Directory&) { return "directory"; },
             [](const Link&) { return "link"; },
             [](const Other&) { return "other"; },
-        });
+        };
+        return std::visit(visitor, m_value);
     }
 
     inline String Node::build_path() const
