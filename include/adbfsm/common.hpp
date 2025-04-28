@@ -78,6 +78,26 @@ namespace adbfsm
     {
         inline constexpr auto sink_void = [](auto&&) { };
         inline constexpr auto sink_unit = [](auto&&) { return Unit{}; };
+
+        template <typename T>
+        Expect<T> ok_or(Opt<T>&& opt, std::errc err)
+        {
+            if (opt.has_value()) {
+                return std::move(opt).value();
+            } else {
+                return std::unexpected{ err };
+            }
+        }
+
+        template <typename T>
+        Expect<T*> ptr_ok_or(T* opt, std::errc err)
+        {
+            if (opt != nullptr) {
+                return opt;
+            } else {
+                return std::unexpected{ err };
+            }
+        }
     }
 
     inline namespace literals
