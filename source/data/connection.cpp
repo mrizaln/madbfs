@@ -205,24 +205,6 @@ namespace
             .link_to = link,
         };
     }
-
-    // TODO: make this right
-    String resolve_path(Str parent, Str path)
-    {
-        auto resolved    = String{};
-        auto num_slashes = sr::count(parent | sv::drop(1), '/');
-
-        auto pos = 0uz;
-        while (path[pos] == '/') {
-            ++pos;
-        }
-        for (; num_slashes; --num_slashes) {
-            resolved.append("../");
-        }
-
-        resolved.append(path.data() + pos, path.size() - pos);
-        return resolved;
-    }
 }
 
 namespace adbfsm::data
