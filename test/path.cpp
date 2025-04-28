@@ -14,6 +14,8 @@ using namespace adbfsm::aliases;
 struct TestConstruct
 {
     Str  input;
+    Str  upper_parent;
+    Str  upper_filename;
     Str  parent;
     Str  filename;
     bool is_dir;
@@ -27,131 +29,180 @@ struct TestIter
 
 std::ostream& operator<<(std::ostream& out, const TestConstruct& test)
 {
-    auto [input, parent, filename, _] = test;
-    fmt::print(out, "input: [{}] | dirname: [{}] | basename: [{}]", input, parent, filename);
+    auto [input, upper_parent, upper_filename, parent, filename, _] = test;
+    fmt::print(
+        out,
+        "\ninput\t\t: [{}]\nupper_parent\t: [{}]\nupper_filename\t: [{}]\ndirname\t\t: [{}]\nbasename\t: "
+        "[{}]",
+        input,
+        upper_parent,
+        upper_filename,
+        parent,
+        filename
+    );
     return out;
 }
 
 constexpr auto constructible_testcases = std::array{
     TestConstruct{
-        .input    = "/",
-        .parent   = "/",
-        .filename = "/",
-        .is_dir   = true,
+        .input          = "/",
+        .upper_parent   = "/",
+        .upper_filename = "/",
+        .parent         = "/",
+        .filename       = "/",
+        .is_dir         = true,
     },
     TestConstruct{
-        .input    = "//",
-        .parent   = "/",
-        .filename = "/",
-        .is_dir   = true,
+        .input          = "//",
+        .upper_parent   = "/",
+        .upper_filename = "/",
+        .parent         = "/",
+        .filename       = "/",
+        .is_dir         = true,
     },
     TestConstruct{
-        .input    = "//////",
-        .parent   = "/",
-        .filename = "/",
-        .is_dir   = true,
+        .input          = "//////",
+        .upper_parent   = "/",
+        .upper_filename = "/",
+        .parent         = "/",
+        .filename       = "/",
+        .is_dir         = true,
     },
     TestConstruct{
-        .input    = "//////////////////",
-        .parent   = "/",
-        .filename = "/",
-        .is_dir   = true,
+        .input          = "//////////////////",
+        .upper_parent   = "/",
+        .upper_filename = "/",
+        .parent         = "/",
+        .filename       = "/",
+        .is_dir         = true,
     },
     TestConstruct{
-        .input    = "/home",
-        .parent   = "/",
-        .filename = "home",
-        .is_dir   = false,
+        .input          = "/home",
+        .upper_parent   = "/",
+        .upper_filename = "/",
+        .parent         = "/",
+        .filename       = "home",
+        .is_dir         = false,
     },
     TestConstruct{
-        .input    = "/home//",
-        .parent   = "/",
-        .filename = "home",
-        .is_dir   = true,
+        .input          = "/home//",
+        .upper_parent   = "/",
+        .upper_filename = "/",
+        .parent         = "/",
+        .filename       = "home",
+        .is_dir         = true,
     },
     TestConstruct{
-        .input    = "////home////",
-        .parent   = "/",
-        .filename = "home",
-        .is_dir   = true,
+        .input          = "////home////",
+        .upper_parent   = "/",
+        .upper_filename = "/",
+        .parent         = "/",
+        .filename       = "home",
+        .is_dir         = true,
     },
     TestConstruct{
-        .input    = "/home/user",
-        .parent   = "/home",
-        .filename = "user",
-        .is_dir   = false,
+        .input          = "/home/user",
+        .upper_parent   = "/",
+        .upper_filename = "home",
+        .parent         = "/home",
+        .filename       = "user",
+        .is_dir         = false,
     },
     TestConstruct{
-        .input    = "///home/user",
-        .parent   = "/home",
-        .filename = "user",
-        .is_dir   = false,
+        .input          = "///home/user",
+        .upper_parent   = "/",
+        .upper_filename = "home",
+        .parent         = "/home",
+        .filename       = "user",
+        .is_dir         = false,
     },
     TestConstruct{
-        .input    = "/home/user////",
-        .parent   = "/home",
-        .filename = "user",
-        .is_dir   = true,
+        .input          = "/home/user////",
+        .upper_parent   = "/",
+        .upper_filename = "home",
+        .parent         = "/home",
+        .filename       = "user",
+        .is_dir         = true,
     },
     TestConstruct{
-        .input    = "/home///user",
-        .parent   = "/home",
-        .filename = "user",
-        .is_dir   = false,
+        .input          = "/home///user",
+        .upper_parent   = "/",
+        .upper_filename = "home",
+        .parent         = "/home",
+        .filename       = "user",
+        .is_dir         = false,
     },
     TestConstruct{
-        .input    = "/home///user//",
-        .parent   = "/home",
-        .filename = "user",
-        .is_dir   = true,
+        .input          = "/home///user//",
+        .upper_parent   = "/",
+        .upper_filename = "home",
+        .parent         = "/home",
+        .filename       = "user",
+        .is_dir         = true,
     },
     TestConstruct{
-        .input    = "/home//////user//",
-        .parent   = "/home",
-        .filename = "user",
-        .is_dir   = true,
+        .input          = "/home//////user//",
+        .upper_parent   = "/",
+        .upper_filename = "home",
+        .parent         = "/home",
+        .filename       = "user",
+        .is_dir         = true,
     },
     TestConstruct{
-        .input    = "/home/user/projects/cpp/adbfsm",
-        .parent   = "/home/user/projects/cpp",
-        .filename = "adbfsm",
-        .is_dir   = false,
+        .input          = "/home/user/projects/cpp/adbfsm",
+        .upper_parent   = "/home/user/projects",
+        .upper_filename = "cpp",
+        .parent         = "/home/user/projects/cpp",
+        .filename       = "adbfsm",
+        .is_dir         = false,
     },
     TestConstruct{
-        .input    = "///////home/user/projects/cpp/adbfsm",
-        .parent   = "/home/user/projects/cpp",
-        .filename = "adbfsm",
-        .is_dir   = false,
+        .input          = "///////home/user/projects/cpp/adbfsm",
+        .upper_parent   = "/home/user/projects",
+        .upper_filename = "cpp",
+        .parent         = "/home/user/projects/cpp",
+        .filename       = "adbfsm",
+        .is_dir         = false,
     },
     TestConstruct{
-        .input    = "/home/user/projects/cpp/adbfsm////",
-        .parent   = "/home/user/projects/cpp",
-        .filename = "adbfsm",
-        .is_dir   = true,
+        .input          = "/home/user/projects/cpp/adbfsm////",
+        .upper_parent   = "/home/user/projects",
+        .upper_filename = "cpp",
+        .parent         = "/home/user/projects/cpp",
+        .filename       = "adbfsm",
+        .is_dir         = true,
     },
     TestConstruct{
-        .input    = "/home/////user/projects/cpp/adbfsm",
-        .parent   = "/home/////user/projects/cpp",
-        .filename = "adbfsm",
-        .is_dir   = false,
+        .input          = "/home/////user/projects/cpp/adbfsm",
+        .upper_parent   = "/home/////user/projects",
+        .upper_filename = "cpp",
+        .parent         = "/home/////user/projects/cpp",
+        .filename       = "adbfsm",
+        .is_dir         = false,
     },
     TestConstruct{
-        .input    = "//home/user/////projects/cpp/adbfsm////",
-        .parent   = "/home/user/////projects/cpp",
-        .filename = "adbfsm",
-        .is_dir   = true,
+        .input          = "//home/user/////projects////cpp/adbfsm////",
+        .upper_parent   = "/home/user/////projects",
+        .upper_filename = "cpp",
+        .parent         = "/home/user/////projects////cpp",
+        .filename       = "adbfsm",
+        .is_dir         = true,
     },
     TestConstruct{
-        .input    = "/home/user/projects/cpp//////adbfsm",
-        .parent   = "/home/user/projects/cpp",
-        .filename = "adbfsm",
-        .is_dir   = false,
+        .input          = "/home/user/projects/cpp//////adbfsm",
+        .upper_parent   = "/home/user/projects",
+        .upper_filename = "cpp",
+        .parent         = "/home/user/projects/cpp",
+        .filename       = "adbfsm",
+        .is_dir         = false,
     },
     TestConstruct{
-        .input    = "/home/user/projects/../projects/../../user/projects/cpp//////adbfsm",
-        .parent   = "/home/user/projects/../projects/../../user/projects/cpp",
-        .filename = "adbfsm",
-        .is_dir   = false,
+        .input          = "/home/user/projects/../projects/../../user/projects/cpp//////adbfsm",
+        .upper_parent   = "/home/user/projects/../projects/../../user/projects",
+        .upper_filename = "cpp",
+        .parent         = "/home/user/projects/../projects/../../user/projects/cpp",
+        .filename       = "adbfsm",
+        .is_dir         = false,
     },
 };
 
@@ -253,12 +304,19 @@ int main()
         auto path = create(test.input);
 
         expect(path.has_value()) << "can't construct: " << test.input;
-
-        if (path.has_value()) {
-            expect(test.parent == path->parent()) << test;
-            expect(test.filename == path->filename()) << test;
-            expect(test.is_dir == path->is_dir()) << test;
+        if (not path.has_value()) {
+            return;
         }
+        expect(test.parent == path->parent()) << test;
+        expect(test.filename == path->filename()) << test;
+        expect(test.is_dir == path->is_dir()) << test;
+
+        auto parent = path->parent_path();
+
+        expect(path->parent() == parent.fullpath()) << test;
+        expect(test.upper_parent == parent.parent()) << test;
+        expect(test.upper_filename == parent.filename()) << test;
+        expect(parent.is_dir()) << test;
     } | constructible_testcases;
 
     "Path must not be constructed if it is ill-formed"_test = [](Str test) {
@@ -280,7 +338,7 @@ int main()
 
     "Path iter should be able to be iterator from root to dirname"_test = [](const TestIter& test) {
         auto path_iter = create(test.input).value();
-        auto iterated  = path_iter.iter_parent() | sr::to<std::vector>();
+        auto iterated  = path_iter.parent_path().iter() | sr::to<std::vector>();
         auto expected  = test.iterated;
         expected.size() > 1 ? expected.pop_back() : void();
         expect(that % expected == iterated) << fmt::format("On input: {:?}", test.input);
