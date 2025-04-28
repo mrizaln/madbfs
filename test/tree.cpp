@@ -83,24 +83,22 @@ struct fmt::formatter<adbfsm::tree::Node> : fmt::formatter<std::string_view>
                 fmt::format_to(ctx.out(), "    ");
             }
 
-            auto additional = node->visit(util::Overload{
+            auto visitor = util::Overload{
                 [&](const Link& link) { return fmt::format("    ->    {}", link.target()->build_path()); },
                 [&](const Directory&) { return String{ "/" }; },
                 [&](const auto&) { return String{ "" }; },
-            });
+            };
+            auto additional = std::visit(visitor, node->value());
 
             // if root, don't print the name since additional will print dir mark (/)
             auto name = node->name() == "/" ? "" : node->name();
             fmt::format_to(ctx.out(), "- {}{}\n", name, additional);
 
-            node->visit(util::Overload{
-                [&](const Directory& dir) {
-                    for (const auto& child : dir.children()) {
-                        self(child.get(), depth + 1);
-                    }
-                },
-                [&](const auto&) { /* do nothing */ },
-            });
+            if (auto* dir = node->as<Directory>()) {
+                for (const auto& child : dir->children()) {
+                    self(child.get(), depth + 1);
+                }
+            };
         };
 
         print_impl(&node, 0u);
@@ -252,47 +250,58 @@ int main()
 
         auto tree = FileTree{ connection, cache };
 
-#define unwrap() or_else([](auto e) { return raise_expect_error<void>(e); }).value()
+#define unwrap(T) or_else([](auto e) { return raise_expect_error<T>(e); }).value()
 
         using adbfsm::path::operator""_path;
 
-        tree.mkdir("/hello"_path).unwrap();
-        tree.touch("/hello/world.txt"_path).unwrap();
-        tree.touch("/hello/foo.txt"_path).unwrap();
-        tree.touch("/hello/movie.mp4"_path).unwrap();
-        tree.mkdir("/hello/bar"_path).unwrap();
-        tree.touch("/hello/bar/baz.txt"_path).unwrap();
-        tree.touch("/hello/bar/qux.txt"_path).unwrap();
-        tree.touch("/hello/bar/quux.txt"_path).unwrap();
-        tree.mkdir("/bye"_path).unwrap();
-        tree.touch("/bye/world.txt"_path).unwrap();
-        tree.touch("/bye/movie.mp4"_path).unwrap();
-        tree.touch("/bye/music.mp3"_path).unwrap();
-        tree.mkdir("/bye/family"_path).unwrap();
-        tree.touch("/bye/family/dad.txt"_path).unwrap();
-        tree.touch("/bye/family/mom.txt"_path).unwrap();
-        tree.mkdir("/bye/friends"_path).unwrap();
-        tree.touch("/bye/friends/bob.txt"_path).unwrap();
-        tree.mkdir("/bye/friends/school"_path).unwrap();
-        tree.touch("/bye/friends/school/kal'tsit.txt"_path).unwrap();
-        tree.touch("/bye/friends/school/closure.txt"_path).unwrap();
-        tree.mkdir("/bye/friends/work"_path).unwrap();
-        tree.touch("/bye/friends/work/loughshinny <3.txt"_path).unwrap();
-        tree.touch("/bye/friends/work/eblana?.mp4"_path).unwrap();
+        tree.mkdir("/hello"_path).unwrap(Node*);
+        tree.mknod("/hello/world.txt"_path).unwrap(Node*);
+        tree.mknod("/hello/foo.txt"_path).unwrap(Node*);
+        tree.mknod("/hello/movie.mp4"_path).unwrap(Node*);
+        tree.mkdir("/hello/bar"_path).unwrap(Node*);
+        tree.mknod("/hello/bar/baz.txt"_path).unwrap(Node*);
+        tree.mknod("/hello/bar/qux.txt"_path).unwrap(Node*);
+        tree.mknod("/hello/bar/quux.txt"_path).unwrap(Node*);
+        tree.mkdir("/bye"_path).unwrap(Node*);
+        tree.mknod("/bye/world.txt"_path).unwrap(Node*);
+        tree.mknod("/bye/movie.mp4"_path).unwrap(Node*);
+        tree.mknod("/bye/music.mp3"_path).unwrap(Node*);
+        tree.mkdir("/bye/family"_path).unwrap(Node*);
+        tree.mknod("/bye/family/dad.txt"_path).unwrap(Node*);
+        tree.mknod("/bye/family/mom.txt"_path).unwrap(Node*);
+        tree.mkdir("/bye/friends"_path).unwrap(Node*);
+        tree.mknod("/bye/friends/bob.txt"_path).unwrap(Node*);
+        tree.mkdir("/bye/friends/school"_path).unwrap(Node*);
+        tree.mknod("/bye/friends/school/kal'tsit.txt"_path).unwrap(Node*);
+        tree.mknod("/bye/friends/school/closure.txt"_path).unwrap(Node*);
+        tree.mkdir("/bye/friends/work"_path).unwrap(Node*);
+        tree.mknod("/bye/friends/work/loughshinny <3.txt"_path).unwrap(Node*);
+        tree.mknod("/bye/friends/work/eblana?.mp4"_path).unwrap(Node*);
 
-        tree.link("/bye/friends/school/hehe"_path, "/bye/friends/work"_path).unwrap();
-        tree.link("/hello/wife"_path, "/bye/friends/work/loughshinny <3.txt"_path).unwrap();
+        tree.symlink("/bye/friends/school/hehe"_path, "/bye/friends/work"_path).unwrap(void);
+        tree.symlink("/hello/wife"_path, "/bye/friends/work/loughshinny <3.txt"_path).unwrap(void);
 
-        tree.touch("/bye/theresa.txt"_path).unwrap();
+        tree.mknod("/bye/theresa.txt"_path).unwrap(Node*);
 
         auto tree_str = fmt::format("\n{}", tree.root());
         expect(expected == tree_str) << diff_str(expected, tree_str);
 
-        tree.rm("/hello/world.txt"_path, false).unwrap();
-        tree.rm("/hello/bar"_path, true).unwrap();
-        tree.rm("/bye/music.mp3"_path, false).unwrap();
-        tree.rm("/bye/friends/bob.txt"_path, false).unwrap();
-        tree.rm("/bye/friends/school/hehe"_path, false).unwrap();
+        tree.unlink("/hello/world.txt"_path).unwrap(void);
+        tree.unlink("/bye/music.mp3"_path).unwrap(void);
+        tree.unlink("/bye/friends/bob.txt"_path).unwrap(void);
+        tree.unlink("/bye/friends/school/hehe"_path).unwrap(void);
+
+        // there is no recursive delete
+        auto* bar = tree.traverse("/hello/bar"_path).unwrap(Node*);
+        if (auto* dir = bar->as<Directory>()) {
+            auto paths = dir->children()    //
+                       | sv::transform([](auto&& node) { return node->build_path(); })
+                       | sr::to<std::vector>();
+            for (auto path : paths) {
+                tree.unlink(adbfsm::path::create(path).value()).unwrap(void);
+            }
+        }
+        tree.rmdir("/hello/bar"_path).unwrap(void);
 
         tree_str = fmt::format("\n{}", tree.root());
         expect(expected_rm == tree_str) << diff_str(expected_rm, tree_str);
