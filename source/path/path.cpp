@@ -41,17 +41,4 @@ namespace adbfsm::path
     {
         return iter_path_impl(fullpath());
     }
-
-    std::generator<Str> Path::iter_parent() const
-    {
-        return iter_path_impl(parent());
-    }
-
-    Opt<std::generator<Str>> iter_str(Str path)
-    {
-        if (path.empty() or path.front() != '/') {
-            return std::nullopt;
-        }
-        return iter_path_impl(path);
-    }
 }
