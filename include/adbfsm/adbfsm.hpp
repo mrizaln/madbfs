@@ -3,7 +3,6 @@
 #include "adbfsm/data/cache.hpp"
 #include "adbfsm/data/connection.hpp"
 #include "adbfsm/tree/file_tree.hpp"
-#include <filesystem>
 
 #define FUSE_USE_VERSION 31
 #include <fcntl.h>

@@ -201,54 +201,66 @@ namespace adbfsm
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        // TODO: implement
-
-        return fuse_err(__func__)(std::errc::function_not_supported);
+        return ok_or(path::create(path), std::errc::operation_not_supported)
+            .and_then([&](auto p) { return get_data().tree.truncate(p, size); })
+            .transform_error(fuse_err(__func__))
+            .error_or(0);
     }
 
     i32 open(const char* path, fuse_file_info* fi)
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        // TODO: implement
-
-        return fuse_err(__func__)(std::errc::function_not_supported);
+        return ok_or(path::create(path), std::errc::operation_not_supported)
+            .and_then([&](auto p) { return get_data().tree.open(p, fi->flags); })
+            .transform_error(fuse_err(__func__))
+            .error_or(0);
     }
 
-    i32 read(const char* path, char* buf, size_t size, off_t offset, fuse_file_info* fi)
+    i32 read(const char* path, char* buf, size_t size, off_t offset, [[maybe_unused]] fuse_file_info* fi)
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        // TODO: implement
-
-        return fuse_err(__func__)(std::errc::function_not_supported);
+        auto res = ok_or(path::create(path), std::errc::operation_not_supported).and_then([&](auto p) {
+            return get_data().tree.read(p, { buf, size }, offset);
+        });
+        return res.has_value() ? static_cast<i32>(res.value()) : fuse_err(__func__)(res.error());
     }
 
-    i32 write(const char* path, const char* buf, size_t size, off_t offset, fuse_file_info* fi)
+    i32 write(
+        const char*                      path,
+        const char*                      buf,
+        size_t                           size,
+        off_t                            offset,
+        [[maybe_unused]] fuse_file_info* fi
+    )
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        // TODO: implement
-
-        return fuse_err(__func__)(std::errc::function_not_supported);
+        auto res = ok_or(path::create(path), std::errc::operation_not_supported).and_then([&](auto p) {
+            return get_data().tree.write(p, { buf, size }, offset);
+        });
+        return res.has_value() ? static_cast<i32>(res.value()) : fuse_err(__func__)(res.error());
     }
 
-    i32 flush(const char* path, fuse_file_info* fi)
+    i32 flush(const char* path, [[maybe_unused]] fuse_file_info* fi)
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        // TODO: implement
-
-        return fuse_err(__func__)(std::errc::function_not_supported);
+        return ok_or(path::create(path), std::errc::operation_not_supported)
+            .and_then([&](auto p) { return get_data().tree.flush(p); })
+            .transform_error(fuse_err(__func__))
+            .error_or(0);
     }
 
-    i32 release(const char* path, fuse_file_info* fi)
+    i32 release(const char* path, [[maybe_unused]] fuse_file_info* fi)
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        // TODO: implement
-
-        return fuse_err(__func__)(std::errc::function_not_supported);
+        return ok_or(path::create(path), std::errc::operation_not_supported)
+            .and_then([&](auto p) { return get_data().tree.release(p); })
+            .transform_error(fuse_err(__func__))
+            .error_or(0);
     }
 
     i32 readdir(
@@ -283,8 +295,9 @@ namespace adbfsm
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        // TODO: implement
-
-        return fuse_err(__func__)(std::errc::function_not_supported);
+        return ok_or(path::create(path), std::errc::operation_not_supported)
+            .and_then([&](auto p) { return get_data().tree.utimens(p); })
+            .transform_error(fuse_err(__func__))
+            .error_or(0);
     }
 }

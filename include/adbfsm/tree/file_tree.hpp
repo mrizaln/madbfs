@@ -44,10 +44,10 @@ namespace adbfsm::tree
         Expect<void>  unlink(path::Path path);
         Expect<void>  rmdir(path::Path path);
         Expect<void>  rename(path::Path from, path::Path to);
-        Expect<void>  truncate(path::Path, usize size);
-        Expect<i32>   open(path::Path, usize size, std::span<char> buf, off_t offset);
-        Expect<usize> read(path::Path, usize size, std::string_view str, off_t offset);
-        Expect<usize> write(path::Path, usize size);
+        Expect<void>  truncate(path::Path path, off_t size);
+        Expect<i32>   open(path::Path path, int flags);
+        Expect<usize> read(path::Path path, std::span<char> out, off_t offset);
+        Expect<usize> write(path::Path path, std::string_view in, off_t offset);
         Expect<void>  flush(path::Path path);
         Expect<void>  release(path::Path path);
         Expect<void>  utimens(path::Path path);

@@ -51,7 +51,6 @@ namespace
 
         return resolved;
     }
-
 }
 
 namespace adbfsm::tree
@@ -178,8 +177,6 @@ namespace adbfsm::tree
 
     Expect<void> FileTree::readdir(path::Path path, Filler filler)
     {
-        log_d({ "{}: {:?}" }, __func__, path.fullpath());
-
         auto lock = std::scoped_lock{ m_mutex };
 
         auto base = &m_root;
@@ -205,8 +202,6 @@ namespace adbfsm::tree
         // conditional above
 
         return m_connection.stat_dir(path).transform([&](auto stats) {
-            log_d({ "readdir: {:?}" }, path.fullpath());
-
             for (auto stat : stats) {
                 auto file = unescape(stat.path);
 
@@ -218,7 +213,7 @@ namespace adbfsm::tree
                     auto target      = resolve_path(path, unescape(stat.link_to));
                     auto target_node = traverse_or_build(path::create(target).value());
                     if (not target_node.has_value()) {
-                        log_e({ "readdir: target can't found target: {:?}" }, target);
+                        log_w({ "readdir: target can't found target: {:?}" }, target);
                         continue;
                     }
 
@@ -245,8 +240,6 @@ namespace adbfsm::tree
 
     Expect<const data::Stat*> FileTree::getattr(path::Path path)
     {
-        log_d({ "{}: {:?}" }, __func__, path.fullpath());
-
         auto lock = std::scoped_lock{ m_mutex };
 
         return traverse_or_build(path)    //
@@ -255,8 +248,6 @@ namespace adbfsm::tree
 
     Expect<Node*> FileTree::readlink(path::Path path)
     {
-        log_d({ "{}: {:?}" }, __func__, path.fullpath());
-
         auto lock = std::scoped_lock{ m_mutex };
 
         return traverse_or_build(path)    //
@@ -266,8 +257,6 @@ namespace adbfsm::tree
 
     Expect<Node*> FileTree::mknod(path::Path path)
     {
-        log_d({ "{}: {:?}" }, __func__, path.fullpath());
-
         auto lock = std::scoped_lock{ m_mutex };
 
         auto parent = path.parent_path();
@@ -279,8 +268,6 @@ namespace adbfsm::tree
 
     Expect<Node*> FileTree::mkdir(path::Path path)
     {
-        log_d({ "{}: {:?}" }, __func__, path.fullpath());
-
         auto lock = std::scoped_lock{ m_mutex };
 
         auto parent = path.parent_path();
@@ -292,8 +279,6 @@ namespace adbfsm::tree
 
     Expect<void> FileTree::unlink(path::Path path)
     {
-        log_d({ "{}: {:?}" }, __func__, path.fullpath());
-
         auto lock = std::scoped_lock{ m_mutex };
 
         auto parent = path.parent_path();
@@ -305,8 +290,6 @@ namespace adbfsm::tree
 
     Expect<void> FileTree::rmdir(path::Path path)
     {
-        log_d({ "{}: {:?}" }, __func__, path.fullpath());
-
         auto lock = std::scoped_lock{ m_mutex };
 
         auto parent = path.parent_path();
@@ -318,8 +301,6 @@ namespace adbfsm::tree
 
     Expect<void> FileTree::rename(path::Path from, path::Path to)
     {
-        log_d({ "{}: {:?} -> {:?}" }, __func__, from.fullpath(), to.fullpath());
-
         auto lock = std::scoped_lock{ m_mutex };
 
         auto from_node = traverse_or_build(from);
@@ -339,6 +320,55 @@ namespace adbfsm::tree
                 });
             })
             .transform(sink_void);
+    }
+
+    Expect<void> FileTree::truncate(path::Path path, off_t size)
+    {
+        return traverse_or_build(path).and_then([&](Node* node) {
+            return node->truncate({ m_connection, m_cache, path }, size);
+        });
+    }
+
+    Expect<i32> FileTree::open(path::Path path, int flags)
+    {
+        return traverse_or_build(path).and_then([&](Node* node) {
+            return node->open({ m_connection, m_cache, path }, flags);
+        });
+    }
+
+    Expect<usize> FileTree::read(path::Path path, std::span<char> out, off_t offset)
+    {
+        return traverse_or_build(path).and_then([&](Node* node) {
+            return node->read({ m_connection, m_cache, path }, out, offset);
+        });
+    }
+
+    Expect<usize> FileTree::write(path::Path path, std::string_view in, off_t offset)
+    {
+        return traverse_or_build(path).and_then([&](Node* node) {
+            return node->write({ m_connection, m_cache, path }, in, offset);
+        });
+    }
+
+    Expect<void> FileTree::flush(path::Path path)
+    {
+        return traverse_or_build(path).and_then([&](Node* node) {
+            return node->flush({ m_connection, m_cache, path });
+        });
+    }
+
+    Expect<void> FileTree::release(path::Path path)
+    {
+        return traverse_or_build(path).and_then([&](Node* node) {
+            return node->release({ m_connection, m_cache, path });
+        });
+    }
+
+    Expect<void> FileTree::utimens(path::Path path)
+    {
+        return traverse_or_build(path).and_then([&](Node* node) {
+            return node->utimens({ m_connection, m_cache, path });
+        });
     }
 
     Expect<void> FileTree::symlink(path::Path path, path::Path target)

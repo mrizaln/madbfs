@@ -25,8 +25,17 @@ namespace adbfsm::tree
     class RegularFile
     {
     public:
+        friend Node;
+
+        data::Id id() const { return m_id; }
+        int      fd() const { return m_fd; }
+
     private:
-        i32 m_fd = -1;    // negative means not opened
+        void set_id(data::Id id) { m_id = id; }
+        void set_fd(int fd) { m_fd = fd; }
+
+        data::Id m_id = {};
+        int      m_fd = -1;
     };
 
     class Directory
@@ -120,8 +129,8 @@ namespace adbfsm::tree
         };
 
         Node(Str name, Node* parent, data::Stat stat, File value)
-            : m_name{ name }
-            , m_parent{ parent }
+            : m_parent{ parent }
+            , m_name{ name }
             , m_stat{ std::move(stat) }
             , m_value{ std::move(value) }
         {
@@ -133,15 +142,6 @@ namespace adbfsm::tree
         Node(const Node&)            = delete;
         Node& operator=(const Node&) = delete;
 
-        void swap(Node& other) noexcept
-        {
-            std::swap(m_id, other.m_id);
-            std::swap(m_name, other.m_name);
-            std::swap(m_parent, other.m_parent);
-            std::swap(m_stat, other.m_stat);
-            std::swap(m_value, other.m_value);
-        }
-
         template <typename T>
         bool is() const;
 
@@ -151,12 +151,10 @@ namespace adbfsm::tree
         template <typename T>
         const T* as() const;
 
-        void set_id(data::Id id) { m_id = id; }
         void set_name(Str name) { m_name = name; }
         void set_parent(Node* parent) { m_parent = parent; }
         void set_stat(data::Stat stat) { m_stat = stat; }
 
-        data::Id    id() const { return m_id; }
         Str         name() const { return m_name; }
         Node*       parent() const { return m_parent; }
         const File& value() const { return m_value; }
@@ -167,6 +165,9 @@ namespace adbfsm::tree
         String build_path() const;
 
         void refresh_stat() { m_stat.mtime = Clock::to_time_t(Clock::now()); }
+
+        // operations on Directory
+        // -----------------------
 
         /**
          * @brief Create a new node without any call to connection or cache with this node as its parent.
@@ -243,15 +244,36 @@ namespace adbfsm::tree
          */
         Expect<void> rmdir(Str name, Context context);
 
+        // -----------------------
+
+        // operations on RegularFile
+        // -------------------------
+
+        Expect<void>  truncate(Context context, off_t size);
+        Expect<i32>   open(Context context, int flags);
+        Expect<usize> read(Context context, std::span<char> out, off_t offset);
+        Expect<usize> write(Context context, std::string_view in, off_t offset);
+        Expect<void>  flush(Context context);
+        Expect<void>  release(Context context);
+        Expect<void>  utimens(Context context);
+
+        // -------------------------
+
     private:
         inline static std::atomic<u64> s_id_counter = 0;
 
-        data::Id    m_id     = {};
-        std::string m_name   = {};
         Node*       m_parent = nullptr;
+        std::string m_name   = {};
         data::Stat  m_stat   = {};
         File        m_value;
     };
+
+    // helper function
+    template <typename T>
+    T* into(adbfsm::tree::Node* node)
+    {
+        return node->as<T>();
+    }
 }
 
 // -----------------------

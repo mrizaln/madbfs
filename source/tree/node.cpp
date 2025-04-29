@@ -1,7 +1,7 @@
 #include "adbfsm/tree/node.hpp"
 #include "adbfsm/data/connection.hpp"
 
-#include <sys/stat.h>
+#include <fcntl.h>
 
 namespace adbfsm::tree
 {
@@ -46,7 +46,10 @@ namespace adbfsm::tree
 
         return node;
     }
+}
 
+namespace adbfsm::tree
+{
     Node* Link::real_path() const
     {
         auto* current = m_target;
@@ -59,7 +62,10 @@ namespace adbfsm::tree
         }
         return current;
     }
+}
 
+namespace adbfsm::tree
+{
     Expect<Node*> Node::build(Str name, data::Stat stat, File file)
     {
         auto* dir = as<Directory>();
@@ -99,12 +105,7 @@ namespace adbfsm::tree
             return std::unexpected{ std::errc::not_a_directory };
         }
 
-        if (auto node = dir->find(name); node.has_value()) {
-            (*node)->refresh_stat();
-            return node;
-        }
-
-        return context.connection.touch(context.path)
+        return context.connection.touch(context.path, true)
             .and_then([&] { return context.connection.stat(context.path); })
             .and_then([&](data::ParsedStat&& parsed) {
                 auto node = std::make_unique<Node>(name, this, std::move(parsed.stat), RegularFile{});
@@ -180,18 +181,18 @@ namespace adbfsm::tree
             return std::unexpected{ std::errc::not_a_directory };
         }
 
-        // TODO: should have check for the file existence on the device first, since maybe the file has
-        // not been stat-ed yet
-
         return dir->find(name).and_then([&](Node* node) -> Expect<void> {
             if (node->is<Directory>() and not recursive) {
                 return std::unexpected{ std::errc::is_a_directory };
+            } else if (auto* file = node->as<RegularFile>()) {
+                if (auto res = context.cache.remove(context.connection, file->id()); not res.has_value()) {
+                    return std::unexpected{ res.error() };
+                }
             }
 
             auto success = dir->erase(name);
             assert(success);
 
-            context.cache.remove(node->id());
             return context.connection.rm(context.path, recursive);
         });
     }
@@ -203,9 +204,6 @@ namespace adbfsm::tree
             return std::unexpected{ std::errc::not_a_directory };
         }
 
-        // TODO: should have check for the file existence on the device first, since maybe the file has
-        // not been stat-ed yet
-
         return dir->find(name).and_then([&](Node* node) -> Expect<void> {
             auto* target = node->as<Directory>();
             if (target == nullptr) {
@@ -213,9 +211,186 @@ namespace adbfsm::tree
             } else if (not target->children().empty()) {
                 return std::unexpected{ std::errc::directory_not_empty };
             }
-
-            context.cache.remove(node->id());
             return context.connection.rmdir(context.path).transform([&] { dir->erase(name); });
         });
+    }
+
+    Expect<void> Node::truncate(Context context, off_t size)
+    {
+        RegularFile* file = nullptr;
+
+        // clang-format off
+        if      (is<Directory>()) return std::unexpected{ std::errc::is_a_directory };
+        else if (is<Other>())     return std::unexpected{ std::errc::permission_denied };
+        else if (is<Link>())      return as<Link>()->real_path()->truncate(context, size);
+        else                      file = as<RegularFile>();
+        // clang-format on
+
+        auto path = context.cache.get(file->id());
+        if (not path.has_value()) {
+            auto id = context.cache.add(context.connection, context.path);
+            if (not id.has_value()) {
+                return std::unexpected{ id.error() };
+            }
+            path = context.cache.get(*id);
+            file->set_id(*id);
+        }
+
+        assert(std::filesystem::exists(*path));
+        context.cache.set_dirty(file->id(), true);
+
+        auto ret = ::truncate(path->c_str(), size);
+        if (ret < 0) {
+            return std::unexpected{ static_cast<std::errc>(errno) };
+        }
+
+        m_stat.size -= size;
+        return {};
+    }
+
+    Expect<i32> Node::open(Context context, int flags)
+    {
+        RegularFile* file = nullptr;
+
+        // clang-format off
+        if      (is<Directory>()) return std::unexpected{ std::errc::is_a_directory };
+        else if (is<Other>())     return std::unexpected{ std::errc::permission_denied };
+        else if (is<Link>())      return as<Link>()->real_path()->open(context, flags);
+        else                      file = as<RegularFile>();
+        // clang-format on
+
+        auto path = context.cache.get(file->id());
+        if (not path.has_value()) {
+            auto id = context.cache.add(context.connection, context.path);
+            if (not id.has_value()) {
+                return std::unexpected{ id.error() };
+            }
+            path = context.cache.get(*id);
+            file->set_id(*id);
+        }
+
+        assert(std::filesystem::exists(*path));
+        auto ret = ::open(path->c_str(), flags);
+
+        if (ret >= 0) {
+            file->set_fd(ret);
+        }
+
+        return std::unexpected{ ret < 0 ? static_cast<std::errc>(errno) : std::errc{} };
+    }
+
+    Expect<usize> Node::read(Context context, std::span<char> out, off_t offset)
+    {
+        RegularFile* file = nullptr;
+
+        // clang-format off
+        if      (is<Directory>()) return std::unexpected{ std::errc::is_a_directory };
+        else if (is<Other>())     return std::unexpected{ std::errc::permission_denied };
+        else if (is<Link>())      return as<Link>()->real_path()->read(context, out, offset);
+        else                      file = as<RegularFile>();
+        // clang-format on
+
+        // in-case the cache is missing, add it back
+        if (not context.cache.exists(file->id())) {
+            auto id = context.cache.add(context.connection, context.path);
+            if (not id.has_value()) {
+                return std::unexpected{ id.error() };
+            }
+            file->set_id(*id);
+        }
+
+        if (auto ret = ::pread(file->fd(), out.data(), out.size(), offset); ret >= 0) {
+            return ret;
+        }
+        return std::unexpected{ static_cast<std::errc>(errno) };
+    }
+
+    Expect<usize> Node::write(Context context, std::string_view in, off_t offset)
+    {
+        RegularFile* file = nullptr;
+
+        // clang-format off
+        if      (is<Directory>()) return std::unexpected{ std::errc::is_a_directory };
+        else if (is<Other>())     return std::unexpected{ std::errc::permission_denied };
+        else if (is<Link>())      return as<Link>()->real_path()->write(context, in, offset);
+        else                      file = as<RegularFile>();
+        // clang-format on
+
+        // in-case the cache is missing, add it back and set to dirty
+        if (not context.cache.exists(file->id())) {
+            auto id = context.cache.add(context.connection, context.path);
+            if (not id.has_value()) {
+                return std::unexpected{ id.error() };
+            }
+            file->set_id(*id);
+        }
+
+        if (auto ret = ::pwrite(file->fd(), (void*)in.data(), in.size(), offset); ret >= 0) {
+            context.cache.set_dirty(file->id(), true);
+            m_stat.size += ret;
+            return ret;
+        }
+        return std::unexpected{ static_cast<std::errc>(errno) };
+    }
+
+    Expect<void> Node::flush(Context context)
+    {
+        RegularFile* file = nullptr;
+
+        // clang-format off
+        if      (is<Directory>()) return std::unexpected{ std::errc::is_a_directory };
+        else if (is<Other>())     return std::unexpected{ std::errc::permission_denied };
+        else if (is<Link>())      return as<Link>()->real_path()->flush(context);
+        else                      file = as<RegularFile>();
+        // clang-format on
+
+        // in-case the cache is missing, add it back
+        if (not context.cache.exists(file->id())) {
+            auto id = context.cache.add(context.connection, context.path);
+            if (not id.has_value()) {
+                return std::unexpected{ id.error() };
+            }
+            file->set_id(*id);
+        }
+
+        auto ret = ::fsync(file->fd());
+        return std::unexpected{ ret < 0 ? static_cast<std::errc>(errno) : std::errc{} };
+    }
+
+    Expect<void> Node::release(Context context)
+    {
+        RegularFile* file = nullptr;
+
+        // clang-format off
+        if      (is<Directory>()) return std::unexpected{ std::errc::is_a_directory };
+        else if (is<Other>())     return std::unexpected{ std::errc::permission_denied };
+        else if (is<Link>())      return as<Link>()->real_path()->release(context);
+        else                      file = as<RegularFile>();
+        // clang-format on
+
+        // in-case the cache is missing
+        // TODO: should have assert that file exist
+        if (not context.cache.exists(file->id())) {
+            auto id = context.cache.add(context.connection, context.path);
+            if (not id.has_value()) {
+                return std::unexpected{ id.error() };
+            }
+            file->set_id(*id);
+        }
+
+        auto ret = ::close(file->fd());
+        if (auto res = context.cache.flush(context.connection, file->id()); not res.has_value()) {
+            return std::unexpected{ res.error() };
+        }
+        context.cache.set_dirty(file->id(), false);
+
+        return std::unexpected{ ret < 0 ? static_cast<std::errc>(errno) : std::errc{} };
+    }
+
+    Expect<void> Node::utimens(Context context)
+    {
+        return context.connection.touch(context.path, false)
+            .and_then([&] { return context.connection.stat(context.path); })
+            .transform([&](data::ParsedStat&& parsed) { m_stat = parsed.stat; });
     }
 }
