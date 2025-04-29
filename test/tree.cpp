@@ -156,7 +156,7 @@ namespace mock
             return ParsedStat{ .stat = {}, .path = path.fullpath(), .link_to = {} };
         }
 
-        Expect<void> touch(path::Path) override { return {}; }
+        Expect<void> touch(path::Path, bool) override { return {}; }
         Expect<void> mkdir(path::Path) override { return {}; }
         Expect<void> rm(path::Path, bool) override { return {}; }
         Expect<void> rmdir(path::Path) override { return {}; }
@@ -167,10 +167,17 @@ namespace mock
 
     class DummyCache : public ICache
     {
-    public:
-        const Entry*         get(Id) const override { return nullptr; }
-        Expect<const Entry*> add(IConnection&, path::Path) override { return nullptr; };
-        bool                 remove(Id) override { return true; }
+        using Path = std::filesystem::path;
+
+        Opt<Path> get(Id) const override { return std::nullopt; }
+        bool      exists(Id) const override { return true; }
+        bool      set_dirty(Id, bool) override { return true; };
+
+        Expect<Id>   add(IConnection&, path::Path) override { return {}; };
+        Expect<bool> remove(IConnection&, Id) override { return true; };
+
+        Expect<bool> sync(IConnection&) override { return true; };
+        Expect<bool> flush(IConnection&, Id) override { return true; };
     };
 }
 
