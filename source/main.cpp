@@ -50,8 +50,8 @@ void unexpected_program_end(const char* msg, bool is_sigsegv)
     // remove the temporary directory
     if (auto* fuse_ctx = fuse_get_context(); fuse_ctx != nullptr) {
         adbfsm::log_c({ "> There is no fuse context! temp dir can't be deleted" });
-        auto& data = *static_cast<adbfsm::AdbfsmData*>(fuse_ctx->private_data);
-        std::filesystem::remove_all(data.m_dir);
+        auto& data = *static_cast<adbfsm::Adbfsm*>(fuse_ctx->private_data);
+        std::filesystem::remove_all(data.cache_dir);
     }
 
     if (is_sigsegv) {

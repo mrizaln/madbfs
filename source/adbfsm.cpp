@@ -1,76 +1,13 @@
 #include "adbfsm/adbfsm.hpp"
 #include "adbfsm/args.hpp"
-#include "adbfsm/cmd.hpp"
-#include "adbfsm/common.hpp"
-#include "adbfsm/util.hpp"
 
 #include <fcntl.h>
 
 #include <cassert>
-#include <charconv>
 #include <cstring>
 
-namespace detail
+namespace
 {
-    using namespace adbfsm;
-
-    static constexpr usize minimum_path_size   = 3;
-    static constexpr i32   default_gid         = 98;
-    static constexpr i32   default_uid         = 98;
-    static constexpr Str   no_device           = "adb: no devices/emulators found";
-    static constexpr Str   device_offline      = "adb: device offline";
-    static constexpr Str   permission_denied   = " Permission denied";
-    static constexpr Str   no_such_file_or_dir = " No such file or directory";
-    static constexpr Str   not_a_directory     = " Not a directory";
-    static constexpr Str   inaccessible        = " inaccessible or not found";
-    static constexpr Str   read_only           = " Read-only file system";
-    static constexpr Str   bash_escapes        = " \t\n\\\"'`$()<>;&|*?[#~=%";
-
-    struct ParsedStat
-    {
-        Str   m_path;
-        Stat& m_stat;
-    };
-
-    enum class Error
-    {
-        Unknown,
-        NoDev,
-        PermDenied,
-        NoSuchFileOrDir,
-        NotADir,
-        Inaccessible,
-        ReadOnly,
-    };
-
-    i32 to_errno(Error err)
-    {
-        switch (err) {
-        case Error::Unknown: return EIO;
-        case Error::NoDev: return ENODEV;
-        case Error::PermDenied: return EACCES;
-        case Error::NoSuchFileOrDir: return ENOENT;
-        case Error::NotADir: return ENOTDIR;
-        case Error::Inaccessible: return ENOMEDIUM;    // program not accessible means no medium, right?
-        case Error::ReadOnly: return EROFS;
-        default: std::terminate();
-        }
-    }
-
-    Str to_string(Error err)
-    {
-        switch (err) {
-        case Error::Unknown: return "Unknown error";
-        case Error::NoDev: return "No device";
-        case Error::PermDenied: return "Permission denied";
-        case Error::NoSuchFileOrDir: return "No such file or directory";
-        case Error::NotADir: return "Not a directory";
-        case Error::Inaccessible: return "Inaccessible or not found";
-        case Error::ReadOnly: return "Read-only file system";
-        default: std::terminate();
-        }
-    }
-
     /**
      * @brief Create a temporary directory.
      * @return The path to the temporary directory.
@@ -85,311 +22,22 @@ namespace detail
         return temp;
     }
 
-    AdbfsmData& get_data()
+    adbfsm::Adbfsm& get_data()
     {
         auto ctx = ::fuse_get_context()->private_data;
         assert(ctx != nullptr);
-        return *static_cast<AdbfsmData*>(ctx);
+        return *static_cast<adbfsm::Adbfsm*>(ctx);
     }
 
-    String copy_replace(const char* str, char replace, char with)
+    auto fuse_err(adbfsm::Str name)
     {
-        auto  new_str = String{};
-        auto* ch      = str;
-        while (*ch != '\0') {
-            *ch == replace ? new_str.push_back(with) : new_str.push_back(*ch);
-            ++ch;
-        }
-        return new_str;
-    }
-
-    String copy_escape(const char* str, Str escapes = bash_escapes)
-    {
-        auto  new_str = String{};
-        auto* ch      = str;
-        while (*ch != '\0') {
-            if (escapes.find(*ch) != String::npos) {
-                new_str.push_back('\\');
+        return [name](std::errc err) {
+            if (err != std::errc{}) {
+                auto msg = std::make_error_code(err).message();
+                adbfsm::log_e({ "{}: returned with error code [{}]: {}" }, name, static_cast<int>(err), msg);
             }
-            new_str.push_back(*ch);
-            ++ch;
-        }
-        return new_str;
-    }
-
-    String copy_replace_escape(const char* str, char replace, char with, Str escapes = bash_escapes)
-    {
-        auto  new_str = String{};
-        auto* ch      = str;
-        while (*ch != '\0') {
-            if (escapes.find(*ch) != String::npos) {
-                new_str.push_back('\\');
-            }
-            *ch == replace ? new_str.push_back(with) : new_str.push_back(*ch);
-            ++ch;
-        }
-        return new_str;
-    }
-
-    template <typename T>
-        requires std::is_fundamental_v<T>
-    constexpr Opt<T> parse_fundamental(Str str)
-    {
-        auto t         = T{};
-        auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), t);
-        if (ptr != str.data() + str.size() or ec != std::errc{}) {
-            return {};
-        }
-        return t;
-    }
-
-    Error parse_stderr(Str str)
-    {
-        auto splitter = util::StringSplitter{ str, '\n' };
-        while (auto line = splitter.next()) {
-            if (*line == no_device or *line == device_offline) {
-                return Error::NoDev;
-            }
-
-            auto rev       = String{ line->rbegin(), line->rend() };
-            auto rev_strip = util::strip(rev);
-            auto err       = util::StringSplitter{ rev_strip, ':' }.next();
-            if (not err) {
-                continue;
-            }
-
-            auto eq = [&](auto rhs) { return sr::equal(*err, rhs | sv::reverse); };
-
-            // clang-format off
-            if      (eq(permission_denied))     return Error::PermDenied;
-            else if (eq(no_such_file_or_dir))   return Error::NoSuchFileOrDir;
-            else if (eq(not_a_directory))       return Error::NotADir;
-            else if (eq(inaccessible))          return Error::Inaccessible;
-            else if (eq(read_only))             return Error::ReadOnly;
-            else                                return Error::Unknown;
-            // clang-format on
-        }
-
-        return Error::Unknown;
-    }
-
-    i32 parse_and_log_err(const cmd::Out& out, Str fun, Str msg)
-    {
-        auto& errmsg = util::strip(out.cerr).empty() ? out.cout : out.cerr;
-        auto  errn   = to_errno(parse_stderr(errmsg));
-        log_e({ "{}: {} [{}] (errno: {}) {}" }, fun, msg, out.returncode, errn, util::strip(errmsg));
-        return errn;
-    }
-
-    i32 parse_mode(Str str)
-    {
-        if (str.size() != 10) {
-            return 0;
-        }
-
-        auto fmode = 0;
-
-        switch (str[0]) {
-        case 's': fmode |= S_IFSOCK; break;
-        case 'l': fmode |= S_IFLNK; break;
-        case '-': fmode |= S_IFREG; break;
-        case 'd': fmode |= S_IFDIR; break;
-        case 'b': fmode |= S_IFBLK; break;
-        case 'c': fmode |= S_IFCHR; break;
-        case 'p': fmode |= S_IFIFO; break;
-        }
-
-        fmode |= str[1] == 'r' ? S_IRUSR : 0;
-        fmode |= str[2] == 'w' ? S_IWUSR : 0;
-
-        switch (str[3]) {
-        case 'x': fmode |= S_IXUSR; break;
-        case 's': fmode |= S_ISUID | S_IXUSR; break;
-        case 'S': fmode |= S_ISUID; break;
-        }
-
-        fmode |= str[4] == 'r' ? S_IRGRP : 0;
-        fmode |= str[5] == 'w' ? S_IWGRP : 0;
-
-        switch (str[6]) {
-        case 'x': fmode |= S_IXGRP; break;
-        case 's': fmode |= S_ISGID | S_IXGRP; break;
-        case 'S': fmode |= S_ISGID; break;
-        }
-
-        fmode |= str[7] == 'r' ? S_IROTH : 0;
-        fmode |= str[8] == 'w' ? S_IWOTH : 0;
-
-        switch (str[9]) {
-        case 'x': fmode |= S_IXOTH; break;
-        case 't': fmode |= S_ISVTX | S_IXOTH; break;
-        case 'T': fmode |= S_ISVTX; break;
-        }
-
-        return fmode;
-    }
-
-    i32 get_gid(Str group, Cache& cache)
-    {
-        {
-            auto lock = std::shared_lock{ cache.m_mutex };
-            if (auto it = cache.m_gid.find(group); it != cache.m_gid.end()) {
-                return it->second;
-            }
-        }
-
-        auto gid = cmd::exec_adb_shell({ "id", "-g", String{ group } });
-        if (gid.returncode != 0) {
-            log_e({ "get_gid: failed to get gid for [{}] (err: {}) {}" }, group, gid.returncode, gid.cerr);
-        }
-
-        auto lock     = std::unique_lock{ cache.m_mutex };
-        auto real_gid = parse_fundamental<i32>(util::strip(gid.cout)).value_or(default_gid);
-
-        return cache.m_gid[String{ group }] = real_gid;
-    }
-
-    i32 get_uid(Str user, Cache& cache)
-    {
-        {
-            auto lock = std::shared_lock{ cache.m_mutex };
-            if (auto it = cache.m_uid.find(user); it != cache.m_uid.end()) {
-                return it->second;
-            }
-        }
-
-        auto uid = cmd::exec_adb_shell({ "id", "-u", String{ user } });
-        if (uid.returncode != 0) {
-            log_e({ "get_uid: failed to get uid for [{}] (err: {}) {}" }, user, uid.returncode, uid.cerr);
-        }
-
-        auto lock     = std::unique_lock{ cache.m_mutex };
-        auto real_uid = parse_fundamental<i32>(util::strip(uid.cout)).value_or(default_uid);
-
-        return cache.m_uid[String{ user }] = real_uid;
-    }
-
-    Opt<Timestamp> parse_time(Str ymd, Str hmsms, Str offset)
-    {
-        // using std::chrono::parse function (the milliseconds part is not able to be parsed)
-        // parseable format: "2024-11-02 20:09:18 -0700"
-        auto format = "%F %T %z";
-        auto hms    = hmsms.substr(0, hmsms.find_first_of('.'));
-        auto buffer = std::stringstream{};
-
-        // clang-format off
-        for (auto ch : ymd)    { buffer << ch; } buffer << ' ';
-        for (auto ch : hms)    { buffer << ch; } buffer << ' ';
-        for (auto ch : offset) { buffer << ch; }
-        // clang-format on
-
-        auto time = Timestamp{};
-        if (buffer >> std::chrono::parse(format, time)) {
-            return time;
+            return -static_cast<int>(err);
         };
-
-        log_e({ "parse_time: failed to parse time [{} {} {}]" }, ymd, hms, offset);
-        return {};
-    }
-
-    /**
-     * @brief Parse the output of `ls -lla` command.
-     *
-     * @param str The output of `ls -lla` command.
-     * @param cache The cache to store the parsed stat.
-     * @param serial The serial number of the device.
-     *
-     * @return The parsed stat if successful, otherwise empty.
-     *
-     * example input:
-     *  -rw-rw----  1 root everybody 16037494 2025-02-02 03:50:34.000000000 +0700 pozy.qoi
-     *
-     * block device and character device are not supported currently:
-     *  crw-rw-rw-  1 root root        1,   5 2025-02-09 21:09:39.728000000 +0700 zero
-     *
-     * file with unknown stat field will not be parsed:
-     *  d?????????   ? ?      ?             ?                             ? metadata
-     *
-     * TODO: implement different parsing strategy for non-regular files
-     */
-    template <std::invocable<ParsedStat> Fn>
-    bool parse_file_stat(Str parent, Str str, Cache& cache, Fn&& fn)
-    {
-        auto result = util::split_n<8>(str, ' ');
-        if (not result) {
-            return false;
-        }
-
-        auto [to_be_stat, remainder] = *result;
-
-        auto path = remainder;
-        auto link = String{};
-
-        if (auto arrow = remainder.find(" -> "); arrow != String::npos) {
-            path = remainder.substr(0, arrow);
-
-            auto to_be_link  = remainder.substr(arrow + 4);
-            auto num_slashes = sr::count(path | sv::drop(1), '/');
-
-            auto pos = 0_usize;
-            while (to_be_link[pos] == '/') {
-                ++pos;
-            }
-            for (; num_slashes; --num_slashes) {
-                link.append("../");
-            }
-
-            link.append(to_be_link.data() + pos, to_be_link.size() - pos);
-        }
-
-        if (to_be_stat[0].find_first_of('?') != String::npos) {
-            log_e({ "parse_file_stat: failed, file contains unparsable data [{}]" }, to_be_stat[0]);
-            return false;
-        }
-
-        {
-            auto lock        = std::shared_lock{ cache.m_mutex };
-            auto actual_path = fs::path{ parent } / path;
-            if (auto found = cache.m_file_stat.find(actual_path.c_str()); found != cache.m_file_stat.end()) {
-                auto& [_, stat] = *found;
-                auto basename   = actual_path.filename();
-                fn(ParsedStat{ .m_path = basename.c_str(), .m_stat = stat });
-                return true;
-            }
-        }
-
-        auto stat = Stat{
-            .m_mode    = parse_mode(to_be_stat[0]),
-            .m_links   = parse_fundamental<i32>(to_be_stat[1]).value(),
-            .m_uid     = get_uid(to_be_stat[2], cache),
-            .m_gid     = get_gid(to_be_stat[3], cache),
-            .m_size    = parse_fundamental<i32>(to_be_stat[4]).value_or(0),
-            .m_mtime   = parse_time(to_be_stat[5], to_be_stat[6], to_be_stat[7]).value(),
-            .m_age     = Clock::now(),
-            .m_link_to = link,
-        };
-
-        if ((stat.m_mode & S_IFMT) == S_IFLNK and link.empty()) {
-            log_e({ "parse_file_stat: link is empty for [{}] when it should not be" }, path);
-        }
-
-        auto it          = cache.m_file_stat.begin();
-        auto actual_path = fs::path{ parent } / path;
-        {
-            auto lock = std::unique_lock{ cache.m_mutex };
-            it        = cache.m_file_stat.emplace(actual_path, stat).first;
-        }
-
-        auto basename = actual_path.filename();
-        fn(ParsedStat{ .m_path = basename.c_str(), .m_stat = it->second });
-        return true;
-    }
-
-    cmd::Out adb_rescan_file(Str path)
-    {
-        auto file   = fmt::format("'file://{}'", path);
-        auto intent = "android.intent.action.MEDIA_SCANNER_SCAN_FILE";
-        return cmd::exec_adb_shell({ "am", "broadcast", "-a", intent, "-d", file });
     }
 }
 
@@ -400,75 +48,58 @@ namespace adbfsm
         auto* args = static_cast<args::ParsedOpt*>(::fuse_get_context()->private_data);
         assert(args != nullptr and "data should not be empty!");
 
-        auto temp = detail::make_temp_dir();
-        return new AdbfsmData{
-            .m_cache      = Cache{},
-            .m_local_copy = LocalCopy{ args->m_cachesize * 1000 * 1000 },
-            .m_dir        = detail::make_temp_dir(),
-            .m_serial     = args->m_serial,
-            .m_readdir    = false,
-            .m_rescan     = args->m_rescan,
+        auto temp       = make_temp_dir();
+        auto connection = std::make_unique<data::Connection>();
+        auto cache      = std::make_unique<data::Cache>(temp, args->m_cachesize * 1000 * 1000);
+
+        auto* connection_ptr = connection.get();
+        auto* cache_ptr      = cache.get();
+
+        return new Adbfsm{
+            .connection = std::move(connection),
+            .cache      = std::move(cache),
+            .tree       = adbfsm::tree::FileTree{ *connection_ptr, *cache_ptr },
+            .cache_dir  = temp,
         };
     }
 
     void destroy(void* private_data)
     {
-        auto* data = static_cast<AdbfsmData*>(private_data);
+        auto* data = static_cast<Adbfsm*>(private_data);
         assert(data != nullptr and "data should not be empty!");
 
-        fs::remove_all(data->m_dir);
-        adbfsm::log_i({ "cleaned up temporary directory: {:?}" }, data->m_dir.c_str());
-
+        auto temp = data->cache_dir;
         delete data;
+
+        adbfsm::log_i({ "cleaned up temporary directory: {:?}" }, temp.c_str());
+        std::filesystem::remove_all(temp);
     }
 
     i32 getattr(const char* path, struct stat* stbuf, [[maybe_unused]] fuse_file_info* fi)
     {
-        log_i({ "getattr: {:?}" }, path);
-        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
-        readdir_flag.wait(true);
+        log_i({ "{}: {:?}" }, __func__, path);
 
-        if (auto found = cache.m_file_stat.find(path); found == cache.m_file_stat.end()) {
-            // INFO: exec_adb_shell file args need to be escaped
-            auto ls = cmd::exec_adb_shell({ "ls", "-llad", detail::copy_escape(path) });
-            if (ls.returncode != 0) {
-                auto errn = detail::parse_and_log_err(ls, "getattr", "failed to get file info");
-                cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
-                return -errn;
-            }
-
-            auto success = detail::parse_file_stat("/", util::strip(ls.cout), cache, [&](auto) { });
-            if (not success) {
-                log_e({ "getattr: failed to parse file stat [{}]" }, ls.cout);
-                return -EIO;
-            }
+        auto maybe_stat = ok_or(path::create(path), std::errc::operation_not_supported).and_then([](auto p) {
+            return get_data().tree.getattr(p);
+        });
+        if (not maybe_stat.has_value()) {
+            return fuse_err(__func__)(maybe_stat.error());
         }
 
-        auto lock        = std::shared_lock{ cache.m_mutex };
-        auto& [__, stat] = *cache.m_file_stat.find(path);
-
-        if (stat.m_err != 0) {
-            log_d({ "getattr: from cache [{}] (errno: {})" }, path, stat.m_err);
-            return -stat.m_err;
-        }
+        const auto& stat = **maybe_stat;
 
         std::memset(stbuf, 0, sizeof(struct stat));
 
         stbuf->st_ino   = 1;    // fake inode number;
-        stbuf->st_mode  = static_cast<__mode_t>(stat.m_mode);
-        stbuf->st_nlink = static_cast<__nlink_t>(stat.m_links);
-        stbuf->st_uid   = static_cast<__uid_t>(stat.m_uid);
-        stbuf->st_gid   = static_cast<__gid_t>(stat.m_gid);
+        stbuf->st_mode  = static_cast<__mode_t>(stat.mode);
+        stbuf->st_nlink = static_cast<__nlink_t>(stat.links);
+        stbuf->st_uid   = static_cast<__uid_t>(stat.uid);
+        stbuf->st_gid   = static_cast<__gid_t>(stat.gid);
 
         switch (stbuf->st_mode & S_IFMT) {
-        case S_IFBLK:
-        case S_IFCHR:
-            /* TODO: implement parse_file_stat but for block and character devices */
-            stbuf->st_size = 0;
-            break;
-        case S_IFREG:
-            stbuf->st_size = stat.m_size;    //
-            break;
+        case S_IFBLK:    // TODO: implement parse_file_stat but for block and character devices
+        case S_IFCHR: stbuf->st_size = 0; break;
+        case S_IFREG: stbuf->st_size = stat.size; break;
         case S_IFSOCK:
         case S_IFIFO:
         case S_IFDIR:
@@ -478,12 +109,7 @@ namespace adbfsm
         stbuf->st_blksize = 512;
         stbuf->st_blocks  = (stbuf->st_size + 256) / 512;
 
-        namespace chr = std::chrono;
-
-        auto time = timespec{
-            .tv_sec  = chr::time_point_cast<chr::seconds>(stat.m_mtime).time_since_epoch().count(),
-            .tv_nsec = chr::time_point_cast<chr::nanoseconds>(stat.m_mtime).time_since_epoch().count(),
-        };
+        auto time = timespec{ .tv_sec = stat.mtime, .tv_nsec = 0 };
 
         stbuf->st_atim = time;
         stbuf->st_mtim = time;
@@ -494,302 +120,135 @@ namespace adbfsm
 
     i32 readlink(const char* path, char* buf, size_t size)
     {
-        log_i({ "readlink: {:?}" }, path);
-        auto& [cache, local, temp, serial, readdir_flag, _] = detail::get_data();
-        readdir_flag.wait(true);
+        log_i({ "{}: {:?}" }, __func__, path);
 
-        if (auto found = cache.m_file_stat.find(path); found == cache.m_file_stat.end()) {
-            // INFO: exec_adb_shell file args need to be escaped
-            auto ls = cmd::exec_adb_shell({ "ls", "-llad", detail::copy_escape(path) });
-            if (ls.returncode != 0) {
-                auto errn = detail::parse_and_log_err(ls, "readlink", "failed to read file info");
-                cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
-                return -errn;
-            }
+        return ok_or(path::create(path), std::errc::operation_not_supported)
+            .and_then([](path::Path p) { return get_data().tree.readlink(p); })
+            .and_then([&](tree::Node* node) -> Expect<void> {
+                auto path = node->build_path();    // this will emits absolute path, which we don't want
+                if (path.size() - 1 < size) {
+                    std::memcpy(buf, path.c_str() + 1, path.size());    // copy path without initial '/'
 
-            auto success = detail::parse_file_stat("/", util::strip(ls.cout), cache, [&](auto) { });
-            if (not success) {
-                log_e({ "readdir: failed to parse file stat [{}]" }, ls.cout);
-                return -EIO;
-            }
-        }
-
-        auto lock        = std::shared_lock{ cache.m_mutex };
-        auto& [__, stat] = *cache.m_file_stat.find(path);
-
-        if (stat.m_err != 0) {
-            log_d({ "readlink: from cache [{}] (errno: {})" }, path, stat.m_err);
-            return -stat.m_err;
-        }
-
-        if ((stat.m_mode & S_IFMT) != S_IFLNK) {
-            log_e({ "readlink: [{}] is not a link" }, path);
-            return -EINVAL;
-        }
-
-        if (stat.m_link_to.size() >= size) {
-            log_e({ "readlink: buffer too small for link [{}]" }, path);
-            return -ENOSYS;
-        }
-
-        std::memcpy(buf, stat.m_link_to.c_str(), std::min(size, stat.m_link_to.size() + 1));
-
-        return 0;
+                    return {};
+                } else {
+                    log_e({ "readlink: path size is too long: {} vs {}" }, size, path.size());
+                    return std::unexpected{ std::errc::filename_too_long };
+                }
+            })
+            .transform_error(fuse_err(__func__))
+            .error_or(0);
     }
 
-    i32 mknod(const char* path, mode_t mode, [[maybe_unused]] dev_t rdev)
+    i32 mknod(const char* path, [[maybe_unused]] mode_t mode, [[maybe_unused]] dev_t rdev)
     {
-        log_i({ "mknod: {:?}" }, path);
-        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
-        auto local_path = temp / detail::copy_replace(path, '/', '-');
+        log_i({ "{}: {:?}" }, __func__, path);
 
-        if ((mode & S_IFMT) != S_IFREG) {
-            log_e({ "mknod: [{}] is not a regular file" }, path);
-            return -EACCES;
-        }
-
-        // INFO: exec_adb_shell file args need to be escaped
-        auto touch = cmd::exec_adb_shell({ "touch", detail::copy_escape(path) });
-        if (touch.returncode != 0) {
-            return -detail::parse_and_log_err(touch, "mknod", "failed to create file");
-        }
-
-        auto pull = cmd::exec_adb({ "pull", path, local_path });
-        if (pull.returncode != 0) {
-            return -detail::parse_and_log_err(pull, "mknod", fmt::format("failed to pull {:?}", path));
-        }
-
-        cache.m_file_stat.erase(path);
-
-        return 0;
+        return ok_or(path::create(path), std::errc::operation_not_supported)
+            .and_then([](path::Path p) { return get_data().tree.mknod(p); })
+            .transform_error(fuse_err(__func__))
+            .error_or(0);
     }
 
     i32 mkdir(const char* path, [[maybe_unused]] mode_t mode)
     {
-        log_i({ "mkdir: {:?}" }, path);
-        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
+        log_i({ "{}: {:?}" }, __func__, path);
 
-        // INFO: exec_adb_shell file args need to be escaped
-        auto mkdir = cmd::exec_adb_shell({ "mkdir", detail::copy_escape(path) });
-        if (mkdir.returncode != 0) {
-            return -detail::parse_and_log_err(mkdir, "mkdir", "failed to create directory");
-        }
-
-        cache.m_file_stat.erase(path);
-
-        return 0;
+        return ok_or(path::create(path), std::errc::operation_not_supported)
+            .and_then([](path::Path p) { return get_data().tree.mkdir(p); })
+            .transform_error(fuse_err(__func__))
+            .error_or(0);
     }
 
     i32 unlink(const char* path)
     {
-        log_i({ "unlink: {:?}" }, path);
-        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
+        log_i({ "{}: {:?}" }, __func__, path);
 
-        auto local_path = temp / detail::copy_replace(path, '/', '-');
-
-        cache.m_file_stat.erase(path);
-        local.remove(local_path);
-
-        // INFO: exec_adb_shell file args need to be escaped
-        auto rm = cmd::exec_adb_shell({ "rm", detail::copy_escape(path) });
-        if (rm.returncode != 0) {
-            auto errn = detail::parse_and_log_err(rm, "unlink", "failed to remove file");
-            cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
-            return -errn;
-        }
-
-        if (rescan) {
-            auto out = detail::adb_rescan_file(path);
-            if (out.returncode != 0) {
-                return -detail::parse_and_log_err(out, "flush", "failed to rescan file");
-            }
-        }
-
-        return 0;
+        return ok_or(path::create(path), std::errc::operation_not_supported)
+            .and_then([](auto p) { return get_data().tree.unlink(p); })
+            .transform_error(fuse_err(__func__))
+            .error_or(0);
     }
 
     i32 rmdir(const char* path)
     {
-        log_i({ "rmdir: {:?}" }, path);
-        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
+        log_i({ "{}: {:?}" }, __func__, path);
 
-        // INFO: exec_adb_shell file args need to be escaped
-        auto rmdir = cmd::exec_adb_shell({ "rmdir", detail::copy_escape(path) });
-        if (rmdir.returncode != 0) {
-            return -detail::parse_and_log_err(rmdir, "rmdir", "failed to remove directory");
-        }
-
-        cache.m_file_stat.erase(path);
-
-        return 0;
+        return ok_or(path::create(path), std::errc::operation_not_supported)
+            .and_then([](auto p) { return get_data().tree.rmdir(p); })
+            .transform_error(fuse_err(__func__))
+            .error_or(0);
     }
 
     // TODO: handle flags
     i32 rename(const char* from, const char* to, [[maybe_unused]] u32 flags)
     {
-        log_i({ "rename: {:?} -> {:?}" }, from, to);
-        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
+        log_i({ "{}: {:?} -> {:?}" }, __func__, from, to);
 
-        // INFO: exec_adb_shell file args need to be escaped
-        auto mv = cmd::exec_adb_shell({ "mv", detail::copy_escape(from), detail::copy_escape(to) });
-        if (mv.returncode != 0) {
-            return -detail::parse_and_log_err(mv, "rename", "failed to rename file");
+        auto from_path = path::create(from);
+        auto to_path   = path::create(to);
+
+        if (not from_path.has_value()) {
+            return fuse_err(__func__)(std::errc::operation_not_supported);
+        }
+        if (not to_path.has_value()) {
+            return fuse_err(__func__)(std::errc::operation_not_supported);
         }
 
-        auto local_from = temp / detail::copy_replace(from, '/', '-');
-        auto local_to   = temp / detail::copy_replace(to, '/', '-');
-
-        local.rename(local_from, std::move(local_to));
-
-        cache.m_file_stat.erase(from);
-        cache.m_file_stat.erase(to);
-
-        return 0;
+        return get_data().tree.rename(*from_path, *to_path).transform_error(fuse_err(__func__)).error_or(0);
     }
 
     i32 truncate(const char* path, off_t size, [[maybe_unused]] fuse_file_info* fi)
     {
-        log_i({ "truncate: {:?}" }, path);
-        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
-        auto local_path = temp / detail::copy_replace(path, '/', '-');
+        log_i({ "{}: {:?}" }, __func__, path);
 
-        if (auto found = cache.m_file_stat.find(path); found != cache.m_file_stat.end()) {
-            if (static_cast<usize>(found->second.m_size) > local.max_size()) {
-                return -EFBIG;
-            }
-        }
+        // TODO: implement
 
-        if (not local.exists(local_path)) {
-            auto pull = cmd::exec_adb({ "pull", path, local_path });
-            if (pull.returncode != 0) {
-                return -detail::parse_and_log_err(pull, "truncate", fmt::format("failed to pull {:?}", path));
-            }
-            if (auto res = local.add(local_path); res != 0) {
-                return -res;
-            }
-        }
-
-        cache.m_file_truncated.insert(path);
-        cache.m_file_stat.erase(path);
-
-        return ::truncate(local_path.c_str(), size);
+        return fuse_err(__func__)(std::errc::function_not_supported);
     }
 
     i32 open(const char* path, fuse_file_info* fi)
     {
-        log_i({ "open: {:?}" }, path);
-        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
-        auto local_path = temp / detail::copy_replace(path, '/', '-');
+        log_i({ "{}: {:?}" }, __func__, path);
 
-        if (auto found = cache.m_file_stat.find(path); found != cache.m_file_stat.end()) {
-            if (static_cast<usize>(found->second.m_size) > local.max_size()) {
-                log_i({ "open: file size is too large [{}]" }, path);
-                return -EFBIG;
-            }
-        }
+        // TODO: implement
 
-        if (not cache.m_file_truncated.contains(path) and not local.exists(local_path)) {
-            auto pull = cmd::exec_adb({ "pull", path, local_path });
-            if (pull.returncode != 0) {
-                return -detail::parse_and_log_err(pull, "open", fmt::format("failed to pull {:?}", path));
-            }
-            if (auto res = local.add(local_path); res != 0) {
-                return -res;
-            }
-        }
-
-        cache.m_file_truncated.erase(path);
-
-        auto handle = ::open(local_path.c_str(), fi->flags);
-        if (handle == -1) {
-            log_e({ "open: failed to open [{}] (errno: {}) {}" }, local_path.c_str(), errno, strerror(errno));
-            return -errno;
-        }
-
-        fi->fh = static_cast<u64>(handle);
-
-        return 0;
+        return fuse_err(__func__)(std::errc::function_not_supported);
     }
 
     i32 read(const char* path, char* buf, size_t size, off_t offset, fuse_file_info* fi)
     {
-        log_i({ "read: {:?}" }, path);
-        // auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
+        log_i({ "{}: {:?}" }, __func__, path);
 
-        auto fd  = static_cast<i32>(fi->fh);
-        auto res = ::pread(fd, buf, size, offset);
-        if (res == -1) {
-            log_e({ "read: failed to read [{}] (errno: {}) {}" }, path, errno, strerror(errno));
-            return -errno;
-        }
+        // TODO: implement
 
-        return static_cast<i32>(res);
+        return fuse_err(__func__)(std::errc::function_not_supported);
     }
 
     i32 write(const char* path, const char* buf, size_t size, off_t offset, fuse_file_info* fi)
     {
-        log_i({ "write: {:?}" }, path);
-        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
-        auto local_path = temp / detail::copy_replace(path, '/', '-');
+        log_i({ "{}: {:?}" }, __func__, path);
 
-        auto fd = static_cast<i32>(fi->fh);
-        cache.m_file_pending_write.insert(fd);
+        // TODO: implement
 
-        auto res = ::pwrite(fd, buf, size, offset);
-        if (res == -1) {
-            log_e({ "write: failed to write file [{}] (errno: {}) {}" }, local_path, errno, strerror(errno));
-            return -errno;
-        }
-
-        return static_cast<i32>(res);
+        return fuse_err(__func__)(std::errc::function_not_supported);
     }
 
     i32 flush(const char* path, fuse_file_info* fi)
     {
-        log_i({ "flush: {:?}" }, path);
+        log_i({ "{}: {:?}" }, __func__, path);
 
-        auto fd = static_cast<i32>(fi->fh);
-        ::fsync(fd);
+        // TODO: implement
 
-        return 0;
+        return fuse_err(__func__)(std::errc::function_not_supported);
     }
 
     i32 release(const char* path, fuse_file_info* fi)
     {
-        log_i({ "release: {:?}" }, path);
-        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
-        auto local_path = temp / detail::copy_replace(path, '/', '-');
+        log_i({ "{}: {:?}" }, __func__, path);
 
-        cache.m_file_stat.erase(path);
-        auto fd = static_cast<i32>(fi->fh);
+        // TODO: implement
 
-        if (::close(fd) == -1) {
-            log_e({ "release: failed to close file [{}] (errno: {}) {}" }, fd, errno, strerror(errno));
-            return -errno;
-        }
-
-        if (cache.m_file_pending_write.contains(fd)) {
-            cache.m_file_pending_write.erase(fd);
-
-            log_d({ "release: new size of file is [{}]" }, fs::file_size(local_path));
-
-            auto push = cmd::exec_adb({ "push", local_path, path });
-            if (push.returncode != 0) {
-                return -detail::parse_and_log_err(push, "flush", fmt::format("failed to push {:?}", path));
-            }
-
-            std::ignore = cmd::exec_adb_shell({ "sync" });
-            if (rescan) {
-                auto out = detail::adb_rescan_file(path);
-                if (out.returncode != 0) {
-                    return -detail::parse_and_log_err(out, "flush", "failed to rescan file");
-                }
-            }
-        } else {
-            log_d({ "release: file [{}] with fd [{}] is not pending write" }, path, fd);
-        }
-
-        return 0;
+        return fuse_err(__func__)(std::errc::function_not_supported);
     }
 
     i32 readdir(
@@ -801,79 +260,31 @@ namespace adbfsm
         [[maybe_unused]] fuse_readdir_flags flags
     )
     {
-        log_i({ "readdir: {:?}" }, path);
-        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
-        readdir_flag.wait(true);
+        log_i({ "{}: {:?}" }, __func__, path);
 
-        if (auto found = cache.m_file_stat.find(path); found != cache.m_file_stat.end()) {
-            auto& [path, stat] = *found;
-            if (stat.m_err != 0) {
-                return -stat.m_err;
-            }
-        }
+        const auto fill = [&](const char* name) { filler(buf, name, nullptr, 0, FUSE_FILL_DIR_PLUS); };
 
-        // INFO: exec_adb_shell file args need to be escaped
-        auto ls = cmd::exec_adb_shell({ "ls", "-lla", detail::copy_escape(path) });
-        if (ls.returncode != 0) {
-            auto errn = detail::parse_and_log_err(ls, "readdir", "failed to list directory");
-            cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
-            return -errn;
-        }
-
-        util::StringSplitter{ ls.cout, '\n' }.while_next([&](Str line) {
-            if (line.size() < detail::minimum_path_size) {    // skip lines too short to process
-                return;
-            }
-            detail::parse_file_stat(path, line, cache, [&](detail::ParsedStat parsed) {
-                auto& [path, stat] = parsed;
-                filler(buf, path.data(), nullptr, 0, FUSE_FILL_DIR_PLUS);
-            });
-        });
-
-        readdir_flag = false;
-        readdir_flag.notify_all();
-
-        return 0;
+        return ok_or(path::create(path), std::errc::operation_not_supported)
+            .and_then([&](auto p) { return get_data().tree.readdir(p, fill); })
+            .transform_error(fuse_err(__func__))
+            .error_or(0);
     }
 
     i32 access([[maybe_unused]] const char* path, [[maybe_unused]] i32 mask)
     {
-        log_i({ "access: {:?}" }, path);
+        log_i({ "{}: {:?}" }, __func__, path);
+
         // NOTE: empty
+
         return 0;
     }
 
     i32 utimens(const char* path, [[maybe_unused]] const timespec tv[2], [[maybe_unused]] fuse_file_info* fi)
     {
-        log_i({ "utimens: {:?}" }, path);
-        auto& [cache, local, temp, serial, readdir_flag, rescan] = detail::get_data();
-        readdir_flag.wait(true);
+        log_i({ "{}: {:?}" }, __func__, path);
 
-        // TODO: use the timedata from ts instead of the current time
-        // NOTE: this command also need escaping
-        auto touch = cmd::exec_adb_shell({ "touch", detail::copy_escape(path) });
-        if (touch.returncode != 0) {
-            auto errn = detail::parse_and_log_err(touch, "utimens", "failed to touch file");
-            cache.m_file_stat.emplace(path, Stat{ .m_err = errn });
-            return -errn;
-        }
+        // TODO: implement
 
-        if (auto found = cache.m_file_stat.find(path); found != cache.m_file_stat.end()) {
-            auto& [path, stat] = *found;
-            if (stat.m_err != 0) {
-                return -stat.m_err;
-            }
-            stat.m_mtime = Clock::now();
-        }
-
-        // If we forgot to mount -o rescan then we can remount and touch to trigger the scan.
-        if (rescan) {
-            auto out = detail::adb_rescan_file(path);
-            if (out.returncode != 0) {
-                return -detail::parse_and_log_err(out, "utimens", "failed to rescan file");
-            }
-        }
-
-        return 0;
+        return fuse_err(__func__)(std::errc::function_not_supported);
     }
 }
