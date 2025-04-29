@@ -200,7 +200,7 @@ namespace
             return Clock::to_time_t(time);
         };
 
-        log_e({ "parse_time: failed to parse time [{} {} {}]" }, ymd, hms, offset);
+        log_w({ "parse_time: failed to parse time [{} {} {}]" }, ymd, hms, offset);
         return {};
     }
 
@@ -230,7 +230,7 @@ namespace
 
         auto result = util::split_n<8>(str, ' ');
         if (not result) {
-            log_e({ "parse_file_stat: string can't be split into 8 parts [{}]" }, str);
+            log_w({ "parse_file_stat: string can't be split into 8 parts [{}]" }, str);
             return std::nullopt;
         }
 
@@ -250,7 +250,7 @@ namespace
         }
 
         if (to_be_stat[0].find_first_of('?') != String::npos) {
-            log_e({ "parse_file_stat: failed, file contains unparsable data [{}]" }, to_be_stat[0]);
+            log_w({ "parse_file_stat: failed, file contains unparsable data [{}]" }, to_be_stat[0]);
             return std::nullopt;
         }
 
@@ -295,7 +295,9 @@ namespace adbfsm::data
 
     Expect<std::generator<ParsedStat>> Connection::stat_dir(path::Path path)
     {
-        const auto cmd = Array{ "adb"sv, "shell"sv, "ls"sv, "-lla"sv, path.fullpath() };
+        // NOTE: somehow adb shell needs double escaping
+        const auto path_str = fmt::format("\"{}\"", path.fullpath());
+        const auto cmd      = Array{ "adb"sv, "shell"sv, "ls"sv, "-lla"sv, Str{ path_str } };
 
         auto out = exec(cmd);
         if (not out.has_value()) {
@@ -318,7 +320,9 @@ namespace adbfsm::data
 
     Expect<ParsedStat> Connection::stat(path::Path path)
     {
-        const auto cmd = Array{ "adb"sv, "shell"sv, "ls"sv, "-llad"sv, path.fullpath() };
+        // NOTE: somehow adb shell needs double escaping
+        const auto path_str = fmt::format("\"{}\"", path.fullpath());
+        const auto cmd      = Array{ "adb"sv, "shell"sv, "ls"sv, "-llad"sv, Str{ path_str } };
 
         auto out = exec(cmd);
         if (not out.has_value()) {
@@ -334,38 +338,54 @@ namespace adbfsm::data
         return std::move(parsed).value();
     }
 
-    Expect<void> Connection::touch(path::Path path)
+    Expect<void> Connection::touch(path::Path path, bool create)
     {
-        const auto cmd = Array{ "adb"sv, "shell"sv, "touch"sv, path.fullpath() };
-        return exec(cmd).transform(sink_void);
+        // NOTE: somehow adb shell needs double escaping
+        const auto path_str = fmt::format("\"{}\"", path.fullpath());
+        if (create) {
+            const auto cmd = Array{ "adb"sv, "shell"sv, "touch"sv, Str{ path_str } };
+            return exec(cmd).transform(sink_void);
+        } else {
+            const auto cmd = Array{ "adb"sv, "shell"sv, "touch"sv, "-c"sv, Str{ path_str } };
+            return exec(cmd).transform(sink_void);
+        }
     }
 
     Expect<void> Connection::mkdir(path::Path path)
     {
-        const auto cmd = Array{ "adb"sv, "shell"sv, "mkdir"sv, path.fullpath() };
+        // NOTE: somehow adb shell needs double escaping
+        const auto path_str = fmt::format("\"{}\"", path.fullpath());
+        const auto cmd      = Array{ "adb"sv, "shell"sv, "mkdir"sv, Str{ path_str } };
         return exec(cmd).transform(sink_void);
     }
 
     Expect<void> Connection::rm(path::Path path, bool recursive)
     {
+        // NOTE: somehow adb shell needs double escaping
+        const auto path_str = fmt::format("\"{}\"", path.fullpath());
         if (not recursive) {
-            const auto cmd = Array{ "adb"sv, "shell"sv, "rm"sv, path.fullpath() };
+            const auto cmd = Array{ "adb"sv, "shell"sv, "rm"sv, Str{ path_str } };
             return exec(cmd).transform(sink_void);
         } else {
-            const auto cmd = Array{ "adb"sv, "shell"sv, "rm"sv, "-r"sv, path.fullpath() };
+            const auto cmd = Array{ "adb"sv, "shell"sv, "rm"sv, "-r"sv, Str{ path_str } };
             return exec(cmd).transform(sink_void);
         }
     }
 
     Expect<void> Connection::rmdir(path::Path path)
     {
-        const auto cmd = Array{ "adb"sv, "shell"sv, "rmdir"sv, path.fullpath() };
+        // NOTE: somehow adb shell needs double escaping
+        const auto path_str = fmt::format("\"{}\"", path.fullpath());
+        const auto cmd      = Array{ "adb"sv, "shell"sv, "rmdir"sv, Str{ path_str } };
         return exec(cmd).transform(sink_void);
     }
 
     Expect<void> Connection::mv(path::Path from, path::Path to)
     {
-        const auto cmd = Array{ "adb"sv, "shell"sv, "mv"sv, from.fullpath(), to.fullpath() };
+        // NOTE: somehow adb shell needs double escaping
+        const auto from_str = fmt::format("\"{}\"", from.fullpath());
+        const auto to_str   = fmt::format("\"{}\"", to.fullpath());
+        const auto cmd      = Array{ "adb"sv, "shell"sv, "mv"sv, Str{ from_str }, Str{ to_str } };
         return exec(cmd).transform(sink_void);
     }
 

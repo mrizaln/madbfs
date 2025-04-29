@@ -25,7 +25,7 @@ namespace adbfsm::data
     public:
         virtual Expect<std::generator<ParsedStat>> stat_dir(path::Path path)            = 0;
         virtual Expect<ParsedStat>                 stat(path::Path path)                = 0;
-        virtual Expect<void>                       touch(path::Path path)               = 0;
+        virtual Expect<void>                       touch(path::Path path, bool create)  = 0;
         virtual Expect<void>                       mkdir(path::Path path)               = 0;
         virtual Expect<void>                       rm(path::Path path, bool recursive)  = 0;
         virtual Expect<void>                       rmdir(path::Path path)               = 0;
@@ -61,8 +61,9 @@ namespace adbfsm::data
          * @brief Touch a file on the device.
          *
          * @param path Path to the file.
+         * @param create Indicate whether to create a file if not exist.
          */
-        Expect<void> touch(path::Path path) override;
+        Expect<void> touch(path::Path path, bool create) override;
 
         /**
          * @brief Make a directory on the device.
