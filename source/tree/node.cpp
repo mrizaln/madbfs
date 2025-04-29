@@ -1,7 +1,6 @@
 #include "adbfsm/tree/node.hpp"
 #include "adbfsm/data/connection.hpp"
 
-#include <expected>
 #include <sys/stat.h>
 
 namespace adbfsm::tree

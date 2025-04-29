@@ -34,6 +34,9 @@ namespace adbfsm::tree
     public:
         Directory() = default;
 
+        bool has_readdir() const { return m_has_readdir; }
+        void set_readdir() { m_has_readdir = true; }
+
         /**
          * @brief Check if a node with the given name exists.
          *
@@ -70,6 +73,7 @@ namespace adbfsm::tree
 
     private:
         Vec<Uniq<Node>> m_children;
+        bool            m_has_readdir = false;
     };
 
     // TODO: add a way to check if the link is broken
@@ -150,6 +154,7 @@ namespace adbfsm::tree
         void set_id(data::Id id) { m_id = id; }
         void set_name(Str name) { m_name = name; }
         void set_parent(Node* parent) { m_parent = parent; }
+        void set_stat(data::Stat stat) { m_stat = stat; }
 
         data::Id    id() const { return m_id; }
         Str         name() const { return m_name; }
