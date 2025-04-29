@@ -16,9 +16,75 @@ namespace
 {
     using namespace adbfsm;
 
+    static constexpr Str no_device           = "adb: no devices/emulators found";
+    static constexpr Str device_offline      = "adb: device offline";
+    static constexpr Str permission_denied   = " Permission denied";
+    static constexpr Str no_such_file_or_dir = " No such file or directory";
+    static constexpr Str not_a_directory     = " Not a directory";
+    static constexpr Str inaccessible        = " inaccessible or not found";
+    static constexpr Str read_only           = " Read-only file system";
+
+    enum class Error
+    {
+        Unknown,
+        NoDev,
+        PermDenied,
+        NoSuchFileOrDir,
+        NotADir,
+        Inaccessible,
+        ReadOnly,
+    };
+
+    std::errc to_errc(Error err)
+    {
+        switch (err) {
+        case Error::Unknown: return std::errc::io_error;
+        case Error::NoDev: return std::errc::no_such_device;
+        case Error::PermDenied: return std::errc::permission_denied;
+        case Error::NoSuchFileOrDir: return std::errc::no_such_file_or_directory;
+        case Error::NotADir: return std::errc::not_a_directory;
+        case Error::Inaccessible: return std::errc::operation_not_supported;    // program not accessible
+        case Error::ReadOnly: return std::errc::read_only_file_system;
+        default: std::terminate();
+        }
+    }
+
+    Error parse_stderr(Str str)
+    {
+        auto splitter = util::StringSplitter{ str, '\n' };
+        while (auto line = splitter.next()) {
+            if (*line == no_device or *line == device_offline) {
+                return Error::NoDev;
+            }
+
+            auto rev       = String{ line->rbegin(), line->rend() };
+            auto rev_strip = util::strip(rev);
+            auto err       = util::StringSplitter{ rev_strip, ':' }.next();
+            if (not err) {
+                continue;
+            }
+
+            auto eq = [&](auto rhs) { return sr::equal(*err, rhs | sv::reverse); };
+
+            // clang-format off
+            if      (eq(permission_denied))     return Error::PermDenied;
+            else if (eq(no_such_file_or_dir))   return Error::NoSuchFileOrDir;
+            else if (eq(not_a_directory))       return Error::NotADir;
+            else if (eq(inaccessible))          return Error::Inaccessible;
+            else if (eq(read_only))             return Error::ReadOnly;
+            else                                return Error::Unknown;
+            // clang-format on
+        }
+
+        return Error::Unknown;
+    }
+
     Expect<String> exec(Span<const Str> cmd)
     {
+        log_d({ "exec command: {::?}" }, cmd);
+
         using Sink = reproc::sink::string;
+        using namespace std::chrono_literals;
 
         auto proc = reproc::process{};
         auto args = reproc::arguments{ cmd };
@@ -29,18 +95,27 @@ namespace
         auto out = String{};
         auto err = String{};
 
-        auto ec       = proc.start(args, opts);
-        auto ec_drain = reproc::drain(proc, Sink{ out }, Sink{ err });
+        auto ec             = proc.start(args, opts);
+        auto ec_drain       = reproc::drain(proc, Sink{ out }, Sink{ err });
+        auto [ret, ec_wait] = proc.wait(10s);
 
-        if (ec != std::errc{}) {
-            const auto& errmsg = not err.empty() ? err : out;
-            log_e({ "failed to execute command [{}]: {}" }, cmd, errmsg);
+        if (ec) {
+            log_e({ "failed to start command {}: {}" }, cmd, ec.message());
+            return std::unexpected{ std::errc::protocol_error };
+        }
+        if (ec_wait) {
+            log_e({ "failed to execute command {}: {}" }, cmd, ec_wait.message());
+            return std::unexpected{ std::errc::timed_out };
+        }
+        if (ec_drain) {
+            log_e({ "failed to drain command output {}: {}" }, cmd, ec_drain.message());
+            return std::unexpected{ static_cast<std::errc>(ec_drain.value()) };
         }
 
-        if (ec_drain) {
-            return std::unexpected{ static_cast<std::errc>(ec_drain.value()) };
-        } else if (ec) {
-            return std::unexpected{ static_cast<std::errc>(ec.value()) };
+        if (ret != 0) {
+            const auto& errmsg = not err.empty() ? err : out;
+            log_e({ "non-zero command status ({}) {}: err: [{}]" }, ret, cmd, util::strip(errmsg));
+            return std::unexpected{ to_errc(parse_stderr(errmsg)) };
         }
 
         return std::move(out);
@@ -164,6 +239,11 @@ namespace
         auto path = remainder;
         auto link = Str{};
 
+        // NOTE: special case, ignore
+        if (remainder == "." or remainder == "..") {
+            return std::nullopt;
+        }
+
         if (auto arrow = remainder.find(" -> "); arrow != String::npos) {
             path = remainder.substr(0, arrow);
             link = remainder.substr(arrow + 4);
@@ -177,18 +257,20 @@ namespace
         auto name_store = std::array<char, 128>{};    // getpwnam & getgrpnam need null terminated string :(
 
         name_store.fill(0);
-        std::copy(to_be_stat[2].begin(), to_be_stat[2].end(), name_store.data());
+        auto size = std::min(to_be_stat[2].size(), name_store.size() - 1);
+        std::copy_n(to_be_stat[2].begin(), size, name_store.data());
         auto maybe_uid = ::getpwnam(name_store.data());
 
         name_store.fill(0);
-        std::copy(to_be_stat[3].begin(), to_be_stat[3].end(), name_store.data());
+        size = std::min(to_be_stat[3].size(), name_store.size() - 1);
+        std::copy_n(to_be_stat[3].begin(), size, name_store.data());
         auto maybe_grp = ::getgrnam(name_store.data());
 
         // TODO: cache the uid and gid
 
         auto stat = data::Stat{
             .mode  = parse_mode(to_be_stat[0]),
-            .links = parse_fundamental<nlink_t>(to_be_stat[1]).value(),
+            .links = parse_fundamental<nlink_t>(to_be_stat[1]).value_or(0),
             .uid   = maybe_uid ? maybe_uid->pw_uid : 98,
             .gid   = maybe_grp ? maybe_grp->gr_gid : 98,
             .size  = parse_fundamental<off_t>(to_be_stat[4]).value_or(0),
@@ -213,31 +295,30 @@ namespace adbfsm::data
 
     Expect<std::generator<ParsedStat>> Connection::stat_dir(path::Path path)
     {
-        const auto cmd = Array{ "adb"sv, "shell"sv, "-lla"sv, path.fullpath() };
+        const auto cmd = Array{ "adb"sv, "shell"sv, "ls"sv, "-lla"sv, path.fullpath() };
 
         auto out = exec(cmd);
         if (not out.has_value()) {
             return std::unexpected{ out.error() };
         }
 
-        auto generator = [out = std::move(out).value()] -> std::generator<ParsedStat> {
+        auto generator = [](std::string out) -> std::generator<ParsedStat> {
             auto lines = util::StringSplitter{ out, '\n' };
             while (auto line = lines.next()) {
                 auto parsed = parse_file_stat(util::strip(*line));
                 if (not parsed.has_value()) {
-                    log_e({ "Connection::stat_dir: parsing stat failed [{}]" }, *line);
                     continue;
                 }
                 co_yield std::move(parsed).value();
             }
         };
 
-        return generator();
+        return generator(std::move(out).value());
     }
 
     Expect<ParsedStat> Connection::stat(path::Path path)
     {
-        const auto cmd = Array{ "adb"sv, "shell"sv, "-llad"sv, path.fullpath() };
+        const auto cmd = Array{ "adb"sv, "shell"sv, "ls"sv, "-llad"sv, path.fullpath() };
 
         auto out = exec(cmd);
         if (not out.has_value()) {
