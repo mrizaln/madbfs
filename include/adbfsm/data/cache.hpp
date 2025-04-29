@@ -6,6 +6,7 @@
 #include <atomic>
 #include <deque>
 #include <filesystem>
+#include <shared_mutex>
 
 namespace adbfsm::data
 {
@@ -53,9 +54,17 @@ namespace adbfsm::data
     class ICache
     {
     public:
-        virtual const Entry*         get(Id id) const                              = 0;
-        virtual Expect<const Entry*> add(IConnection& connection, path::Path path) = 0;
-        virtual bool                 remove(Id id)                                 = 0;
+        using Path = std::filesystem::path;
+
+        virtual Opt<Path> get(Id id) const             = 0;
+        virtual bool      exists(Id id) const          = 0;
+        virtual bool      set_dirty(Id id, bool dirty) = 0;
+
+        virtual Expect<Id>   add(IConnection& connection, path::Path path) = 0;
+        virtual Expect<bool> remove(IConnection& connection, Id id)        = 0;
+
+        virtual Expect<bool> sync(IConnection& connection)         = 0;
+        virtual Expect<bool> flush(IConnection& connection, Id id) = 0;
 
         virtual ~ICache() = default;
     };
@@ -80,12 +89,29 @@ namespace adbfsm::data
          *
          * @param id The id of the entry
          *
-         * @return Pointer to entry if exists, or nullptr if not exists.
+         * @return Path to cache file or nullopt if id not in entry.
          *
-         * The returned pointer only valid until Cache::add is called. In the case of the entry not exist, it
-         * may have been invalidated on Cache::add call. You may want to re-add the entry if that is the case.
+         * The returned path only valid until Cache::add is called. In the case of the entry not exist, it may
+         * have been invalidated on Cache::add call. You may want to re-add the entry if that is the case.
          */
-        const Entry* get(Id id) const override;
+        Opt<ICache::Path> get(Id id) const override;
+
+        /**
+         * @brief Check whether a cache is exists by its id.
+         *
+         * @param id The id of the entry
+         */
+        bool exists(Id id) const override;
+
+        /**
+         * @brief Set entry as dirty or modified.
+         *
+         * @param id Id of the entry.
+         * @param dirty The dirty state of the entry.
+         *
+         * @return True if successfully changed the status of the entry.
+         */
+        bool set_dirty(Id id, bool dirty) override;
 
         /**
          * @brief Add a new entry into the cache
@@ -93,24 +119,47 @@ namespace adbfsm::data
          * @param connection IConnection interface to the device.
          * @param path Path to be inserted into the entry
          *
-         * @return Pointer to Entry if successful or error if not successful.
+         * @return Id of the entry or error if not successful.
          *
          * The returned pointer is guaranteed to be non-null.
          */
-        Expect<const Entry*> add(IConnection& connection, path::Path path) override;
+        Expect<Id> add(IConnection& connection, path::Path path) override;
 
         /**
          * @brief Remove cache entry.
          *
+         * @param connection IConnection interface to the device.
          * @param id The id to the cache.
          *
          * @return True if the entry is removed, false if it's not exists.
          */
-        bool remove(Id id) override;
+        Expect<bool> remove(IConnection& connection, Id id) override;
+
+        /**
+         * @brief Sync the cache with the device.
+         *
+         * @param connection IConnection interface to the device.
+         *
+         * @return True if sync performed else false if there's nothing to sync.
+         */
+        Expect<bool> sync(IConnection& connection) override;
+
+        /**
+         * @brief Sync the cache with the device.
+         *
+         * @param connection IConnection interface to the device.
+         * @param id The id to the cache.
+         *
+         * @return True if flush performed else false if there's nothing to flush.
+         */
+        Expect<bool> flush(IConnection& connection, Id id) override;
 
     private:
-        // files that are pulled from the device and associated with node in FileTree
-        std::deque<Entry>     m_entries;
+        mutable std::shared_mutex m_mutex;
+
+        std::deque<Entry> m_entries;
+        std::deque<Entry> m_entries_dirty;
+
         std::filesystem::path m_cache_dir;
 
         usize m_max_size;
