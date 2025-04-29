@@ -1,8 +1,10 @@
 #pragma once
 
+#include <rapidhash.h>
+
+#include <chrono>
 #include <cstdint>
 #include <expected>
-#include <filesystem>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -68,9 +70,34 @@ namespace adbfsm
         using Clock     = std::chrono::system_clock;
         using Timestamp = Clock::time_point;
 
-        namespace fs = std::filesystem;
         namespace sr = std::ranges;
         namespace sv = std::views;
+    }
+
+    inline namespace util_functions
+    {
+        inline constexpr auto sink_void = [](auto&&) { };
+        inline constexpr auto sink_unit = [](auto&&) { return Unit{}; };
+
+        template <typename T>
+        Expect<T> ok_or(Opt<T>&& opt, std::errc err)
+        {
+            if (opt.has_value()) {
+                return std::move(opt).value();
+            } else {
+                return std::unexpected{ err };
+            }
+        }
+
+        template <typename T>
+        Expect<T*> ptr_ok_or(T* opt, std::errc err)
+        {
+            if (opt != nullptr) {
+                return opt;
+            } else {
+                return std::unexpected{ err };
+            }
+        }
     }
 
     inline namespace literals
@@ -94,3 +121,11 @@ namespace adbfsm
         // clang-format on
     }
 }
+
+// enable hashing for any type that has unique object representation
+template <typename T>
+    requires std::has_unique_object_representations_v<T>
+struct std::hash<T>
+{
+    std::size_t operator()(const T& value) const noexcept { return rapidhash(&value, sizeof(T)); }
+};

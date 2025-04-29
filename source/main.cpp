@@ -1,6 +1,6 @@
 #include "adbfsm/adbfsm.hpp"
 #include "adbfsm/args.hpp"
-#include "adbfsm/cmd.hpp"
+#include "adbfsm/log.hpp"
 
 #include <execinfo.h>
 #include <unistd.h>
@@ -50,8 +50,8 @@ void unexpected_program_end(const char* msg, bool is_sigsegv)
     // remove the temporary directory
     if (auto* fuse_ctx = fuse_get_context(); fuse_ctx != nullptr) {
         adbfsm::log_c({ "> There is no fuse context! temp dir can't be deleted" });
-        auto& data = *static_cast<adbfsm::AdbfsmData*>(fuse_ctx->private_data);
-        std::filesystem::remove_all(data.m_dir);
+        auto& data = *static_cast<adbfsm::Adbfsm*>(fuse_ctx->private_data);
+        std::filesystem::remove_all(data.cache_dir);
     }
 
     if (is_sigsegv) {
@@ -63,9 +63,9 @@ void unexpected_program_end(const char* msg, bool is_sigsegv)
 int main(int argc, char** argv)
 {
     fmt::println("[adbfsm] checking adb availability...");
-    if (auto serv = adbfsm::cmd::exec({ "adb", "start-server" }); serv.returncode != 0) {
+    if (auto status = adbfsm::data::start_connection(); not status.has_value()) {
         fmt::println(stderr, "error: failed to start adb server, make sure adb is installed and in PATH");
-        fmt::println(stderr, "stderr:\n{}", serv.cerr);
+        fmt::println(stderr, "{}", std::make_error_code(status.error()).message());
         return 1;
     }
 
