@@ -1,41 +1,53 @@
 #include "adbfsm/tree/file_tree.hpp"
 #include "adbfsm/log.hpp"
 #include "adbfsm/tree/node.hpp"
+#include "adbfsm/util.hpp"
 
 namespace
 {
     // dumb unescape function, it will skip '\' in a string
-    adbfsm::String& unescape(adbfsm::String& str)
+    adbfsm::String unescape(adbfsm::Str str)
     {
-        auto left  = 0uz;
-        auto right = 0uz;
+        auto right     = 0uz;
+        auto unescaped = adbfsm::String{};
 
         while (right < str.size()) {
-            right       += str[right] == '\\';
-            str[left++]  = str[right++];
+            right     += str[right] == '\\';
+            unescaped += str[right++];
         }
 
-        str.resize(left);
-        return str;
+        return unescaped;
     }
 
-    // implicitly unescape the string
-    adbfsm::String resolve_path(adbfsm::Str parent, adbfsm::Str path)
+    // resolve relative path
+    adbfsm::String resolve_path(adbfsm::path::Path parent, adbfsm::Str path)
     {
-        auto resolved    = adbfsm::String{};
-        auto num_slashes = adbfsm::sr::count(parent | adbfsm::sv::drop(1), '/');
-
-        auto pos = 0uz;
-        while (path[pos] == '/') {
-            ++pos;
-        }
-        for (; num_slashes; --num_slashes) {
-            resolved.append("../");
+        auto parents = std::vector<adbfsm::Str>{};
+        if (path.front() != '/') {
+            parents = adbfsm::util::split(parent.fullpath(), '/');
         }
 
-        resolved.append(path.data() + pos, path.size() - pos);
+        adbfsm::util::StringSplitter{ path, '/' }.while_next([&](adbfsm::Str str) {
+            if (str == ".") {
+                return;
+            } else if (str == "..") {
+                if (not parents.empty()) {
+                    parents.pop_back();
+                }
+                return;
+            }
+            parents.push_back(str);
+        });
 
-        unescape(resolved);
+        if (parents.empty()) {
+            return "/";
+        }
+
+        auto resolved = adbfsm::String{};
+        for (auto path : parents) {
+            resolved += '/';
+            resolved += path;
+        }
 
         return resolved;
     }
@@ -78,6 +90,15 @@ namespace adbfsm::tree
     Expect<Node*> FileTree::traverse_or_build(path::Path path)
     {
         if (path.is_root()) {
+            // workaround to initialize root stat on getattr
+            if (not m_root_initialized) {
+                auto parsed = m_connection.stat(path);
+                if (not parsed.has_value()) {
+                    return std::unexpected{ parsed.error() };
+                }
+                m_root.set_stat(parsed->stat);
+                m_root_initialized = true;
+            }
             return &m_root;
         }
 
@@ -91,21 +112,21 @@ namespace adbfsm::tree
                 return std::unexpected{ std::errc::not_a_directory };
             }
 
+            current_path += '/';
+            current_path += name;
+
             auto node = dir->find(name);
             if (node.has_value()) {
                 current = node.value();
                 continue;
             }
 
-            current_path += '/';
-            current_path += name;
-
             // get stat from device
             auto parsed = m_connection.stat(path::create(current_path).value());
             if (not parsed.has_value()) {
                 return std::unexpected{ parsed.error() };
             }
-            if ((parsed->stat.mode & S_IFDIR) != 0) {
+            if ((parsed->stat.mode & S_IFMT) != S_IFDIR) {
                 return std::unexpected{ std::errc::not_a_directory };
             }
 
@@ -119,9 +140,12 @@ namespace adbfsm::tree
         }
 
         // current must be directory here
-        if (auto found = current->as<Directory>()->find(path.filename()); found != nullptr) {
+        if (auto found = current->as<Directory>()->find(path.filename()); found.has_value()) {
             return found;
         }
+
+        current_path += '/';
+        current_path += path.filename();
 
         // get stat from device
         auto parsed = m_connection.stat(path::create(current_path).value());
@@ -131,16 +155,16 @@ namespace adbfsm::tree
 
         // build the node depending on the node kind
         auto built = Expect<Node*>{};
+
         switch (parsed->stat.mode & S_IFMT) {
         case S_IFREG: built = current->build(path.filename(), parsed->stat, RegularFile{}); break;
         case S_IFDIR: built = current->build(path.filename(), parsed->stat, Directory{}); break;
         case S_IFLNK: {
-            auto target = resolve_path(path.parent(), parsed->link_to);
-            log_d({ "FileTree::build: getting link target: {:?}" }, target);
+            auto target = resolve_path(path.parent_path(), unescape(parsed->link_to));
 
             auto target_node = traverse_or_build(path::create(target).value());
             if (not target_node.has_value()) {
-                log_e({ "FileTree::build: target can't found target: {:?}" }, target);
+                log_e({ "{}: can't found target: {:?}" }, __func__, target);
                 return std::unexpected{ target_node.error() };
             }
 
@@ -149,15 +173,80 @@ namespace adbfsm::tree
         default: built = current->build(path.filename(), parsed->stat, Other{}); break;
         }
 
-        if (not built.has_value()) {
-            return std::unexpected{ built.error() };
+        return built;
+    }
+
+    Expect<void> FileTree::readdir(path::Path path, Filler filler)
+    {
+        log_d({ "{}: {:?}" }, __func__, path.fullpath());
+
+        auto lock = std::scoped_lock{ m_mutex };
+
+        auto base = &m_root;
+
+        if (not path.is_root()) {
+            auto maybe_base = traverse_or_build(path);
+            if (not maybe_base.has_value()) {
+                return std::unexpected{ maybe_base.error() };
+            }
+            base = maybe_base.value();
         }
 
-        return std::unexpected{ std::errc::no_such_file_or_directory };
+        if (auto* dir = base->as<Directory>(); dir == nullptr) {
+            return std::unexpected{ std::errc::not_a_directory };
+        } else if (dir->has_readdir()) {
+            for (const auto& child : dir->children()) {
+                filler(child->name().data());
+            }
+            return {};
+        }
+
+        // NOTE: base must be a Directory here, since traverse_or_build below code is an else branch of
+        // conditional above
+
+        return m_connection.stat_dir(path).transform([&](auto stats) {
+            log_d({ "readdir: {:?}" }, path.fullpath());
+
+            for (auto stat : stats) {
+                auto file = unescape(stat.path);
+
+                auto built = Expect<Node*>{};
+                switch (stat.stat.mode & S_IFMT) {
+                case S_IFREG: built = base->build(file, stat.stat, RegularFile{}); break;
+                case S_IFDIR: built = base->build(file, stat.stat, Directory{}); break;
+                case S_IFLNK: {
+                    auto target      = resolve_path(path, unescape(stat.link_to));
+                    auto target_node = traverse_or_build(path::create(target).value());
+                    if (not target_node.has_value()) {
+                        log_e({ "readdir: target can't found target: {:?}" }, target);
+                        continue;
+                    }
+
+                    built = base->build(file, stat.stat, Link{ *target_node });
+                } break;
+                default: built = base->build(file, stat.stat, Other{}); break;
+                }
+
+                if (not built.has_value()) {
+                    log_e(
+                        { "readdir: {} [{}/{}]" },
+                        std::make_error_code(built.error()).message(),
+                        path.fullpath(),
+                        stat.path
+                    );
+                }
+
+                filler(file.c_str());
+            }
+
+            base->as<Directory>()->set_readdir();
+        });
     }
 
     Expect<const data::Stat*> FileTree::getattr(path::Path path)
     {
+        log_d({ "{}: {:?}" }, __func__, path.fullpath());
+
         auto lock = std::scoped_lock{ m_mutex };
 
         return traverse_or_build(path)    //
@@ -166,15 +255,19 @@ namespace adbfsm::tree
 
     Expect<Node*> FileTree::readlink(path::Path path)
     {
+        log_d({ "{}: {:?}" }, __func__, path.fullpath());
+
         auto lock = std::scoped_lock{ m_mutex };
 
         return traverse_or_build(path)    //
             .and_then([](Node* node) { return ptr_ok_or(node->as<Link>(), std::errc::invalid_argument); })
-            .transform([](Link* node) { return node->target(); });
+            .transform([](Link* node) { return node->real_path(); });
     }
 
     Expect<Node*> FileTree::mknod(path::Path path)
     {
+        log_d({ "{}: {:?}" }, __func__, path.fullpath());
+
         auto lock = std::scoped_lock{ m_mutex };
 
         auto parent = path.parent_path();
@@ -186,6 +279,8 @@ namespace adbfsm::tree
 
     Expect<Node*> FileTree::mkdir(path::Path path)
     {
+        log_d({ "{}: {:?}" }, __func__, path.fullpath());
+
         auto lock = std::scoped_lock{ m_mutex };
 
         auto parent = path.parent_path();
@@ -197,6 +292,8 @@ namespace adbfsm::tree
 
     Expect<void> FileTree::unlink(path::Path path)
     {
+        log_d({ "{}: {:?}" }, __func__, path.fullpath());
+
         auto lock = std::scoped_lock{ m_mutex };
 
         auto parent = path.parent_path();
@@ -208,6 +305,8 @@ namespace adbfsm::tree
 
     Expect<void> FileTree::rmdir(path::Path path)
     {
+        log_d({ "{}: {:?}" }, __func__, path.fullpath());
+
         auto lock = std::scoped_lock{ m_mutex };
 
         auto parent = path.parent_path();
@@ -219,6 +318,8 @@ namespace adbfsm::tree
 
     Expect<void> FileTree::rename(path::Path from, path::Path to)
     {
+        log_d({ "{}: {:?} -> {:?}" }, __func__, from.fullpath(), to.fullpath());
+
         auto lock = std::scoped_lock{ m_mutex };
 
         auto from_node = traverse_or_build(from);

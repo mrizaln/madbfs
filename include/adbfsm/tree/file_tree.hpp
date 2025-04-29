@@ -4,6 +4,7 @@
 #include "adbfsm/path/path.hpp"
 #include "adbfsm/tree/node.hpp"
 
+#include <functional>
 #include <mutex>
 
 namespace adbfsm::tree
@@ -17,6 +18,8 @@ namespace adbfsm::tree
     class FileTree
     {
     public:
+        using Filler = std::function<void(const char* name)>;
+
         FileTree(data::IConnection& connection, data::ICache& cache);
 
         FileTree(Node&& root)            = delete;
@@ -32,14 +35,24 @@ namespace adbfsm::tree
          */
         Expect<Node*> traverse(path::Path path);
 
+        Expect<void>              readdir(path::Path path, Filler filler);
         Expect<const data::Stat*> getattr(path::Path path);
-        Expect<Node*>             readlink(path::Path path);
-        Expect<Node*>             mknod(path::Path path);
-        Expect<Node*>             mkdir(path::Path path);
-        Expect<void>              unlink(path::Path path);
-        Expect<void>              rmdir(path::Path path);
-        Expect<void>              rename(path::Path from, path::Path to);
-        Expect<void>              symlink(path::Path path, path::Path target);
+
+        Expect<Node*> readlink(path::Path path);
+        Expect<Node*> mknod(path::Path path);
+        Expect<Node*> mkdir(path::Path path);
+        Expect<void>  unlink(path::Path path);
+        Expect<void>  rmdir(path::Path path);
+        Expect<void>  rename(path::Path from, path::Path to);
+        Expect<void>  truncate(path::Path, usize size);
+        Expect<i32>   open(path::Path, usize size, std::span<char> buf, off_t offset);
+        Expect<usize> read(path::Path, usize size, std::string_view str, off_t offset);
+        Expect<usize> write(path::Path, usize size);
+        Expect<void>  flush(path::Path path);
+        Expect<void>  release(path::Path path);
+        Expect<void>  utimens(path::Path path);
+
+        Expect<void> symlink(path::Path path, path::Path target);
 
         const Node& root() const { return m_root; }
 
@@ -54,6 +67,7 @@ namespace adbfsm::tree
         Node               m_root;
         data::ICache&      m_cache;
         data::IConnection& m_connection;
+        bool               m_root_initialized = false;
 
         std::mutex m_mutex;
     };

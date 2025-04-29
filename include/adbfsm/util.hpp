@@ -105,6 +105,13 @@ namespace adbfsm::util
         Str                m_remainder;
     };
 
+    inline std::vector<Str> split(Str str, SplitDelim delim)
+    {
+        auto vec = std::vector<Str>{};
+        StringSplitter{ str, delim }.while_next([&](Str str) { vec.push_back(str); });
+        return vec;
+    }
+
     template <usize N>
     Opt<SplitResult<N>> split_n(Str str, SplitDelim delim)
     {
