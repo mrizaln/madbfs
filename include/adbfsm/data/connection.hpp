@@ -111,4 +111,40 @@ namespace adbfsm::data
          */
         Expect<void> push(path::Path from, path::Path to) override;
     };
+
+    enum class DeviceStatus
+    {
+        Device,
+        Offline,
+        Unauthorized,
+        Unknown,
+    };
+
+    struct Device
+    {
+        String       serial;
+        DeviceStatus status;
+    };
+
+    constexpr std::string_view to_string(DeviceStatus status)
+    {
+        switch (status) {
+        case DeviceStatus::Device: return "device ok";
+        case DeviceStatus::Offline: return "device offline";
+        case DeviceStatus::Unauthorized: return "device unauthorized";
+        case DeviceStatus::Unknown: return "unknown";
+        }
+        return "Unknown";
+    }
+
+    /**
+     * @brief Start connection with the devices.
+     */
+    Expect<void> start_connection();
+
+    /**
+     * @brief List connected devices.
+     */
+    Expect<std::vector<Device>> list_devices();
+
 }

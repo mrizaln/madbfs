@@ -304,7 +304,7 @@ namespace adbfsm::data
             return std::unexpected{ out.error() };
         }
 
-        auto generator = [](std::string out) -> std::generator<ParsedStat> {
+        auto generator = [](String out) -> std::generator<ParsedStat> {
             auto lines = util::StringSplitter{ out, '\n' };
             while (auto line = lines.next()) {
                 auto parsed = parse_file_stat(util::strip(*line));
@@ -399,5 +399,49 @@ namespace adbfsm::data
     {
         const auto cmd = Array{ "adb"sv, "push"sv, from.fullpath(), to.fullpath() };
         return exec(cmd).transform(sink_void);
+    }
+
+    Expect<void> start_connection()
+    {
+        const auto cmd = Array{ "adb"sv, "start-server"sv };
+        return exec(cmd).transform(sink_void);
+    }
+
+    Expect<std::vector<Device>> list_devices()
+    {
+        const auto cmd = Array{ "adb"sv, "devices"sv };
+        auto       out = exec(cmd);
+
+        if (not out.has_value()) {
+            return std::unexpected{ out.error() };
+        }
+
+        auto devices = std::vector<Device>{};
+
+        auto line_splitter = util::StringSplitter{ *out, { '\n' } };
+        std::ignore        = line_splitter.next();    // skip the first line
+
+        while (auto str = line_splitter.next()) {
+            auto splitter = util::StringSplitter{ *str, { " \t" } };
+
+            auto serial_str = splitter.next();
+            auto status_str = splitter.next();
+
+            if (not serial_str.has_value() or not status_str.has_value()) {
+                continue;
+            }
+
+            auto status = DeviceStatus::Unknown;
+
+            // clang-format off
+                if      (*status_str == "offline")      status = DeviceStatus::Offline;
+                else if (*status_str == "unauthorized") status = DeviceStatus::Unauthorized;
+                else if (*status_str == "device")       status = DeviceStatus::Device;
+            // clang-format on
+
+            devices.emplace_back(String{ *serial_str }, status);
+        }
+
+        return devices;
     }
 }

@@ -4,7 +4,7 @@
 #include "adbfsm/data/cache.hpp"
 #include "adbfsm/data/connection.hpp"
 #include "adbfsm/data/stat.hpp"
-#include "adbfsm/tree/util.hpp"
+#include "adbfsm/util.hpp"
 
 #include <sys/types.h>
 

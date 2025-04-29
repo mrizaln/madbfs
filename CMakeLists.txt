@@ -18,8 +18,6 @@ find_package(rapidhash REQUIRED)
 find_package(reproc++ REQUIRED)
 find_package(spdlog REQUIRED)
 
-include(cmake/fetched-libs.cmake)
-
 add_library(adbfsm-lib STATIC)
 target_sources(
     adbfsm-lib
@@ -40,7 +38,6 @@ target_link_libraries(
         rapidhash::rapidhash
         reproc::reproc
         spdlog::spdlog
-        fetch::subprocess
 )
 target_include_directories(adbfsm-lib PUBLIC include)
 

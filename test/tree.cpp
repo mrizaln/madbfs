@@ -1,6 +1,5 @@
 #include "adbfsm/path/path.hpp"
 #include "adbfsm/tree/node.hpp"
-#include "adbfsm/tree/util.hpp"
 #include <adbfsm/tree/file_tree.hpp>
 
 #include <boost/ut.hpp>
@@ -83,7 +82,7 @@ struct fmt::formatter<adbfsm::tree::Node> : fmt::formatter<std::string_view>
                 fmt::format_to(ctx.out(), "    ");
             }
 
-            auto visitor = util::Overload{
+            auto visitor = adbfsm::util::Overload{
                 [&](const Link& link) { return fmt::format("    ->    {}", link.target()->build_path()); },
                 [&](const Directory&) { return String{ "/" }; },
                 [&](const auto&) { return String{ "" }; },

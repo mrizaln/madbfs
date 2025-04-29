@@ -1,11 +1,13 @@
 #pragma once
 
-#include "adbfsm/cmd.hpp"
-#include "adbfsm/util.hpp"
+#include "adbfsm/data/connection.hpp"
 
 #define FUSE_USE_VERSION 31
 #include <fuse3/fuse.h>
 #include <fuse3/fuse_lowlevel.h>
+#include <spdlog/spdlog.h>
+
+#include <iostream>
 
 namespace adbfsm::args
 {
@@ -49,14 +51,6 @@ namespace adbfsm::args
         // clang-format on
     };
 
-    enum class SerialStatus
-    {
-        NotExist,
-        Offline,
-        Unauthorized,
-        Device,
-    };
-
     static constexpr auto adbfsm_opt_spec = std::array<fuse_opt, 9>{ {
         // clang-format off
         { "--serial=%s",    offsetof(AdbfsmOpt, m_serial),    true },
@@ -87,17 +81,6 @@ namespace adbfsm::args
         );
     };
 
-    constexpr std::string_view to_string(SerialStatus status)
-    {
-        switch (status) {
-        case SerialStatus::NotExist: return "device not exist";
-        case SerialStatus::Offline: return "device offline";
-        case SerialStatus::Unauthorized: return "device unauthorized";
-        case SerialStatus::Device: return "device ok";
-        }
-        return "Unknown";
-    }
-
     inline std::optional<spdlog::level::level_enum> parse_level_str(std::string_view level)
     {
         // clang-format off
@@ -112,86 +95,51 @@ namespace adbfsm::args
         // clang-format on
     }
 
-    inline SerialStatus check_serial(std::string_view serial)
+    inline data::DeviceStatus check_serial(std::string_view serial)
     {
-        auto proc = adbfsm::cmd::exec({ "adb", "devices" });
-        assert(proc.returncode == 0);
-
-        auto line_splitter = adbfsm::util::StringSplitter{ proc.cout, { '\n' } };
-        while (auto str = line_splitter.next()) {
-            auto splitter = adbfsm::util::StringSplitter{ *str, { " \t" } };
-
-            auto supposedly_serial = splitter.next();
-            auto status            = splitter.next();
-
-            if (not supposedly_serial.has_value() or not status.has_value()) {
-                return SerialStatus::NotExist;
-            }
-
-            if (supposedly_serial.value() == serial) {
-                if (*status == "offline") {
-                    return SerialStatus::Offline;
-                } else if (*status == "unauthorized") {
-                    return SerialStatus::Unauthorized;
-                } else if (*status == "device") {
-                    return SerialStatus::Device;
-                } else {
-                    return SerialStatus::NotExist;
-                }
+        if (auto maybe_devices = data::list_devices(); maybe_devices.has_value()) {
+            auto found = sr::find(*maybe_devices, serial, &data::Device::serial);
+            if (found != maybe_devices->end()) {
+                return found->status;
             }
         }
-
-        return SerialStatus::NotExist;
+        return data::DeviceStatus::Unknown;
     }
 
     inline std::string get_serial()
     {
-        auto proc = adbfsm::cmd::exec({ "adb", "devices" });
-        assert(proc.returncode == 0);
-
-        auto serials       = std::vector<std::string>{};
-        auto line_splitter = adbfsm::util::StringSplitter{ proc.cout, { '\n' } };
-
-        std::ignore = line_splitter.next();    // skip the first line
-
-        while (auto str = line_splitter.next()) {
-            auto splitter = adbfsm::util::StringSplitter{ *str, { " \t" } };
-
-            auto supposedly_serial = splitter.next();
-            auto status            = splitter.next();
-
-            if (not supposedly_serial.has_value() or not status.has_value()) {
-                break;
-            }
-            if (*status == "device") {
-                serials.emplace_back(*supposedly_serial);
-            }
+        auto maybe_devices = data::list_devices();
+        if (not maybe_devices.has_value()) {
+            return "";
         }
+        auto devices = *maybe_devices                                                                 //
+                     | sv::filter([](auto&& d) { return d.status == data::DeviceStatus::Device; })    //
+                     | sr::to<std::vector>();
 
-        if (serials.empty()) {
+        if (devices.empty()) {
             return {};
-        } else if (serials.size() == 1) {
-            fmt::println("[adbfsm] only one device found, using serial '{}'", serials[0]);
-            return serials[0];
+        } else if (devices.size() == 1) {
+            fmt::println("[adbfsm] only one device found, using serial '{}'", devices[0].serial);
+            return devices[0].serial;
         }
 
         fmt::println("[adbfsm] multiple devices detected,");
-        for (auto i : adbfsm::sv::iota(0u, serials.size())) {
-            fmt::println("         - {}: {}", i + 1, serials[i]);
+        for (auto i : adbfsm::sv::iota(0u, devices.size())) {
+            fmt::println("         - {}: {}", i + 1, devices[i].serial);
         }
         fmt::print("[adbfsm] please specify which one you would like to use: ");
 
         auto choice = 1u;
         while (true) {
             std::cin >> choice;
-            if (choice > 0 and choice <= serials.size()) {
+            if (choice > 0 and choice <= devices.size()) {
                 break;
             }
-            fmt::print("[adbfsm] invalid choice, please enter a number between 1 and {}: ", serials.size());
+            fmt::print("[adbfsm] invalid choice, please enter a number between 1 and {}: ", devices.size());
         }
-        fmt::println("[adbfsm] using serial '{}'", serials[choice - 1]);
+        fmt::println("[adbfsm] using serial '{}'", devices[choice - 1].serial);
 
-        return serials[choice - 1];
+        return devices[choice - 1].serial;
     }
 
     /**
@@ -258,7 +206,7 @@ namespace adbfsm::args
                 return 1;
             }
             adbfsm_opt.m_serial = ::strdup(serial.c_str());
-        } else if (auto status = check_serial(adbfsm_opt.m_serial); status != SerialStatus::Device) {
+        } else if (auto status = check_serial(adbfsm_opt.m_serial); status != data::DeviceStatus::Device) {
             fmt::println(
                 stderr, "error: serial '{} 'is not valid ({})", adbfsm_opt.m_serial, to_string(status)
             );

@@ -1,5 +1,6 @@
 #include "adbfsm/adbfsm.hpp"
 #include "adbfsm/args.hpp"
+#include "adbfsm/log.hpp"
 
 #include <fcntl.h>
 
