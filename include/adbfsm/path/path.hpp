@@ -89,7 +89,7 @@ namespace adbfsm::path
         {
         }
 
-        Path as_path() { return m_path; }
+        Path as_path() const { return m_path; }
 
     private:
         String m_buf;
