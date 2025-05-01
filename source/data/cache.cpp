@@ -6,8 +6,6 @@ namespace adbfsm::data
 {
     Opt<ICache::Path> Cache::get(Id id) const
     {
-        auto lock = std::shared_lock{ m_mutex };
-
         if (exists(id)) {
             return m_cache_dir / std::to_string(id.inner());
         }
@@ -42,6 +40,7 @@ namespace adbfsm::data
                 return true;
             }
         }
+
         return false;
     }
 
@@ -71,7 +70,7 @@ namespace adbfsm::data
             new_size -= entry.size;
         }
 
-        auto& entry = m_entries.emplace_back(Id::incr(), stat->stat.size, Clock::now(), path);
+        auto& entry = m_entries.emplace_back(Id::incr(), stat->stat.size, Clock::now(), path.into_buf());
 
         auto dest = m_cache_dir / std::to_string(entry.id.inner());
         auto file = connection.pull(path, path::create(dest.c_str()).value());
@@ -88,7 +87,6 @@ namespace adbfsm::data
 
     Expect<bool> Cache::remove(IConnection& connection, Id id)
     {
-
         auto lock = std::unique_lock{ m_mutex };
 
         if (id.inner() == 0) {
