@@ -8,7 +8,7 @@ This project aims to create a well-built filesystem abstraction over `adb` using
 
 I want to manage my Android phone storage from my computer without using the terrible MTP.
 
-This project is primarily inspired by the [`adbfs-rootless`](https://github.com/spion/adbfs-rootless) project by Spion, available on GitHub. While his work is highly commendable and greatly appreciated, my experience with it has been marked by frequent crashes. Although I considered updating the code, I found that the codebase was somewhat outdated. As a result, I decided to start from scratch in order to develop a more stable and modern solution.
+This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbfs-rootless) project by Spion, available on GitHub. While `adbfs-rootless` works as intended, I encoutered frequent crashes that affected its reliability. I initially considered contributing fixes directly into the codebase, but found it somewhat dated with practices that don't align well with modern practices. Consequently, I decided to rebuild the project from the ground up to create a more stable and modern solution.
 
 ## Dependencies
 
@@ -28,7 +28,7 @@ Library dependencies
 
 ## Building
 
-Since the dependencies are all managed by Conan, you need to make sure it's installed and configured correctly (consult the documentation on how to do it, [here](https://docs.conan.io/2/installation.html)).
+Since the dependencies are managed by Conan, you need to make sure it's installed and configured correctly (consult the documentation on how to do it, [here](https://docs.conan.io/2/installation.html)) on your system.
 
 > don't forget to run `conan profile detect` if you use Conan for the first time
 
@@ -66,7 +66,7 @@ Options for adbfsm:
 
 ### Selecting device
 
-To mount your device you just need to specify the mount point if there is only one device. If there are more than one device then you can specify the serial using `--serial` option. If you omit the `--serial` option when there are multiple device connected to the computer, you will be prompted to specify the device you want to mount.
+To mount your device you only need to specify the mount point if there is only one device. If there are more than one device then you can specify the serial using `--serial` option. If you omit the `--serial` option when there are multiple device connected to the computer, you will be prompted to specify the device you want to mount.
 
 ```sh
 $ ./adbfsm mount
@@ -77,7 +77,7 @@ $ ./adbfsm mount
 [adbfsm] please specify which one you would like to use: _
 ```
 
-`adbfsm` respects the env variable `ANDROID_SERIAL` just like `adb` so you can use that instead to specify the device.
+`adbfsm` respects the env variable `ANDROID_SERIAL` (mimicking `adb` behavior) so you can alternately use it to specify the device.
 
 ```sh
 $ ANDROID_SERIAL=068832516O101622 ./adbfsm
@@ -87,6 +87,8 @@ $ ANDROID_SERIAL=068832516O101622 ./adbfsm
 ```
 
 ### Cache size
+
+> As the approach the file management has change, this section is irrelevant at the moment
 
 `adbfsm` use the `/tmp/` directory for caching the files pulled from the phone. This cache can be large so you can limit or increase the size of this cache. The size of the cache also correlates to the largest file that can be viewed/pulled from the phone so make sure to set it according to your need.
 
@@ -100,7 +102,7 @@ If the `/tmp/` directory is using `zram` (`tmpfs`) you might want to be careful 
 
 ### Logging
 
-The default log file is stdout (which goes to nowhere when not run in debug mode). If you wish, you can set the log file to your own liking using `--logfile` option and set the log level using `--loglevel`.
+The default log file is stdout (which goes to nowhere when not run in debug mode). You can manually set the log file using `--logfile` option and set the log level using `--loglevel`.
 
 ```sh
 $ ./adbfsm --logfile=adbfsm.log --loglevel=debug <mountpoint>
@@ -108,7 +110,7 @@ $ ./adbfsm --logfile=adbfsm.log --loglevel=debug <mountpoint>
 
 ### Debug mode
 
-As part of debugging functionality `libfuse` has provided debug mode through `-d` flag. You can use this to monitor `adbfsm` operations (if you don't want to use log file or want to see the log in real-time).
+As part of debugging functionality `libfuse` has provided debug mode through `-d` flag. You can use this to monitor `adbfsm` operations (if you don't want to use log file or want to see the log in real-time). If the debugging information is too verbose, you can use `-f` instead to make adbfsm run in foreground mode without printing `fuse` debug information.
 
 ```sh
 $ ./adbfsm --logfile=- --loglevel=debug -d <mountpoint>                     # this will print the libfuse debug messages and adbfsm log messages
@@ -122,4 +124,4 @@ $ ./adbfsm --logfile=- --loglevel=debug -d <mountpoint> 2> /dev/null        # th
 - [ ] IPC to talk to the `adbfsm` to control the filesystem parameters like invalidation, timeout, cache size, etc.
 - [x] Implement the filesystem as actual tree for caching the stat.
 - [ ] Implement versioning on each node that expires every certain period of time. When a node expires it needs to query the files from the device again.
-- [ ] Implement proper multithreading. Current implementation is practically single threaded (the tree is locked every time it is used) which is not ideal.
+- [x] Implement proper multithreading. Current implementation is practically single threaded (the tree is locked every time it is used) which is not ideal.
