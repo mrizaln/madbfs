@@ -63,10 +63,10 @@ namespace adbfsm::tree
     {
     }
 
-    Expect<Node*> FileTree::traverse(path::Path path)
+    Expect<Ref<Node>> FileTree::traverse(path::Path path)
     {
         if (path.is_root()) {
-            return &m_root;
+            return m_root;
         }
 
         auto* current = &m_root;
@@ -74,76 +74,75 @@ namespace adbfsm::tree
         for (auto name : path.iter() | sv::drop(1)) {
             auto next = current->traverse(name);
             if (not next.has_value()) {
-                return std::unexpected{ next.error() };
+                return Unexpect{ next.error() };
             }
-            current = next.value();
+            current = &next->get();
         }
 
-        return current;
+        return *current;
     }
 
-    Expect<Node*> FileTree::traverse_or_build(path::Path path)
+    Expect<Ref<Node>> FileTree::traverse_or_build(path::Path path)
     {
         if (path.is_root()) {
             // workaround to initialize root stat on getattr
             if (not m_root_initialized) {
                 auto parsed = m_connection.stat(path);
                 if (not parsed.has_value()) {
-                    return std::unexpected{ parsed.error() };
+                    return Unexpect{ parsed.error() };
                 }
                 m_root.set_stat(parsed->stat);
                 m_root_initialized = true;
             }
-            return &m_root;
+            return m_root;
         }
 
         auto* current      = &m_root;
-        auto  current_path = String{};
+        auto  current_path = path::PathBuf::root();
 
         // iterate until parent
         for (auto name : path.parent_path().iter() | sv::drop(1)) {
-            current_path += '/';
-            current_path += name;
+            auto res = current_path.extend(name);
+            assert(res and "extend failed");
 
             if (auto next = current->traverse(name); next.has_value()) {
-                current = next.value();
+                current = &next->get();
                 continue;
             }
 
             // get stat from device
-            auto parsed = m_connection.stat(path::create(current_path).value());
+            auto parsed = m_connection.stat(current_path.as_path());
             if (not parsed.has_value()) {
-                return std::unexpected{ parsed.error() };
+                return Unexpect{ parsed.error() };
             }
             if ((parsed->stat.mode & S_IFMT) != S_IFDIR) {
-                return std::unexpected{ std::errc::not_a_directory };
+                return Unexpect{ Errc::not_a_directory };
             }
 
             // build the node
             auto built = current->build(name, parsed->stat, Directory{});
             if (not built.has_value()) {
-                return std::unexpected{ built.error() };
+                return Unexpect{ built.error() };
             }
 
-            current = built.value();
+            current = &built->get();
         }
 
-        // current must be directory here
         if (auto found = current->traverse(path.filename()); found.has_value()) {
             return found;
         }
 
-        current_path += '/';
-        current_path += path.filename();
+        auto res = current_path.extend(path.filename());
+        assert(res and "extend failed");
 
         // get stat from device
-        auto parsed = m_connection.stat(path::create(current_path).value());
+        auto parsed = m_connection.stat(current_path.as_path());
         if (not parsed.has_value()) {
-            return std::unexpected{ parsed.error() };
+            return Unexpect{ parsed.error() };
         }
 
         // build the node depending on the node kind
-        auto built = Expect<Node*>{};
+        auto built = Opt<Expect<Ref<Node>>>{};
 
         switch (parsed->stat.mode & S_IFMT) {
         case S_IFREG: built = current->build(path.filename(), parsed->stat, RegularFile{}); break;
@@ -154,15 +153,15 @@ namespace adbfsm::tree
             auto target_node = traverse_or_build(path::create(target).value());
             if (not target_node.has_value()) {
                 log_e({ "{}: can't found target: {:?}" }, __func__, target);
-                return std::unexpected{ target_node.error() };
+                return Unexpect{ target_node.error() };
             }
 
-            built = current->build(path.filename(), parsed->stat, Link{ *target_node });
+            built = current->build(path.filename(), parsed->stat, Link{ &target_node->get() });
         } break;
         default: built = current->build(path.filename(), parsed->stat, Other{}); break;
         }
 
-        return built;
+        return built.value()->get();
     }
 
     Expect<void> FileTree::readdir(path::Path path, Filler filler)
@@ -172,9 +171,9 @@ namespace adbfsm::tree
         if (not path.is_root()) {
             auto maybe_base = traverse_or_build(path);
             if (not maybe_base.has_value()) {
-                return std::unexpected{ maybe_base.error() };
+                return Unexpect{ maybe_base.error() };
             }
-            base = maybe_base.value();
+            base = &maybe_base->get();
         }
 
         if (base->has_synced()) {
@@ -188,7 +187,8 @@ namespace adbfsm::tree
             for (auto stat : stats) {
                 auto file = unescape(stat.path);
 
-                auto built = Expect<Node*>{};
+                auto built = Opt<Expect<Ref<Node>>>{};
+
                 switch (stat.stat.mode & S_IFMT) {
                 case S_IFREG: built = base->build(file, stat.stat, RegularFile{}); break;
                 case S_IFDIR: built = base->build(file, stat.stat, Directory{}); break;
@@ -199,8 +199,7 @@ namespace adbfsm::tree
                         log_w({ "readdir: target can't found target: {:?}" }, target);
                         continue;
                     }
-
-                    built = base->build(file, stat.stat, Link{ *target_node });
+                    built = base->build(file, stat.stat, Link{ &target_node->get() });
                 } break;
                 default: built = base->build(file, stat.stat, Other{}); break;
                 }
@@ -208,7 +207,7 @@ namespace adbfsm::tree
                 if (not built.has_value()) {
                     log_e(
                         { "readdir: {} [{}/{}]" },
-                        std::make_error_code(built.error()).message(),
+                        std::make_error_code(built->error()).message(),
                         path.fullpath(),
                         stat.path
                     );
@@ -221,70 +220,65 @@ namespace adbfsm::tree
         });
     }
 
-    Expect<const data::Stat*> FileTree::getattr(path::Path path)
+    Expect<Ref<const data::Stat>> FileTree::getattr(path::Path path)
     {
-        return traverse_or_build(path)    //
-            .transform([](Node* node) { return &node->stat(); });
+        return traverse_or_build(path).transform(proj(&Node::stat));
     }
 
-    Expect<Node*> FileTree::readlink(path::Path path)
+    Expect<Ref<Node>> FileTree::readlink(path::Path path)
     {
-        return traverse_or_build(path)    //
-            .and_then([](Node* node) { return node->readlink(); });
+        return traverse_or_build(path).and_then(proj(&Node::readlink));
     }
 
-    Expect<Node*> FileTree::mknod(path::Path path)
+    Expect<Ref<Node>> FileTree::mknod(path::Path path)
     {
-        auto parent = path.parent_path();
-        return traverse_or_build(parent)    //
-            .and_then([&](Node* node) {
-                return node->touch({ m_connection, m_cache, path }, path.filename());
-            });
+        auto parent  = path.parent_path();
+        auto context = Node::Context{ m_connection, m_cache, path };
+        return traverse_or_build(parent).and_then(proj(&Node::touch, context, path.filename()));
     }
 
-    Expect<Node*> FileTree::mkdir(path::Path path)
+    Expect<Ref<Node>> FileTree::mkdir(path::Path path)
     {
-        auto parent = path.parent_path();
-        return traverse_or_build(parent)    //
-            .and_then([&](Node* node) {
-                return node->mkdir({ m_connection, m_cache, path }, path.filename());
-            });
+        auto parent  = path.parent_path();
+        auto context = Node::Context{ m_connection, m_cache, path };
+        return traverse_or_build(parent).and_then(proj(&Node::mkdir, context, path.filename()));
     }
 
     Expect<void> FileTree::unlink(path::Path path)
     {
-        auto parent = path.parent_path();
-        return traverse_or_build(parent)    //
-            .and_then([&](Node* node) {
-                return node->rm({ m_connection, m_cache, path }, path.filename(), false);
-            });
+        auto parent  = path.parent_path();
+        auto context = Node::Context{ m_connection, m_cache, path };
+        return traverse_or_build(parent).and_then(proj(&Node::rm, context, path.filename(), false));
     }
 
     Expect<void> FileTree::rmdir(path::Path path)
     {
-        auto parent = path.parent_path();
-        return traverse_or_build(parent)    //
-            .and_then([&](Node* node) {
-                return node->rmdir({ m_connection, m_cache, path }, path.filename());
-            });
+        auto parent  = path.parent_path();
+        auto context = Node::Context{ m_connection, m_cache, path };
+        return traverse_or_build(parent).and_then(proj(&Node::rmdir, context, path.filename()));
     }
 
     Expect<void> FileTree::rename(path::Path from, path::Path to)
     {
+        // NOTE: I don't think root can be moved
+        if (from.is_root()) {
+            return Unexpect{ Errc::operation_not_supported };
+        }
+
         auto from_node = traverse_or_build(from);
         if (not from_node.has_value()) {
-            return std::unexpected{ from_node.error() };
+            return Unexpect{ from_node.error() };
         }
 
         // TODO: manage cache also
         return m_connection.mv(from, to)
-            .and_then([&] { return traverse(from.parent_path()); })
-            .and_then([&](Node* node) { return node->extract(from.filename()); })
+            .transform([&] { return std::ref(*from_node->get().parent()); })    // non-root (always exists)
+            .and_then(proj(&Node::extract, from.filename()))
             .and_then([&](Uniq<Node>&& node) {
-                return traverse(to.parent_path()).and_then([&](Node* to_parent) {
+                return traverse(to.parent_path()).and_then([&](Node& to_parent) {
                     node->set_name(to.filename());
-                    node->set_parent(to_parent);
-                    return to_parent->insert(std::move(node), true);
+                    node->set_parent(&to_parent);
+                    return to_parent.insert(std::move(node), true);
                 });
             })
             .transform(sink_void);
@@ -292,51 +286,44 @@ namespace adbfsm::tree
 
     Expect<void> FileTree::truncate(path::Path path, off_t size)
     {
-        return traverse_or_build(path).and_then([&](Node* node) {
-            return node->truncate({ m_connection, m_cache, path }, size);
-        });
+        auto context = Node::Context{ m_connection, m_cache, path };
+        return traverse_or_build(path).and_then(proj(&Node::truncate, context, size));
     }
 
     Expect<i32> FileTree::open(path::Path path, int flags)
     {
-        return traverse_or_build(path).and_then([&](Node* node) {
-            return node->open({ m_connection, m_cache, path }, flags);
-        });
+        auto context = Node::Context{ m_connection, m_cache, path };
+        return traverse_or_build(path).and_then(proj(&Node::open, context, flags));
     }
 
     Expect<usize> FileTree::read(path::Path path, Span<char> out, off_t offset)
     {
-        return traverse_or_build(path).and_then([&](Node* node) {
-            return node->read({ m_connection, m_cache, path }, out, offset);
-        });
+        auto context = Node::Context{ m_connection, m_cache, path };
+        return traverse_or_build(path).and_then(proj(&Node::read, context, out, offset));
     }
 
     Expect<usize> FileTree::write(path::Path path, Str in, off_t offset)
     {
-        return traverse_or_build(path).and_then([&](Node* node) {
-            return node->write({ m_connection, m_cache, path }, in, offset);
-        });
+        auto context = Node::Context{ m_connection, m_cache, path };
+        return traverse_or_build(path).and_then(proj(&Node::write, context, in, offset));
     }
 
     Expect<void> FileTree::flush(path::Path path)
     {
-        return traverse_or_build(path).and_then([&](Node* node) {
-            return node->flush({ m_connection, m_cache, path });
-        });
+        auto context = Node::Context{ m_connection, m_cache, path };
+        return traverse_or_build(path).and_then(proj(&Node::flush, context));
     }
 
     Expect<void> FileTree::release(path::Path path)
     {
-        return traverse_or_build(path).and_then([&](Node* node) {
-            return node->release({ m_connection, m_cache, path });
-        });
+        auto context = Node::Context{ m_connection, m_cache, path };
+        return traverse_or_build(path).and_then(proj(&Node::release, context));
     }
 
     Expect<void> FileTree::utimens(path::Path path)
     {
-        return traverse_or_build(path).and_then([&](Node* node) {
-            return node->utimens({ m_connection, m_cache, path });
-        });
+        auto context = Node::Context{ m_connection, m_cache, path };
+        return traverse_or_build(path).and_then(proj(&Node::utimens, context));
     }
 
     Expect<void> FileTree::symlink(path::Path path, path::Path target)
@@ -348,7 +335,7 @@ namespace adbfsm::tree
         }
 
         return traverse(path.parent_path())
-            .and_then([&](Node* node) { return node->link(path.filename(), *target_node); })
+            .and_then(proj(&Node::link, path.filename(), &target_node->get()))
             .transform(sink_void);
     }
 }

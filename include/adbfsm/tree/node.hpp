@@ -52,7 +52,7 @@ namespace adbfsm::tree
          *
          * @param name The name of the node to check.
          */
-        Expect<Node*> find(Str name) const;
+        Expect<Ref<Node>> find(Str name) const;
 
         /**
          * @brief Erase a file by its name.
@@ -70,11 +70,11 @@ namespace adbfsm::tree
          *
          * @return A pair containing the added node and overwriten node if overwrite happens.
          *
-         * - If insertion happen without overwrite, left will be non-null whereas right will be null.
-         * - If insertion happen with overwrite and flag enabled both will be non-null.
+         * - If insertion happen without overwrite, right will be null.
+         * - If insertion happen with overwrite and flag right will be non-null.
          * - If overwrite happen when flag not enabled, error will be returned.
          */
-        Expect<Pair<Node*, Uniq<Node>>> insert(Uniq<Node> node, bool overwrite);
+        Expect<Pair<Ref<Node>, Uniq<Node>>> insert(Uniq<Node> node, bool overwrite);
 
         /**
          * @brief Extract a node.
@@ -102,7 +102,7 @@ namespace adbfsm::tree
         /**
          * @brief Get immediate target of the link.
          */
-        Node* target() const { return m_target; }
+        Node& target() const { return *m_target; }
 
     private:
         Node* m_target;    // how do I signal node not exist anymore?
@@ -183,7 +183,7 @@ namespace adbfsm::tree
          *
          * @param name The name of the child node.
          */
-        Expect<Node*> traverse(Str name) const;
+        Expect<Ref<Node>> traverse(Str name) const;
 
         /**
          * @brief List children of this node.
@@ -206,7 +206,7 @@ namespace adbfsm::tree
          * operating on the file on the device itself, this function just modify the nodes. This function
          * assume that the build process won't overwrite any node.
          */
-        Expect<Node*> build(Str name, data::Stat stat, File file);
+        Expect<Ref<Node>> build(Str name, data::Stat stat, File file);
 
         /**
          * @brief Extract a child node.
@@ -231,7 +231,7 @@ namespace adbfsm::tree
          * - If insertion happen with overwrite and flag enabled both will be non-null.
          * - If overwrite happen when flag not enabled, error will be returned.
          */
-        Expect<Pair<Node*, Uniq<Node>>> insert(Uniq<Node> node, bool overwrite);
+        Expect<Pair<Ref<Node>, Uniq<Node>>> insert(Uniq<Node> node, bool overwrite);
 
         /**
          * @brief Create a new child node as Link.
@@ -240,7 +240,7 @@ namespace adbfsm::tree
          * @param name The name of the link.
          * @param target The target of the link.
          */
-        Expect<Node*> link(Str name, Node* target);
+        Expect<Ref<Node>> link(Str name, Node* target);
 
         /**
          * @brief Create a new child node as RegularFile or touch an existing one.
@@ -248,7 +248,7 @@ namespace adbfsm::tree
          * @param context Context needed to communicate with device and local.
          * @param name The name of the child node.
          */
-        Expect<Node*> touch(Context context, Str name);
+        Expect<Ref<Node>> touch(Context context, Str name);
 
         /**
          * @brief Create a new child node as Directory.
@@ -256,7 +256,7 @@ namespace adbfsm::tree
          * @param context Context needed to communicate with device and local.
          * @param name The name of the directory.
          */
-        Expect<Node*> mkdir(Context context, Str name);
+        Expect<Ref<Node>> mkdir(Context context, Str name);
 
         /**
          * @brief Remove a child node by its name (RegularFile or Directory).
@@ -345,7 +345,7 @@ namespace adbfsm::tree
         /**
          * @brief Read a link.
          */
-        Expect<Node*> readlink();
+        Expect<Ref<Node>> readlink();
 
         // ------------------
 
