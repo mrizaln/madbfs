@@ -100,16 +100,6 @@ namespace adbfsm
             }
         }
 
-        template <typename T>
-        Expect<T*> ptr_ok_or(T* opt, std::errc err)
-        {
-            if (opt != nullptr) {
-                return opt;
-            } else {
-                return std::unexpected{ err };
-            }
-        }
-
         template <typename T, typename Ret, typename... Args>
         auto proj(Ret (T::*fn)(Args...) const, std::type_identity_t<Args>... args)
         {

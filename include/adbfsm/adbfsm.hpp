@@ -1,6 +1,5 @@
 #pragma once
 
-#include "adbfsm/data/cache.hpp"
 #include "adbfsm/data/connection.hpp"
 #include "adbfsm/tree/file_tree.hpp"
 
@@ -13,7 +12,6 @@ namespace adbfsm
     struct Adbfsm
     {
         Uniq<data::IConnection> connection;
-        Uniq<data::ICache>      cache;
         tree::FileTree          tree;
         path::PathBuf           cache_dir;    // data::ICache is not responsible for deleting the directory
     };
