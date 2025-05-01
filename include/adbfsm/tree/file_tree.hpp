@@ -46,8 +46,8 @@ namespace adbfsm::tree
         Expect<void>  rename(path::Path from, path::Path to);
         Expect<void>  truncate(path::Path path, off_t size);
         Expect<i32>   open(path::Path path, int flags);
-        Expect<usize> read(path::Path path, std::span<char> out, off_t offset);
-        Expect<usize> write(path::Path path, std::string_view in, off_t offset);
+        Expect<usize> read(path::Path path, Span<char> out, off_t offset);
+        Expect<usize> write(path::Path path, Str in, off_t offset);
         Expect<void>  flush(path::Path path);
         Expect<void>  release(path::Path path);
         Expect<void>  utimens(path::Path path);
@@ -68,7 +68,5 @@ namespace adbfsm::tree
         data::ICache&      m_cache;
         data::IConnection& m_connection;
         bool               m_root_initialized = false;
-
-        std::mutex m_mutex;
     };
 }

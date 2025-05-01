@@ -72,15 +72,11 @@ namespace adbfsm::tree
         auto* current = &m_root;
 
         for (auto name : path.iter() | sv::drop(1)) {
-            auto* dir = current->as<Directory>();
-            if (dir == nullptr) {
-                return std::unexpected{ std::errc::not_a_directory };
+            auto next = current->traverse(name);
+            if (not next.has_value()) {
+                return std::unexpected{ next.error() };
             }
-            auto node = dir->find(name);
-            if (not node.has_value()) {
-                return std::unexpected{ node.error() };
-            }
-            current = node.value();
+            current = next.value();
         }
 
         return current;
@@ -106,17 +102,11 @@ namespace adbfsm::tree
 
         // iterate until parent
         for (auto name : path.parent_path().iter() | sv::drop(1)) {
-            auto* dir = current->as<Directory>();
-            if (dir == nullptr) {
-                return std::unexpected{ std::errc::not_a_directory };
-            }
-
             current_path += '/';
             current_path += name;
 
-            auto node = dir->find(name);
-            if (node.has_value()) {
-                current = node.value();
+            if (auto next = current->traverse(name); next.has_value()) {
+                current = next.value();
                 continue;
             }
 
@@ -139,7 +129,7 @@ namespace adbfsm::tree
         }
 
         // current must be directory here
-        if (auto found = current->as<Directory>()->find(path.filename()); found.has_value()) {
+        if (auto found = current->traverse(path.filename()); found.has_value()) {
             return found;
         }
 
@@ -177,8 +167,6 @@ namespace adbfsm::tree
 
     Expect<void> FileTree::readdir(path::Path path, Filler filler)
     {
-        auto lock = std::scoped_lock{ m_mutex };
-
         auto base = &m_root;
 
         if (not path.is_root()) {
@@ -189,13 +177,8 @@ namespace adbfsm::tree
             base = maybe_base.value();
         }
 
-        if (auto* dir = base->as<Directory>(); dir == nullptr) {
-            return std::unexpected{ std::errc::not_a_directory };
-        } else if (dir->has_readdir()) {
-            for (const auto& child : dir->children()) {
-                filler(child->name().data());
-            }
-            return {};
+        if (base->has_synced()) {
+            return base->list([&](Str name) { filler(name.data()); });
         }
 
         // NOTE: base must be a Directory here, since traverse_or_build below code is an else branch of
@@ -234,75 +217,60 @@ namespace adbfsm::tree
                 filler(file.c_str());
             }
 
-            base->as<Directory>()->set_readdir();
+            base->set_synced();
         });
     }
 
     Expect<const data::Stat*> FileTree::getattr(path::Path path)
     {
-        auto lock = std::scoped_lock{ m_mutex };
-
         return traverse_or_build(path)    //
             .transform([](Node* node) { return &node->stat(); });
     }
 
     Expect<Node*> FileTree::readlink(path::Path path)
     {
-        auto lock = std::scoped_lock{ m_mutex };
-
         return traverse_or_build(path)    //
-            .and_then([](Node* node) { return ptr_ok_or(node->as<Link>(), std::errc::invalid_argument); })
-            .transform([](Link* node) { return node->real_path(); });
+            .and_then([](Node* node) { return node->readlink(); });
     }
 
     Expect<Node*> FileTree::mknod(path::Path path)
     {
-        auto lock = std::scoped_lock{ m_mutex };
-
         auto parent = path.parent_path();
         return traverse_or_build(parent)    //
             .and_then([&](Node* node) {
-                return node->touch(path.filename(), { m_connection, m_cache, path });
+                return node->touch({ m_connection, m_cache, path }, path.filename());
             });
     }
 
     Expect<Node*> FileTree::mkdir(path::Path path)
     {
-        auto lock = std::scoped_lock{ m_mutex };
-
         auto parent = path.parent_path();
         return traverse_or_build(parent)    //
             .and_then([&](Node* node) {
-                return node->mkdir(path.filename(), { m_connection, m_cache, path });
+                return node->mkdir({ m_connection, m_cache, path }, path.filename());
             });
     }
 
     Expect<void> FileTree::unlink(path::Path path)
     {
-        auto lock = std::scoped_lock{ m_mutex };
-
         auto parent = path.parent_path();
         return traverse_or_build(parent)    //
             .and_then([&](Node* node) {
-                return node->rm(path.filename(), false, { m_connection, m_cache, path });
+                return node->rm({ m_connection, m_cache, path }, path.filename(), false);
             });
     }
 
     Expect<void> FileTree::rmdir(path::Path path)
     {
-        auto lock = std::scoped_lock{ m_mutex };
-
         auto parent = path.parent_path();
         return traverse_or_build(parent)    //
             .and_then([&](Node* node) {
-                return node->rmdir(path.filename(), { m_connection, m_cache, path });
+                return node->rmdir({ m_connection, m_cache, path }, path.filename());
             });
     }
 
     Expect<void> FileTree::rename(path::Path from, path::Path to)
     {
-        auto lock = std::scoped_lock{ m_mutex };
-
         auto from_node = traverse_or_build(from);
         if (not from_node.has_value()) {
             return std::unexpected{ from_node.error() };
@@ -336,14 +304,14 @@ namespace adbfsm::tree
         });
     }
 
-    Expect<usize> FileTree::read(path::Path path, std::span<char> out, off_t offset)
+    Expect<usize> FileTree::read(path::Path path, Span<char> out, off_t offset)
     {
         return traverse_or_build(path).and_then([&](Node* node) {
             return node->read({ m_connection, m_cache, path }, out, offset);
         });
     }
 
-    Expect<usize> FileTree::write(path::Path path, std::string_view in, off_t offset)
+    Expect<usize> FileTree::write(path::Path path, Str in, off_t offset)
     {
         return traverse_or_build(path).and_then([&](Node* node) {
             return node->write({ m_connection, m_cache, path }, in, offset);
@@ -373,17 +341,14 @@ namespace adbfsm::tree
 
     Expect<void> FileTree::symlink(path::Path path, path::Path target)
     {
-        auto lock = std::scoped_lock{ m_mutex };
-
         // for now, disallow linking to non-existent target
         auto target_node = traverse(target);
         if (not target_node) {
             return target_node.transform(sink_void);
         }
 
-        auto context = Node::Context{ m_connection, m_cache, path };
         return traverse(path.parent_path())
-            .and_then([&](Node* node) { return node->link(path.filename(), *target_node, context); })
+            .and_then([&](Node* node) { return node->link(path.filename(), *target_node); })
             .transform(sink_void);
     }
 }
