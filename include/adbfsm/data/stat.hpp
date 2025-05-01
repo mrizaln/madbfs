@@ -1,9 +1,43 @@
 #pragma once
 
+#include "adbfsm/common.hpp"
+
 #include <sys/stat.h>
+
+#include <atomic>
 
 namespace adbfsm::data
 {
+    /**
+     * @class CacheId
+     *
+     * @brief Strong type for identifying an entry in the cache.
+     */
+    class Id
+    {
+    public:
+        friend class Connection;
+
+        static Id from_fd(u64 fd) { return { static_cast<u64>(fd) }; }
+
+        Id() = default;
+        u64 inner() const { return m_inner; }
+
+        auto operator<=>(const Id&) const = default;
+
+    private:
+        inline static std::atomic<u64> s_id_counter = 0;
+
+        static Id incr() { return { s_id_counter.fetch_add(1, std::memory_order::relaxed) + 1 }; }
+
+        Id(u64 inner)
+            : m_inner{ inner }
+        {
+        }
+
+        u64 m_inner = 0;
+    };
+
     struct Stat
     {
         mode_t  mode  = 0;    // -rwxrwxrwx

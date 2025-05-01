@@ -149,37 +149,25 @@ namespace mock
     class DummyConnection : public IConnection
     {
     public:
-        Expect<Gen<ParsedStat>> stat_dir(path::Path) override    // unused
-        {
-            return std::unexpected{ std::errc::inappropriate_io_control_operation };
-        }
+        Expect<Gen<ParsedStat>> statdir(path::Path) override { return adbfsm::Unexpect{ {} }; }
+        Expect<ParsedStat>      stat(path::Path) override { return ParsedStat{}; }
 
-        Expect<ParsedStat> stat(path::Path path) override
-        {
-            return ParsedStat{ .stat = {}, .path = path.fullpath(), .link_to = {} };
-        }
-
-        Expect<void> touch(path::Path, bool) override { return {}; }
+        // directory operations
         Expect<void> mkdir(path::Path) override { return {}; }
         Expect<void> rm(path::Path, bool) override { return {}; }
         Expect<void> rmdir(path::Path) override { return {}; }
         Expect<void> mv(path::Path, path::Path) override { return {}; }
-        Expect<void> pull(path::Path, path::Path) override { return {}; }
-        Expect<void> push(path::Path, path::Path) override { return {}; }
-    };
 
-    class DummyCache : public ICache
-    {
-        Opt<adbfsm::path::PathBuf> get(Id) const override { return std::nullopt; }
+        // file operations
+        Expect<void>  truncate(path::Path, off_t) override { return {}; }
+        Expect<Id>    open(path::Path, int) override { return {}; }
+        Expect<usize> read(path::Path, Span<char>, off_t) override { return {}; }
+        Expect<usize> write(path::Path, Str, off_t) override { return {}; }
+        Expect<void>  flush(path::Path) override { return {}; }
+        Expect<void>  release(path::Path) override { return {}; }
 
-        bool exists(Id) const override { return true; }
-        bool set_dirty(Id, bool) override { return true; };
-
-        Expect<Id>   add(IConnection&, path::Path) override { return {}; };
-        Expect<bool> remove(IConnection&, Id) override { return true; };
-
-        Expect<bool> sync(IConnection&) override { return true; };
-        Expect<bool> flush(IConnection&, Id) override { return true; };
+        // directory operation (adding file) or file operation (update time)
+        Expect<void> touch(path::Path, bool) override { return {}; }
     };
 }
 
@@ -199,8 +187,7 @@ int main()
         using adbfsm::path::operator""_path;
 
         auto connection = mock::DummyConnection{};
-        auto cache      = mock::DummyCache{};
-        auto context    = Node::Context{ connection, cache, "/dummy"_path };
+        auto context    = Node::Context{ connection, "/dummy"_path };
 
         auto root = Node{ "/", nullptr, {}, Directory{} };
 
@@ -255,9 +242,7 @@ int main()
         using namespace adbfsm::tree;
 
         auto connection = mock::DummyConnection{};
-        auto cache      = mock::DummyCache{};
-
-        auto tree = FileTree{ connection, cache };
+        auto tree       = FileTree{ connection };
 
 #define unwrap(T) transform_error([](auto e) { return raise_expect_error<T>(e); }).value()
 

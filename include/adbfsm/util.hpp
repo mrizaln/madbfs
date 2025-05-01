@@ -29,7 +29,7 @@ namespace adbfsm::util
             : m_lock{ lock }
         {
             auto expect = false;
-            while (not m_lock.compare_exchange_strong(expect, true, Ord::acquire, Ord::relaxed)) {
+            while (not m_lock.compare_exchange_strong(expect, true, Ord::acq_rel)) {
                 m_lock.wait(true, Ord::relaxed);
                 expect = false;
             }

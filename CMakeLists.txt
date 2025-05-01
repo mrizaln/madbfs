@@ -23,7 +23,6 @@ target_sources(
     adbfsm-lib
     PRIVATE
         source/adbfsm.cpp
-        source/data/cache.cpp
         source/data/connection.cpp
         source/path/path.cpp
         source/tree/file_tree.cpp

@@ -21,15 +21,25 @@ namespace adbfsm::data
     class IConnection
     {
     public:
-        virtual Expect<Gen<ParsedStat>> stat_dir(path::Path path)            = 0;
-        virtual Expect<ParsedStat>      stat(path::Path path)                = 0;
-        virtual Expect<void>            touch(path::Path path, bool create)  = 0;
-        virtual Expect<void>            mkdir(path::Path path)               = 0;
-        virtual Expect<void>            rm(path::Path path, bool recursive)  = 0;
-        virtual Expect<void>            rmdir(path::Path path)               = 0;
-        virtual Expect<void>            mv(path::Path from, path::Path to)   = 0;
-        virtual Expect<void>            pull(path::Path from, path::Path to) = 0;
-        virtual Expect<void>            push(path::Path from, path::Path to) = 0;
+        virtual Expect<Gen<ParsedStat>> statdir(path::Path path) = 0;
+        virtual Expect<ParsedStat>      stat(path::Path path)    = 0;
+
+        // directory operations
+        virtual Expect<void> mkdir(path::Path path)              = 0;
+        virtual Expect<void> rm(path::Path path, bool recursive) = 0;
+        virtual Expect<void> rmdir(path::Path path)              = 0;
+        virtual Expect<void> mv(path::Path from, path::Path to)  = 0;
+
+        // file operations
+        virtual Expect<void>  truncate(path::Path path, off_t size)               = 0;
+        virtual Expect<Id>    open(path::Path path, int flags)                    = 0;
+        virtual Expect<usize> read(path::Path path, Span<char> out, off_t offset) = 0;
+        virtual Expect<usize> write(path::Path path, Str in, off_t offset)        = 0;
+        virtual Expect<void>  flush(path::Path path)                              = 0;
+        virtual Expect<void>  release(path::Path path)                            = 0;
+
+        // directory operation (adding file) or file operation (update time)
+        virtual Expect<void> touch(path::Path path, bool create) = 0;
 
         virtual ~IConnection() = default;
     };
@@ -37,6 +47,9 @@ namespace adbfsm::data
     class Connection : public IConnection
     {
     public:
+        // directory operations
+        // --------------------
+
         /**
          * @brief List
          *
@@ -44,7 +57,7 @@ namespace adbfsm::data
          *
          * @return A generator if successful, or an error if it fails.
          */
-        Expect<Gen<ParsedStat>> stat_dir(path::Path path) override;
+        Expect<Gen<ParsedStat>> statdir(path::Path path) override;
 
         /**
          * @brief Get the stat of a file or directory.
@@ -54,14 +67,6 @@ namespace adbfsm::data
          * @return The stat of the file or directory.
          */
         Expect<ParsedStat> stat(path::Path path) override;
-
-        /**
-         * @brief Touch a file on the device.
-         *
-         * @param path Path to the file.
-         * @param create Indicate whether to create a file if not exist.
-         */
-        Expect<void> touch(path::Path path, bool create) override;
 
         /**
          * @brief Make a directory on the device.
@@ -93,21 +98,68 @@ namespace adbfsm::data
          */
         Expect<void> mv(path::Path from, path::Path to) override;
 
-        /**
-         * @brief Pull a file from the device to local.
-         *
-         * @param from Path to the file on the device.
-         * @param to Path to the file destination on local.
-         */
-        Expect<void> pull(path::Path from, path::Path to) override;
+        // --------------------
+
+        // file operations
+        // ---------------
 
         /**
-         * @brief Push a file from local to the device.
+         * @brief Truncate a file on the device.
          *
-         * @param from Path to the file on local.
-         * @param to Path to the file destination on the device.
+         * @param path Path to the file on the device.
+         * @param size Size to truncate to.
          */
-        Expect<void> push(path::Path from, path::Path to) override;
+        Expect<void> truncate(path::Path path, off_t size) override;
+
+        /**
+         * @brief Open a file on the device.
+         *
+         * @param path Path to the file on the device.
+         * @param flags Flags to open the file with.
+         */
+        Expect<Id> open(path::Path path, int flags) override;
+
+        /**
+         * @brief Read from a file on the device.
+         *
+         * @param path Path to the file on the device.
+         * @param out Buffer to read into.
+         * @param offset Offset to read from.
+         */
+        Expect<usize> read(path::Path path, Span<char> out, off_t offset) override;
+
+        /**
+         * @brief Write to a file on the device.
+         *
+         * @param path Path to the file on the device.
+         * @param in Buffer to write from.
+         * @param offset Offset to write to.
+         */
+        Expect<usize> write(path::Path path, Str in, off_t offset) override;
+
+        /**
+         * @brief Flush a file on the device.
+         *
+         * @param path Path to the file on the device.
+         */
+        Expect<void> flush(path::Path path) override;
+
+        /**
+         * @brief Release a file on the device.
+         *
+         * @param path Path to the file on the device.
+         */
+        Expect<void> release(path::Path path) override;
+
+        // ---------------
+
+        /**
+         * @brief Touch a file on the device.
+         *
+         * @param path Path to the file.
+         * @param create Indicate whether to create a file if not exist.
+         */
+        Expect<void> touch(path::Path path, bool create) override;
     };
 
     enum class DeviceStatus

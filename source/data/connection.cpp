@@ -81,7 +81,7 @@ namespace
 
     Expect<String> exec(Span<const Str> cmd)
     {
-        log_d({ "exec command: {::?}" }, cmd);
+        // log_d({ "exec command: {::?}" }, cmd);       // quite heavy to log :D
 
         using Sink = reproc::sink::string;
         using namespace std::chrono_literals;
@@ -114,11 +114,81 @@ namespace
 
         if (ret != 0) {
             const auto& errmsg = not err.empty() ? err : out;
-            log_e({ "non-zero command status ({}) {}: err: [{}]" }, ret, cmd, util::strip(errmsg));
+            log_w({ "non-zero command status ({}) {}: err: [{}]" }, ret, cmd, util::strip(errmsg));
             return std::unexpected{ to_errc(parse_stderr(errmsg)) };
         }
-
         return std::move(out);
+    }
+
+    /**
+     * @brief Execute a command and call the output function with the output.
+     *
+     * @param cmd The command to execute.
+     * @param in The input to the command (stdin).
+     * @param outfn Output function to call with the output.
+     *
+     * @return The number of bytes written to the command's stdin.
+     */
+    template <std::invocable<Span<const u8>> Out>
+    Expect<usize> exec_fn(Span<const Str> cmd, Str in, Out outfn)
+    {
+        // log_d({ "exec command: {::?}" }, cmd);       // quite heavy to log :D
+
+        using namespace std::chrono_literals;
+
+        auto proc = reproc::process{};
+        auto args = reproc::arguments{ cmd };
+        auto opts = reproc::options{};
+
+        opts.redirect.err.type = reproc::redirect::pipe;
+        if (not in.empty()) {
+            opts.redirect.in.type = reproc::redirect::pipe;
+        }
+
+        auto ec       = proc.start(args, opts);
+        auto write_in = 0uz;
+
+        if (not in.empty()) {
+            auto [write, ec_in] = proc.write(reinterpret_cast<const u8*>(in.data()), in.size());
+            if (ec_in) {
+                log_e({ "failed to write command input {}: {}" }, cmd, ec_in.message());
+                return std::unexpected{ std::errc::protocol_error };
+            }
+            if (ec_in = proc.close(reproc::stream::in); ec_in) {
+                log_e({ "failed to close command input {}: {}" }, cmd, ec_in.message());
+                return std::unexpected{ std::errc::protocol_error };
+            }
+            write_in = write;
+        }
+
+        auto err = String{};
+        auto out = [&](reproc::stream, const u8* buffer, usize size) {
+            outfn(Span{ buffer, size });
+            return std::error_code{};
+        };
+
+        auto ec_drain       = reproc::drain(proc, out, reproc::sink::string{ err });
+        auto [ret, ec_wait] = proc.wait(10s);
+
+        if (ec) {
+            log_e({ "failed to start command {}: {}" }, cmd, ec.message());
+            return std::unexpected{ std::errc::protocol_error };
+        }
+        if (ec_wait) {
+            log_e({ "failed to execute command {}: {}" }, cmd, ec_wait.message());
+            return std::unexpected{ std::errc::timed_out };
+        }
+        if (ec_drain) {
+            log_e({ "failed to drain command output {}: {}" }, cmd, ec_drain.message());
+            return std::unexpected{ static_cast<std::errc>(ec_drain.value()) };
+        }
+
+        if (ret != 0) {
+            log_w({ "non-zero command status ({}) {}: err: [{}]" }, ret, cmd, util::strip(err));
+            return std::unexpected{ to_errc(parse_stderr(err)) };
+        }
+
+        return write_in;
     }
 
     mode_t parse_mode(Str str)
@@ -226,8 +296,6 @@ namespace
      */
     Opt<data::ParsedStat> parse_file_stat(Str str)
     {
-        using namespace adbfsm;
-
         auto result = util::split_n<8>(str, ' ');
         if (not result) {
             log_w({ "parse_file_stat: string can't be split into 8 parts [{}]" }, str);
@@ -287,17 +355,23 @@ namespace
             .link_to = link,
         };
     }
+
+    // NOTE: somehow adb shell needs double escaping
+    String quoted(path::Path path)
+    {
+        return fmt::format("\"{}\"", path.fullpath());
+    }
 }
 
 namespace adbfsm::data
 {
     using namespace std::string_view_literals;
+    using namespace std::string_literals;
 
-    Expect<Gen<ParsedStat>> Connection::stat_dir(path::Path path)
+    Expect<Gen<ParsedStat>> Connection::statdir(path::Path path)
     {
-        // NOTE: somehow adb shell needs double escaping
-        const auto path_str = fmt::format("\"{}\"", path.fullpath());
-        const auto cmd      = Array{ "adb"sv, "shell"sv, "ls"sv, "-lla"sv, Str{ path_str } };
+        const auto qpath = quoted(path);
+        const auto cmd   = Array{ "adb"sv, "shell"sv, "ls"sv, "-lla"sv, Str{ qpath } };
 
         auto out = exec(cmd);
         if (not out.has_value()) {
@@ -320,9 +394,8 @@ namespace adbfsm::data
 
     Expect<ParsedStat> Connection::stat(path::Path path)
     {
-        // NOTE: somehow adb shell needs double escaping
-        const auto path_str = fmt::format("\"{}\"", path.fullpath());
-        const auto cmd      = Array{ "adb"sv, "shell"sv, "ls"sv, "-llad"sv, Str{ path_str } };
+        const auto qpath = quoted(path);
+        const auto cmd   = Array{ "adb"sv, "shell"sv, "ls"sv, "-llad"sv, Str{ qpath } };
 
         auto out = exec(cmd);
         if (not out.has_value()) {
@@ -340,65 +413,137 @@ namespace adbfsm::data
 
     Expect<void> Connection::touch(path::Path path, bool create)
     {
-        // NOTE: somehow adb shell needs double escaping
-        const auto path_str = fmt::format("\"{}\"", path.fullpath());
+        const auto qpath = quoted(path);
         if (create) {
-            const auto cmd = Array{ "adb"sv, "shell"sv, "touch"sv, Str{ path_str } };
+            const auto cmd = Array{ "adb"sv, "shell"sv, "touch"sv, Str{ qpath } };
             return exec(cmd).transform(sink_void);
         } else {
-            const auto cmd = Array{ "adb"sv, "shell"sv, "touch"sv, "-c"sv, Str{ path_str } };
+            const auto cmd = Array{ "adb"sv, "shell"sv, "touch"sv, "-c"sv, Str{ qpath } };
             return exec(cmd).transform(sink_void);
         }
     }
 
     Expect<void> Connection::mkdir(path::Path path)
     {
-        // NOTE: somehow adb shell needs double escaping
-        const auto path_str = fmt::format("\"{}\"", path.fullpath());
-        const auto cmd      = Array{ "adb"sv, "shell"sv, "mkdir"sv, Str{ path_str } };
+        const auto qpath = quoted(path);
+        const auto cmd   = Array{ "adb"sv, "shell"sv, "mkdir"sv, Str{ qpath } };
         return exec(cmd).transform(sink_void);
     }
 
     Expect<void> Connection::rm(path::Path path, bool recursive)
     {
-        // NOTE: somehow adb shell needs double escaping
-        const auto path_str = fmt::format("\"{}\"", path.fullpath());
+        const auto qpath = quoted(path);
         if (not recursive) {
-            const auto cmd = Array{ "adb"sv, "shell"sv, "rm"sv, Str{ path_str } };
+            const auto cmd = Array{ "adb"sv, "shell"sv, "rm"sv, Str{ qpath } };
             return exec(cmd).transform(sink_void);
         } else {
-            const auto cmd = Array{ "adb"sv, "shell"sv, "rm"sv, "-r"sv, Str{ path_str } };
+            const auto cmd = Array{ "adb"sv, "shell"sv, "rm"sv, "-r"sv, Str{ qpath } };
             return exec(cmd).transform(sink_void);
         }
     }
 
     Expect<void> Connection::rmdir(path::Path path)
     {
-        // NOTE: somehow adb shell needs double escaping
-        const auto path_str = fmt::format("\"{}\"", path.fullpath());
-        const auto cmd      = Array{ "adb"sv, "shell"sv, "rmdir"sv, Str{ path_str } };
+        const auto qpath = quoted(path);
+        const auto cmd   = Array{ "adb"sv, "shell"sv, "rmdir"sv, Str{ qpath } };
         return exec(cmd).transform(sink_void);
     }
 
     Expect<void> Connection::mv(path::Path from, path::Path to)
     {
-        // NOTE: somehow adb shell needs double escaping
-        const auto from_str = fmt::format("\"{}\"", from.fullpath());
-        const auto to_str   = fmt::format("\"{}\"", to.fullpath());
-        const auto cmd      = Array{ "adb"sv, "shell"sv, "mv"sv, Str{ from_str }, Str{ to_str } };
+        const auto qfrom = quoted(from);
+        const auto qto   = quoted(to);
+        const auto cmd   = Array{ "adb"sv, "shell"sv, "mv"sv, Str{ qfrom }, Str{ qto } };
         return exec(cmd).transform(sink_void);
     }
 
-    Expect<void> Connection::pull(path::Path from, path::Path to)
+    Expect<void> Connection::truncate(path::Path path, off_t size)
     {
-        const auto cmd = Array{ "adb"sv, "pull"sv, from.fullpath(), to.fullpath() };
+        const auto qpath = quoted(path);
+        const auto sizes = fmt::format("{}", size);
+        const auto cmd   = Array{ "adb"sv, "shell"sv, "truncate"sv, "-s"sv, Str{ sizes }, Str{ qpath } };
         return exec(cmd).transform(sink_void);
     }
 
-    Expect<void> Connection::push(path::Path from, path::Path to)
+    Expect<Id> Connection::open(path::Path /* path */, int /* flags */)
     {
-        const auto cmd = Array{ "adb"sv, "push"sv, from.fullpath(), to.fullpath() };
-        return exec(cmd).transform(sink_void);
+        /*
+         * Since we're using a streaming approach to read/write files, there is no need to do open or
+         * close operation on the file. The file is opened when we read or write to it, and closed after
+         * those operation complete on the device.
+         *
+         * Thus, there is really no need to do anything here.
+         */
+
+        return Id::incr();
+    }
+
+    Expect<usize> Connection::read(path::Path path, Span<char> out, off_t offset)
+    {
+        const auto skip  = fmt::format("skip={}", offset);
+        const auto count = fmt::format("count={}", out.size());
+        const auto iff   = fmt::format("if=\"{}\"", path.fullpath());
+
+        const auto cmd = Array{
+            "adb"sv,
+            "shell"sv,
+            "dd"sv,
+            "iflag=skip_bytes,count_bytes"sv,    // https://stackoverflow.com/a/40792605/16506263
+            "bs=65536"sv,                        // https://superuser.com/a/234204
+            Str{ skip },
+            Str{ count },
+            Str{ iff },
+        };
+
+        auto read_count = 0uz;
+        auto outfn      = [&](Span<const u8> data) {
+            auto remaining = out.size() - read_count;
+            auto to_copy   = std::min(data.size(), remaining);
+
+            std::copy_n(data.data(), to_copy, out.data() + read_count);
+            read_count += to_copy;
+        };
+
+        return exec_fn(cmd, "", outfn).transform([&](usize) { return read_count; });
+    }
+
+    Expect<usize> Connection::write(path::Path path, Str in, off_t offset)
+    {
+        const auto seek = fmt::format("seek={}", offset);
+        const auto off  = fmt::format("of=\"{}\"", path.fullpath());
+
+        const auto cmd = Array{
+            "adb"sv,
+            "shell"sv,
+            "dd"sv,
+            "oflag=seek_bytes"sv,    // same as above, though I don't know if this is really needed
+            "conv=notrunc"sv,        // https://unix.stackexchange.com/a/146923
+            "bs=65536"sv,            // https://superuser.com/a/234204
+            Str{ seek },
+            Str{ off },
+        };
+
+        return exec_fn(cmd, in, [&](Span<const u8>) { /* ignore */ });
+    }
+
+    Expect<void> Connection::flush(path::Path /* path */)
+    {
+        /*
+         * The streaming approach is immediate, so there is no need to flush the file. At least for the
+         * moment. In the future we might want to implement caching once again.
+         */
+
+        return {};
+    }
+
+    Expect<void> Connection::release(path::Path /* path */)
+    {
+        /*
+         * The reason this part is a no-op is the same as the open function. We don't need to do any
+         * open or close operation on the file.
+         */
+
+        return {};
     }
 
     Expect<void> start_connection()

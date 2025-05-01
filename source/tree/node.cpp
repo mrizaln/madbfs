@@ -182,16 +182,6 @@ namespace adbfsm::tree
                 if (node.is<Directory>() and not recursive) {
                     return Unexpect{ Errc::is_a_directory };
                 }
-
-                if (node.is<RegularFile>()) {
-                    auto res = node.as<RegularFile>().and_then([&](RegularFile& file) {
-                        return context.cache.remove(context.connection, file.id());
-                    });
-                    if (not res.has_value()) {
-                        return Unexpect{ res.error() };
-                    }
-                }
-
                 auto success = dir.erase(name);
                 assert(success);
                 return context.connection.rm(context.path, recursive);
@@ -216,170 +206,65 @@ namespace adbfsm::tree
 
     Expect<void> Node::truncate(Context context, off_t size)
     {
-        // clang-format off
-        if      (is<Directory>()) return Unexpect{ Errc::is_a_directory };
-        else if (is<Other>())     return Unexpect{ Errc::permission_denied };
-        else if (is<Link>())      return as<Link>()->get().target().truncate(context, size);
-        // clang-format on
-
-        auto  lock = std::unique_lock{ m_mutex };
-        auto& file = as<RegularFile>()->get();
-
-        auto path = context.cache.get(file.id());
-        if (not path.has_value()) {
-            auto id = context.cache.add(context.connection, context.path);
-            if (not id.has_value()) {
-                return Unexpect{ id.error() };
-            }
-            path = context.cache.get(*id);
-            file.set_id(*id);
-        }
-
-        context.cache.set_dirty(file.id(), true);
-        auto ret = ::truncate(path->as_path().fullpath().data(), size);
-        if (ret < 0) {
-            return Unexpect{ static_cast<Errc>(errno) };
-        }
-
-        m_stat.size -= size;
-        return {};
+        auto lock = std::shared_lock{ m_mutex };
+        return regular_file_prelude().and_then([&]([[maybe_unused]] RegularFile& file) {
+            return context.connection.truncate(context.path, size).transform([&] { m_stat.size = size; });
+        });
     }
 
-    Expect<i32> Node::open(Context context, int flags)
+    Expect<u64> Node::open(Context context, int flags)
     {
-        // clang-format off
-        if      (is<Directory>()) return Unexpect{ Errc::is_a_directory };
-        else if (is<Other>())     return Unexpect{ Errc::permission_denied };
-        else if (is<Link>())      return as<Link>()->get().target().open(context, flags);
-        // clang-format on
-
-        auto  lock = std::unique_lock{ m_mutex };
-        auto& file = as<RegularFile>()->get();
-
-        auto path = context.cache.get(file.id());
-        if (not path.has_value()) {
-            auto id = context.cache.add(context.connection, context.path);
-            if (not id.has_value()) {
-                return Unexpect{ id.error() };
-            }
-            path = context.cache.get(*id);
-            file.set_id(*id);
-        }
-
-        auto ret = ::open(path->as_path().fullpath().data(), flags);
-        if (ret >= 0) {
-            file.set_fd(ret);
-        }
-
-        return Unexpect{ ret < 0 ? static_cast<Errc>(errno) : Errc{} };
+        auto lock = std::shared_lock{ m_mutex };
+        return regular_file_prelude().and_then([&](RegularFile& file) {
+            return context.connection.open(context.path, flags).transform([&](data::Id id) {
+                auto res = file.open(id);
+                assert(res);
+                return id.inner();
+            });
+        });
     }
 
-    Expect<usize> Node::read(Context context, std::span<char> out, off_t offset)
+    Expect<usize> Node::read(Context context, u64 fd, std::span<char> out, off_t offset)
     {
-        // clang-format off
-        if      (is<Directory>()) return Unexpect{ Errc::is_a_directory };
-        else if (is<Other>())     return Unexpect{ Errc::permission_denied };
-        else if (is<Link>())      return as<Link>()->get().target().read(context, out, offset);
-        // clang-format on
-
-        auto  lock = std::unique_lock{ m_mutex };
-        auto& file = as<RegularFile>()->get();
-
-        // in-case the cache is missing, add it back
-        if (not context.cache.exists(file.id())) {
-            auto id = context.cache.add(context.connection, context.path);
-            if (not id.has_value()) {
-                return Unexpect{ id.error() };
+        return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<usize> {
+            if (not file.is_open(data::Id::from_fd(fd))) {
+                return Unexpect{ Errc::bad_file_descriptor };
             }
-            file.set_id(*id);
-        }
-
-        if (auto ret = ::pread(file.fd(), out.data(), out.size(), offset); ret >= 0) {
-            return ret;
-        }
-        return Unexpect{ static_cast<Errc>(errno) };
+            return context.connection.read(context.path, out, offset);
+        });
     }
 
-    Expect<usize> Node::write(Context context, std::string_view in, off_t offset)
+    Expect<usize> Node::write(Context context, u64 fd, std::string_view in, off_t offset)
     {
-        // clang-format off
-        if      (is<Directory>()) return Unexpect{ Errc::is_a_directory };
-        else if (is<Other>())     return Unexpect{ Errc::permission_denied };
-        else if (is<Link>())      return as<Link>()->get().target().write(context, in, offset);
-        // clang-format on
-
-        auto  lock = std::unique_lock{ m_mutex };
-        auto& file = as<RegularFile>()->get();
-
-        // in-case the cache is missing, add it back and set to dirty
-        if (not context.cache.exists(file.id())) {
-            auto id = context.cache.add(context.connection, context.path);
-            if (not id.has_value()) {
-                return Unexpect{ id.error() };
+        return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<usize> {
+            if (not file.is_open(data::Id::from_fd(fd))) {
+                return Unexpect{ Errc::bad_file_descriptor };
             }
-            file.set_id(*id);
-        }
-
-        if (auto ret = ::pwrite(file.fd(), (void*)in.data(), in.size(), offset); ret >= 0) {
-            context.cache.set_dirty(file.id(), true);
-            m_stat.size += ret;
-            return ret;
-        }
-        return Unexpect{ static_cast<Errc>(errno) };
+            return context.connection.write(context.path, in, offset).transform([&](usize ret) {
+                m_stat.size += ret;
+                return ret;
+            });
+        });
     }
 
-    Expect<void> Node::flush(Context context)
+    Expect<void> Node::flush(Context context, u64 fd)
     {
-        // clang-format off
-        if      (is<Directory>()) return Unexpect{ Errc::is_a_directory };
-        else if (is<Other>())     return Unexpect{ Errc::permission_denied };
-        else if (is<Link>())      return as<Link>()->get().target().flush(context);
-        // clang-format on
-
-        auto  lock = std::unique_lock{ m_mutex };
-        auto& file = as<RegularFile>()->get();
-
-        // in-case the cache is missing, add it back
-        if (not context.cache.exists(file.id())) {
-            auto id = context.cache.add(context.connection, context.path);
-            if (not id.has_value()) {
-                return Unexpect{ id.error() };
+        return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<void> {
+            if (not file.is_open(data::Id::from_fd(fd))) {
+                return Unexpect{ Errc::bad_file_descriptor };
             }
-            file.set_id(*id);
-        }
-
-        auto ret = ::fsync(file.fd());
-        return Unexpect{ ret < 0 ? static_cast<Errc>(errno) : Errc{} };
+            return context.connection.flush(context.path);
+        });
     }
 
-    Expect<void> Node::release(Context context)
+    Expect<void> Node::release(Context context, u64 fd)
     {
-        // clang-format off
-        if      (is<Directory>()) return Unexpect{ Errc::is_a_directory };
-        else if (is<Other>())     return Unexpect{ Errc::permission_denied };
-        else if (is<Link>())      return as<Link>()->get().target().flush(context);
-        // clang-format on
-
-        auto  lock = std::unique_lock{ m_mutex };
-        auto& file = as<RegularFile>()->get();
-
-        // in-case the cache is missing
-        // TODO: should have assert that file exist
-        if (not context.cache.exists(file.id())) {
-            auto id = context.cache.add(context.connection, context.path);
-            if (not id.has_value()) {
-                return Unexpect{ id.error() };
+        return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<void> {
+            if (not file.close(data::Id::from_fd(fd))) {
+                return Unexpect{ Errc::bad_file_descriptor };
             }
-            file.set_id(*id);
-        }
-
-        auto ret = ::close(file.fd());
-        if (auto res = context.cache.flush(context.connection, file.id()); not res.has_value()) {
-            return Unexpect{ res.error() };
-        }
-        context.cache.set_dirty(file.id(), false);
-
-        return Unexpect{ ret < 0 ? static_cast<Errc>(errno) : Errc{} };
+            return context.connection.release(context.path);
+        });
     }
 
     Expect<void> Node::utimens(Context context)

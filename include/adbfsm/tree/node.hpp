@@ -1,9 +1,9 @@
 #pragma once
 
 #include "adbfsm/common.hpp"
-#include "adbfsm/data/cache.hpp"
 #include "adbfsm/data/connection.hpp"
 #include "adbfsm/data/stat.hpp"
+#include "adbfsm/path/path.hpp"
 #include "adbfsm/util.hpp"
 
 #include <sys/types.h>
@@ -12,6 +12,7 @@
 #include <atomic>
 #include <cassert>
 #include <functional>
+#include <shared_mutex>
 
 namespace adbfsm::tree
 {
@@ -23,20 +24,54 @@ namespace adbfsm::tree
 
     using File = Var<RegularFile, Directory, Link, Other>;
 
+    // TODO: add open flags, use them to determine if file has suitable read/write permission
     class RegularFile
     {
     public:
         friend Node;
 
-        data::Id id() const { return m_id; }
-        int      fd() const { return m_fd; }
+        RegularFile() = default;
+
+        RegularFile(RegularFile&& other)
+        {
+            auto lock  = util::Lock{ m_operated };
+            m_open_ids = std::move(other.m_open_ids);
+            m_operated = false;
+        }
+
+        bool is_open(data::Id id)
+        {
+            auto lock = util::Lock{ m_operated };
+            return sr::find(m_open_ids, id) != m_open_ids.end();
+        }
+
+        bool open(data::Id id)
+        {
+            auto lock = util::Lock{ m_operated };
+            if (sr::find(m_open_ids, id) != m_open_ids.end()) {
+                return false;
+            }
+            m_open_ids.push_back(id);
+            return true;
+        }
+
+        bool close(data::Id id)
+        {
+            auto lock  = util::Lock{ m_operated };
+            auto found = sr::find(m_open_ids, id);
+            if (found == m_open_ids.end()) {
+                return false;
+            }
+            m_open_ids.erase(found);
+            return true;
+        }
 
     private:
-        void set_id(data::Id id) { m_id = id; }
-        void set_fd(int fd) { m_fd = fd; }
+        Vec<data::Id>     m_open_ids;            // used to track open files
+        std::atomic<bool> m_operated = false;    // used for locking.
 
-        data::Id m_id = {};
-        int      m_fd = -1;
+        // NOTE: I use atomic to save space; also this is the most suitable one in this case since each locks
+        // are very short lived as seen above.
     };
 
     class Directory
@@ -124,8 +159,7 @@ namespace adbfsm::tree
         struct Context
         {
             data::IConnection& connection;
-            data::ICache&      cache;
-            path::Path         path;    // path for connection
+            const path::Path&  path;    // path for connection
         };
 
         Node(Str name, Node* parent, data::Stat stat, File value)
@@ -182,6 +216,8 @@ namespace adbfsm::tree
          * @brief Traverse into child node.
          *
          * @param name The name of the child node.
+         *
+         * @return The child node.
          */
         Expect<Ref<Node>> traverse(Str name) const;
 
@@ -202,6 +238,8 @@ namespace adbfsm::tree
          * @param stat Stat of the new node.
          * @param file The kind of the node.
          *
+         * @return The new node.
+         *
          * This function is used to build a new node from existing filetree on the device. Instead of
          * operating on the file on the device itself, this function just modify the nodes. This function
          * assume that the build process won't overwrite any node.
@@ -212,6 +250,8 @@ namespace adbfsm::tree
          * @brief Extract a child node.
          *
          * @param name The name of the node.
+         *
+         * @return The extracted node.
          *
          * Since it extracts a child node, it only works on Directory.
          */
@@ -239,6 +279,8 @@ namespace adbfsm::tree
          * @param context Context needed to communicate with device and local.
          * @param name The name of the link.
          * @param target The target of the link.
+         *
+         * @return The new link node.
          */
         Expect<Ref<Node>> link(Str name, Node* target);
 
@@ -247,6 +289,8 @@ namespace adbfsm::tree
          *
          * @param context Context needed to communicate with device and local.
          * @param name The name of the child node.
+         *
+         * @return The new regular file node.
          */
         Expect<Ref<Node>> touch(Context context, Str name);
 
@@ -255,6 +299,8 @@ namespace adbfsm::tree
          *
          * @param context Context needed to communicate with device and local.
          * @param name The name of the directory.
+         *
+         * @return The new directory node.
          */
         Expect<Ref<Node>> mkdir(Context context, Str name);
 
@@ -293,42 +339,51 @@ namespace adbfsm::tree
          *
          * @param context Context needed to communicate with device and local.
          * @param flags Open mode flags.
+         *
+         * @return File descriptor.
          */
-        Expect<i32> open(Context context, int flags);
+        Expect<u64> open(Context context, int flags);
 
         /**
          * @brief Read data from file.
          *
          * @param context Context needed to communicate with device and local.
+         * @param fd File descriptor.
          * @param out The output of the data.
          * @param offset Offset to the data to be read.
+         *
+         * @return The number of bytes read.
          */
-        Expect<usize> read(Context context, Span<char> out, off_t offset);
+        Expect<usize> read(Context context, u64 fd, Span<char> out, off_t offset);
 
         /**
          * @brief Write data to file.
          *
          * @param context Context needed to communicate with device and local.
+         * @param fd File descriptor.
          * @param in Data to be written.
          * @param offset Offset of the write pointer.
+         *
+         * @return The number of bytes written.
          */
-        Expect<usize> write(Context context, Str in, off_t offset);
+        Expect<usize> write(Context context, u64 fd, Str in, off_t offset);
 
         /**
          * @brief Flush buffer of the file.
          *
          * @param context Context needed to communicate with device and local.
+         * @param fd File descriptor.
          *
          * Basically forcing writing to the file itself instead of to the buffer in memory.
          */
-        Expect<void> flush(Context context);
+        Expect<void> flush(Context context, u64 fd);
 
         /**
          * @brief Release file.
          *
          * @param context Context needed to communicate with device and local.
          */
-        Expect<void> release(Context context);
+        Expect<void> release(Context context, u64 fd);
 
         /**
          * @brief Update the timestamps of a file.
@@ -360,6 +415,22 @@ namespace adbfsm::tree
 
         template <typename T>
         Expect<Ref<const T>> as() const;
+
+        Expect<Ref<RegularFile>> regular_file_prelude()
+        {
+            auto current = this;
+            if (is<Link>()) {
+                current = &readlink()->get();
+            }
+
+            if (current->is<Directory>()) {
+                return Unexpect{ Errc::is_a_directory };
+            } else if (current->is<Other>()) {
+                return Unexpect{ Errc::permission_denied };
+            }
+
+            return current->as<RegularFile>();
+        }
 
         Node*       m_parent = nullptr;
         std::string m_name   = {};
