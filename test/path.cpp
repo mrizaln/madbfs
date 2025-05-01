@@ -275,7 +275,6 @@ int main()
     using namespace ut::operators;
     using ut::expect, ut::log, ut::that;
 
-    using adbfsm::path::combine;
     using adbfsm::path::create;
     using adbfsm::path::operator""_path;
     using adbfsm::path::PathBuf;
@@ -297,7 +296,7 @@ int main()
         expect(test.upper_filename == parent.filename()) << test;
 
         "combine must construct a valid PathBuf if name does not contain '/'"_test = [&] {
-            auto new_path = combine(parent, path->filename());
+            auto new_path = parent.extend_copy(path->filename());
             if (path->is_root()) {
                 expect(not new_path.has_value()) << "path filename contains '/'";
                 return;
@@ -366,6 +365,4 @@ int main()
                 << "Address should be different: " << test;
         }
     } | constructible_testcases;
-
-    // TODO: test `PathBuf combine(Path, Path)` function
 }

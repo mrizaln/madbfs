@@ -84,7 +84,7 @@ struct fmt::formatter<adbfsm::tree::Node> : fmt::formatter<std::string_view>
 
             auto visitor = adbfsm::util::Overload{
                 [&](const Link& link) {
-                    auto pathbuf = link.target()->build_path();
+                    auto pathbuf = link.target().build_path();
                     return fmt::format("    ->    {}", pathbuf.as_path().fullpath());
                 },
                 [&](const Directory&) { return String{ "/" }; },
@@ -170,11 +170,10 @@ namespace mock
 
     class DummyCache : public ICache
     {
-        using Path = std::filesystem::path;
+        Opt<adbfsm::path::PathBuf> get(Id) const override { return std::nullopt; }
 
-        Opt<Path> get(Id) const override { return std::nullopt; }
-        bool      exists(Id) const override { return true; }
-        bool      set_dirty(Id, bool) override { return true; };
+        bool exists(Id) const override { return true; }
+        bool set_dirty(Id, bool) override { return true; };
 
         Expect<Id>   add(IConnection&, path::Path) override { return {}; };
         Expect<bool> remove(IConnection&, Id) override { return true; };
@@ -205,46 +204,46 @@ int main()
 
         auto root = Node{ "/", nullptr, {}, Directory{} };
 
-        auto* hello = root.mkdir(context, "hello").unwrap();
+        Node& hello = root.mkdir(context, "hello").unwrap();
 
-        _ = hello->touch(context, "world.txt").unwrap();
-        _ = hello->touch(context, "foo.txt").unwrap();
-        _ = hello->touch(context, "movie.mp4").unwrap();
+        _ = hello.touch(context, "world.txt").unwrap();
+        _ = hello.touch(context, "foo.txt").unwrap();
+        _ = hello.touch(context, "movie.mp4").unwrap();
 
-        auto* bar = hello->mkdir(context, "bar").unwrap();
+        Node& bar = hello.mkdir(context, "bar").unwrap();
 
-        _ = bar->touch(context, "baz.txt").unwrap();
-        _ = bar->touch(context, "qux.txt").unwrap();
-        _ = bar->touch(context, "quux.txt").unwrap();
+        _ = bar.touch(context, "baz.txt").unwrap();
+        _ = bar.touch(context, "qux.txt").unwrap();
+        _ = bar.touch(context, "quux.txt").unwrap();
 
-        auto* bye = root.mkdir(context, "bye").unwrap();
+        Node& bye = root.mkdir(context, "bye").unwrap();
 
-        _ = bye->touch(context, "world.txt").unwrap();
-        _ = bye->touch(context, "movie.mp4").unwrap();
-        _ = bye->touch(context, "music.mp3").unwrap();
+        _ = bye.touch(context, "world.txt").unwrap();
+        _ = bye.touch(context, "movie.mp4").unwrap();
+        _ = bye.touch(context, "music.mp3").unwrap();
 
-        auto* family = bye->mkdir(context, "family").unwrap();
+        Node& family = bye.mkdir(context, "family").unwrap();
 
-        _ = family->touch(context, "dad.txt").unwrap();
-        _ = family->touch(context, "mom.txt").unwrap();
+        _ = family.touch(context, "dad.txt").unwrap();
+        _ = family.touch(context, "mom.txt").unwrap();
 
-        auto* friends = bye->mkdir(context, "friends").unwrap();
+        Node& friends = bye.mkdir(context, "friends").unwrap();
 
-        _ = friends->touch(context, "bob.txt").unwrap();
+        _ = friends.touch(context, "bob.txt").unwrap();
 
-        auto* school = friends->mkdir(context, "school").unwrap();
+        Node& school = friends.mkdir(context, "school").unwrap();
 
-        _ = school->touch(context, "kal'tsit.txt").unwrap();
-        _ = school->touch(context, "closure.txt").unwrap();
+        _ = school.touch(context, "kal'tsit.txt").unwrap();
+        _ = school.touch(context, "closure.txt").unwrap();
 
-        auto* work = friends->mkdir(context, "work").unwrap();
+        Node& work = friends.mkdir(context, "work").unwrap();
 
-        auto* wife = work->touch(context, "loughshinny <3.txt").unwrap();
+        Node& wife = work.touch(context, "loughshinny <3.txt").unwrap();
 
-        _ = work->touch(context, "eblana?.mp4").unwrap();
-        _ = school->link("hehe", work).unwrap();
-        _ = hello->link("wife", wife).unwrap();
-        _ = bye->touch(context, "theresa.txt").unwrap();
+        _ = work.touch(context, "eblana?.mp4").unwrap();
+        _ = school.link("hehe", &work).unwrap();
+        _ = hello.link("wife", &wife).unwrap();
+        _ = bye.touch(context, "theresa.txt").unwrap();
 
         auto tree_str = fmt::format("\n{}", root);
         expect(expected == tree_str) << diff_str(expected, tree_str);
@@ -302,13 +301,11 @@ int main()
         tree.unlink("/bye/friends/school/hehe"_path).unwrap(void);
 
         // there is no recursive delete
-        auto* bar      = tree.traverse("/hello/bar"_path).unwrap(Node*);
-        auto  bar_path = bar->build_path();
+        Node& bar      = tree.traverse("/hello/bar"_path).unwrap(Node*);
+        auto  bar_path = bar.build_path();
         auto  paths    = std::vector<adbfsm::path::PathBuf>{};
 
-        _ = bar->list([&](Str name) {
-            paths.push_back(adbfsm::path::combine(bar_path.as_path(), name).value());
-        });
+        _ = bar.list([&](Str name) { paths.push_back(bar_path.extend_copy(name).value()); });
         for (const auto& path : paths) {
             tree.unlink(path.as_path()).unwrap(void);
         }
