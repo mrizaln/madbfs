@@ -126,13 +126,15 @@ namespace adbfsm
         return ok_or(path::create(path), std::errc::operation_not_supported)
             .and_then([](path::Path p) { return get_data().tree.readlink(p); })
             .and_then([&](tree::Node* node) -> Expect<void> {
-                auto path = node->build_path();    // this will emits absolute path, which we don't want
-                if (path.size() - 1 < size) {
-                    std::memcpy(buf, path.c_str() + 1, path.size());    // copy path without initial '/'
+                auto path_buf = node->build_path();    // this will emits absolute path, which we don't want
+                auto path     = path_buf.as_path();
+                if (auto pathsize = path.fullpath().size(); pathsize - 1 < size) {
+                    // copy path without initial '/'
+                    std::memcpy(buf, path.fullpath().data() + 1, pathsize);
 
                     return {};
                 } else {
-                    log_e({ "readlink: path size is too long: {} vs {}" }, size, path.size());
+                    log_e({ "readlink: path size is too long: {} vs {}" }, size, pathsize);
                     return std::unexpected{ std::errc::filename_too_long };
                 }
             })
