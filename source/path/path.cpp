@@ -35,8 +35,34 @@ namespace
     }
 }
 
+// TODO: verify offsets if PathBuf is root
+
 namespace adbfsm::path
 {
+    Opt<PathBuf> Path::extend_copy(Str name) const
+    {
+        if (name.contains('/')) {
+            return std::nullopt;
+        }
+
+        auto pathbuf = PathBuf{};
+
+        pathbuf.m_buf = fullpath();
+
+        pathbuf.m_parent_size     = pathbuf.m_buf.size();
+        pathbuf.m_basename_size   = name.size();
+        pathbuf.m_basename_offset = pathbuf.m_buf.size();
+
+        if (not is_root()) {
+            pathbuf.m_basename_offset += 1;
+            pathbuf.m_buf             += '/';
+        }
+
+        pathbuf.m_buf += name;
+
+        return std::move(pathbuf);
+    }
+
     Gen<Str> Path::iter() const
     {
         return iter_path_impl(fullpath());
@@ -52,6 +78,34 @@ namespace adbfsm::path
         pathbuf.m_basename_offset = static_cast<usize>(m_basename.begin() - m_dirname.begin());
 
         return pathbuf;
+    }
+
+    bool PathBuf::extend(Str name)
+    {
+        if (name.empty() or name.contains('/') or name == "." or name == "..") {
+            return false;
+        }
+
+        m_parent_size     = m_buf.size();
+        m_basename_size   = name.size();
+        m_basename_offset = m_buf.size();
+
+        if (m_buf.size() != 1 or m_buf[0] != '/') {
+            m_basename_offset += 1;
+            m_buf             += '/';
+        }
+        m_buf += name;
+
+        return true;
+    }
+
+    Opt<PathBuf> PathBuf::extend_copy(Str name) const
+    {
+        auto pathbuf = *this;
+        if (pathbuf.extend(name)) {
+            return pathbuf;
+        }
+        return std::nullopt;
     }
 
     Path PathBuf::as_path() const
@@ -75,51 +129,6 @@ namespace adbfsm::path
         pathbuf.m_parent_size     = path->parent().size();
         pathbuf.m_basename_size   = path->filename().size();
         pathbuf.m_basename_offset = static_cast<usize>(path->filename().begin() - path->parent().begin());
-
-        return std::move(pathbuf);
-    }
-
-    PathBuf combine(Path path1, Path path2)
-    {
-        if (path1.is_root() and path2.is_root()) {
-            return PathBuf::root();
-        } else if (path2.is_root()) {
-            return path1.into_buf();
-        } else if (path1.is_root()) {
-            return path2.into_buf();
-        }
-
-        auto pathbuf = PathBuf{};
-
-        pathbuf.m_buf  = path1.fullpath();
-        pathbuf.m_buf += path2.fullpath();
-
-        auto path = create(pathbuf.m_buf).value();    // guaranteed to be valid
-
-        pathbuf.m_parent_size     = path.m_dirname.size();
-        pathbuf.m_basename_size   = path.m_basename.size();
-        pathbuf.m_basename_offset = static_cast<usize>(path.m_basename.begin() - path.m_dirname.begin());
-
-        return pathbuf;
-    }
-
-    Opt<PathBuf> combine(Path path, Str name)
-    {
-        if (name.contains('/')) {
-            return std::nullopt;
-        }
-
-        auto pathbuf = PathBuf{};
-
-        pathbuf.m_buf = path.fullpath();
-        if (not path.is_root()) {
-            pathbuf.m_buf += '/';
-        }
-        pathbuf.m_buf += name;
-
-        pathbuf.m_parent_size     = path.fullpath().size();
-        pathbuf.m_basename_size   = name.size();
-        pathbuf.m_basename_offset = pathbuf.m_parent_size + not path.is_root();
 
         return std::move(pathbuf);
     }
