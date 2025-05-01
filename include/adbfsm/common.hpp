@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <generator>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -67,8 +68,18 @@ namespace adbfsm
         template <typename T>
         using Expect = std::expected<T, std::errc>;
 
+        using Unexpect = std::unexpected<std::errc>;
+
         using Clock     = std::chrono::system_clock;
         using Timestamp = Clock::time_point;
+
+        template <typename T>
+        using Gen = std::generator<T>;
+
+        using Errc = std::errc;
+
+        template <typename T>
+        using Ref = std::reference_wrapper<T>;
 
         namespace sr = std::ranges;
         namespace sv = std::views;
@@ -97,6 +108,22 @@ namespace adbfsm
             } else {
                 return std::unexpected{ err };
             }
+        }
+
+        template <typename T, typename Ret, typename... Args>
+        auto proj(Ret (T::*fn)(Args...) const, std::type_identity_t<Args>... args)
+        {
+            return [fn, ... args = std::forward<Args>(args)](const T& t) mutable -> decltype(auto) {    //
+                return (t.*fn)(std::forward<Args>(args)...);
+            };
+        }
+
+        template <typename T, typename Ret, typename... Args>
+        auto proj(Ret (T::*fn)(Args...), std::type_identity_t<Args>... args)
+        {
+            return [fn, ... args = std::forward<Args>(args)](T& t) mutable -> decltype(auto) {    //
+                return (t.*fn)(std::forward<Args>(args)...);
+            };
         }
     }
 
