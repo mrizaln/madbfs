@@ -3,11 +3,12 @@
 #include "adbfsm/common.hpp"
 
 #include <cassert>
-#include <generator>
 #include <print>
 
 namespace adbfsm::path
 {
+    class PathBuf;
+
     /**
      * @class Path
      * @brief Represent a file path in Linux system.
@@ -20,11 +21,14 @@ namespace adbfsm::path
     public:
         friend class PathBuf;
         friend constexpr Opt<Path> create(Str path);
+        friend PathBuf             combine(Path path1, Path path2);
+        friend Opt<PathBuf>        combine(Path path, Str name);
 
         constexpr Path() = default;
 
+        static constexpr Path root() { return { "/", "/" }; }
+
         constexpr bool is_root() const { return m_dirname == "/" and m_basename == "/"; }
-        constexpr bool is_dir() const { return m_is_dir; }
 
         constexpr Str filename() const { return m_basename; }
         constexpr Str parent() const { return m_dirname; }
@@ -33,7 +37,7 @@ namespace adbfsm::path
         constexpr Path parent_path() const
         {
             if (m_dirname == "/") {
-                return { "/", "/", true };
+                return root();
             }
 
             auto base_start = m_dirname.size();
@@ -48,28 +52,28 @@ namespace adbfsm::path
             auto end   = m_dirname.end();
 
             if (dir_end == 0) {
-                return { { begin, begin + base_start + 1 }, { begin + base_start + 1, end }, true };
+                return { { begin, begin + base_start + 1 }, { begin + base_start + 1, end } };
             }
 
-            return { { begin, begin + dir_end + 1 }, { begin + base_start + 1, end }, true };
+            return { { begin, begin + dir_end + 1 }, { begin + base_start + 1, end } };
         }
 
         /**
          * @brief Creates generator that iterates over the path.
          */
-        std::generator<Str> iter() const;
+        Gen<Str> iter() const;
+
+        PathBuf into_buf() const;
 
     private:
-        constexpr Path(Str dirname, Str name, bool is_dir)
+        constexpr Path(Str dirname, Str name)
             : m_dirname{ dirname }
             , m_basename{ name }
-            , m_is_dir{ is_dir }
         {
         }
 
-        Str  m_dirname;
-        Str  m_basename;
-        bool m_is_dir = false;
+        Str m_dirname;
+        Str m_basename;
     };
 
     /**
@@ -79,21 +83,27 @@ namespace adbfsm::path
     class PathBuf
     {
     public:
-        PathBuf(Path path)
-            : m_buf{ path.fullpath() }
-            , m_path{
-                { m_buf.data(), path.parent().size() },
-                { m_buf.data() + (path.filename().data() - path.fullpath().data()), path.filename().size() },
-                path.is_dir(),
-            }
+        friend class Path;
+        friend PathBuf      combine(Path path1, Path path2);
+        friend Opt<PathBuf> combine(Path path, Str name);
+        friend Opt<PathBuf> create_buf(String&& path);
+
+        PathBuf() = default;
+
+        static PathBuf root()
         {
+            auto pathbuf  = PathBuf{};
+            pathbuf.m_buf = String{ "/" };
+            return pathbuf;
         }
 
-        Path as_path() const { return m_path; }
+        Path as_path() const;
 
     private:
         String m_buf;
-        Path   m_path;
+        usize  m_parent_size     = 0;
+        usize  m_basename_size   = 0;
+        usize  m_basename_offset = 0;
     };
 
     /**
@@ -109,9 +119,7 @@ namespace adbfsm::path
             return std::nullopt;
         }
 
-        auto is_dir = false;
         while (path.size() > 1 and path.back() == '/') {
-            is_dir = true;
             path.remove_suffix(1);
         }
         while (path.size() > 2 and path[0] == '/' and path[1] == '/') {
@@ -119,7 +127,7 @@ namespace adbfsm::path
         }
 
         if (path == "/") {
-            return Path{ "/", "/", true };
+            return Path{ "/", "/" };
         }
 
         auto prev    = 1uz;
@@ -141,7 +149,7 @@ namespace adbfsm::path
                 current = path.size();
                 break;
             }
-            current = static_cast<std::size_t>(it - path.begin());
+            current = static_cast<usize>(it - path.begin());
             prev    = current;
         }
 
@@ -153,15 +161,38 @@ namespace adbfsm::path
             ++basename_start;
         }
 
-        return Path{ path.substr(0, dirname_end), path.substr(basename_start), is_dir };
+        return Path{ path.substr(0, dirname_end), path.substr(basename_start) };
     }
+
+    Opt<PathBuf> create_buf(String&& path_str);
+
+    /**
+     * @brief Combine two paths into one.
+     *
+     * @param path1 First path.
+     * @param path2 Second path.
+     * @return Combined path as PathBuf.
+     */
+    PathBuf combine(Path path1, Path path2);
+
+    /*
+     * @brief Combine a path with a name.
+     *
+     * @param path Path to combine with.
+     * @param name Name to combine with.
+     *
+     * @return Combined path as PathBuf.
+     *
+     * The name must not contain '/', if it does, it will return `std::nullopt`.
+     */
+    Opt<PathBuf> combine(Path path, Str name);
 }
 
 namespace adbfsm::path::inline literals
 {
     namespace detail
     {
-        template <std::size_t N>
+        template <usize N>
         struct FixedStr
         {
             char m_data[N]{};
