@@ -19,7 +19,7 @@ namespace adbfsm::tree
     public:
         using Filler = std::function<void(const char* name)>;
 
-        FileTree(data::IConnection& connection, data::ICache& cache);
+        FileTree(data::IConnection& connection);
 
         FileTree(Node&& root)            = delete;
         FileTree& operator=(Node&& root) = delete;
@@ -43,14 +43,17 @@ namespace adbfsm::tree
         Expect<void>      unlink(path::Path path);
         Expect<void>      rmdir(path::Path path);
         Expect<void>      rename(path::Path from, path::Path to);
-        Expect<void>      truncate(path::Path path, off_t size);
-        Expect<i32>       open(path::Path path, int flags);
-        Expect<usize>     read(path::Path path, Span<char> out, off_t offset);
-        Expect<usize>     write(path::Path path, Str in, off_t offset);
-        Expect<void>      flush(path::Path path);
-        Expect<void>      release(path::Path path);
-        Expect<void>      utimens(path::Path path);
 
+        Expect<void>  truncate(path::Path path, off_t size);
+        Expect<u64>   open(path::Path path, int flags);
+        Expect<usize> read(path::Path path, u64 fd, Span<char> out, off_t offset);
+        Expect<usize> write(path::Path path, u64 fd, Str in, off_t offset);
+        Expect<void>  flush(path::Path path, u64 fd);
+        Expect<void>  release(path::Path path, u64 fd);
+
+        Expect<void> utimens(path::Path path);
+
+        // this function only used to link already existing files, user can't use it
         Expect<void> symlink(path::Path path, path::Path target);
 
         const Node& root() const { return m_root; }
@@ -64,7 +67,6 @@ namespace adbfsm::tree
         Expect<Ref<Node>> traverse_or_build(path::Path path);
 
         Node               m_root;
-        data::ICache&      m_cache;
         data::IConnection& m_connection;
         bool               m_root_initialized = false;
     };

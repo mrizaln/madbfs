@@ -55,10 +55,8 @@ namespace
 
 namespace adbfsm::tree
 {
-    // TODO: pull proper stat from the device instead of using default value
-    FileTree::FileTree(data::IConnection& connection, data::ICache& cache)
+    FileTree::FileTree(data::IConnection& connection)
         : m_root{ "/", nullptr, {}, Directory{} }
-        , m_cache{ cache }
         , m_connection{ connection }
     {
     }
@@ -183,7 +181,7 @@ namespace adbfsm::tree
         // NOTE: base must be a Directory here, since traverse_or_build below code is an else branch of
         // conditional above
 
-        return m_connection.stat_dir(path).transform([&](auto stats) {
+        return m_connection.statdir(path).transform([&](auto stats) {
             for (auto stat : stats) {
                 auto file = unescape(stat.path);
 
@@ -233,28 +231,28 @@ namespace adbfsm::tree
     Expect<Ref<Node>> FileTree::mknod(path::Path path)
     {
         auto parent  = path.parent_path();
-        auto context = Node::Context{ m_connection, m_cache, path };
+        auto context = Node::Context{ m_connection, path };
         return traverse_or_build(parent).and_then(proj(&Node::touch, context, path.filename()));
     }
 
     Expect<Ref<Node>> FileTree::mkdir(path::Path path)
     {
         auto parent  = path.parent_path();
-        auto context = Node::Context{ m_connection, m_cache, path };
+        auto context = Node::Context{ m_connection, path };
         return traverse_or_build(parent).and_then(proj(&Node::mkdir, context, path.filename()));
     }
 
     Expect<void> FileTree::unlink(path::Path path)
     {
         auto parent  = path.parent_path();
-        auto context = Node::Context{ m_connection, m_cache, path };
+        auto context = Node::Context{ m_connection, path };
         return traverse_or_build(parent).and_then(proj(&Node::rm, context, path.filename(), false));
     }
 
     Expect<void> FileTree::rmdir(path::Path path)
     {
         auto parent  = path.parent_path();
-        auto context = Node::Context{ m_connection, m_cache, path };
+        auto context = Node::Context{ m_connection, path };
         return traverse_or_build(parent).and_then(proj(&Node::rmdir, context, path.filename()));
     }
 
@@ -286,43 +284,43 @@ namespace adbfsm::tree
 
     Expect<void> FileTree::truncate(path::Path path, off_t size)
     {
-        auto context = Node::Context{ m_connection, m_cache, path };
+        auto context = Node::Context{ m_connection, path };
         return traverse_or_build(path).and_then(proj(&Node::truncate, context, size));
     }
 
-    Expect<i32> FileTree::open(path::Path path, int flags)
+    Expect<u64> FileTree::open(path::Path path, int flags)
     {
-        auto context = Node::Context{ m_connection, m_cache, path };
+        auto context = Node::Context{ m_connection, path };
         return traverse_or_build(path).and_then(proj(&Node::open, context, flags));
     }
 
-    Expect<usize> FileTree::read(path::Path path, Span<char> out, off_t offset)
+    Expect<usize> FileTree::read(path::Path path, u64 fd, Span<char> out, off_t offset)
     {
-        auto context = Node::Context{ m_connection, m_cache, path };
-        return traverse_or_build(path).and_then(proj(&Node::read, context, out, offset));
+        auto context = Node::Context{ m_connection, path };
+        return traverse_or_build(path).and_then(proj(&Node::read, context, fd, out, offset));
     }
 
-    Expect<usize> FileTree::write(path::Path path, Str in, off_t offset)
+    Expect<usize> FileTree::write(path::Path path, u64 fd, Str in, off_t offset)
     {
-        auto context = Node::Context{ m_connection, m_cache, path };
-        return traverse_or_build(path).and_then(proj(&Node::write, context, in, offset));
+        auto context = Node::Context{ m_connection, path };
+        return traverse_or_build(path).and_then(proj(&Node::write, context, fd, in, offset));
     }
 
-    Expect<void> FileTree::flush(path::Path path)
+    Expect<void> FileTree::flush(path::Path path, u64 fd)
     {
-        auto context = Node::Context{ m_connection, m_cache, path };
-        return traverse_or_build(path).and_then(proj(&Node::flush, context));
+        auto context = Node::Context{ m_connection, path };
+        return traverse_or_build(path).and_then(proj(&Node::flush, context, fd));
     }
 
-    Expect<void> FileTree::release(path::Path path)
+    Expect<void> FileTree::release(path::Path path, u64 fd)
     {
-        auto context = Node::Context{ m_connection, m_cache, path };
-        return traverse_or_build(path).and_then(proj(&Node::release, context));
+        auto context = Node::Context{ m_connection, path };
+        return traverse_or_build(path).and_then(proj(&Node::release, context, fd));
     }
 
     Expect<void> FileTree::utimens(path::Path path)
     {
-        auto context = Node::Context{ m_connection, m_cache, path };
+        auto context = Node::Context{ m_connection, path };
         return traverse_or_build(path).and_then(proj(&Node::utimens, context));
     }
 
