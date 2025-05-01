@@ -113,17 +113,29 @@ namespace adbfsm
         template <typename T, typename Ret, typename... Args>
         auto proj(Ret (T::*fn)(Args...) const, std::type_identity_t<Args>... args)
         {
-            return [fn, ... args = std::forward<Args>(args)](const T& t) mutable -> decltype(auto) {    //
-                return (t.*fn)(std::forward<Args>(args)...);
-            };
+            if constexpr (std::is_reference_v<Ret>) {
+                return [fn, ... args = std::forward<Args>(args)](const T& t) mutable {
+                    return std::cref((t.*fn)(std::forward<Args>(args)...));
+                };
+            } else {
+                return [fn, ... args = std::forward<Args>(args)](const T& t) mutable -> decltype(auto) {
+                    return (t.*fn)(std::forward<Args>(args)...);
+                };
+            }
         }
 
         template <typename T, typename Ret, typename... Args>
         auto proj(Ret (T::*fn)(Args...), std::type_identity_t<Args>... args)
         {
-            return [fn, ... args = std::forward<Args>(args)](T& t) mutable -> decltype(auto) {    //
-                return (t.*fn)(std::forward<Args>(args)...);
-            };
+            if constexpr (std::is_reference_v<Ret>) {
+                return [fn, ... args = std::forward<Args>(args)](T& t) mutable {
+                    return std::cref((t.*fn)(std::forward<Args>(args)...));
+                };
+            } else {
+                return [fn, ... args = std::forward<Args>(args)](T& t) mutable -> decltype(auto) {
+                    return (t.*fn)(std::forward<Args>(args)...);
+                };
+            }
         }
     }
 
