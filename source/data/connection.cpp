@@ -467,7 +467,14 @@ namespace adbfsm::data
 
     Expect<Id> Connection::open(path::Path /* path */, int /* flags */)
     {
-        // do nothing actually
+        /*
+         * Since we're using a streaming approach to read/write files, there is no need to do open or
+         * close operation on the file. The file is opened when we read or write to it, and closed after
+         * those operation complete on the device.
+         *
+         * Thus, there is really no need to do anything here.
+         */
+
         return Id::incr();
     }
 
@@ -521,13 +528,21 @@ namespace adbfsm::data
 
     Expect<void> Connection::flush(path::Path /* path */)
     {
-        // do nothing actually
+        /*
+         * The streaming approach is immediate, so there is no need to flush the file. At least for the
+         * moment. In the future we might want to implement caching once again.
+         */
+
         return {};
     }
 
     Expect<void> Connection::release(path::Path /* path */)
     {
-        // do nothing actually
+        /*
+         * The reason this part is a no-op is the same as the open function. We don't need to do any
+         * open or close operation on the file.
+         */
+
         return {};
     }
 
