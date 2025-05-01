@@ -83,7 +83,10 @@ struct fmt::formatter<adbfsm::tree::Node> : fmt::formatter<std::string_view>
             }
 
             auto visitor = adbfsm::util::Overload{
-                [&](const Link& link) { return fmt::format("    ->    {}", link.target()->build_path()); },
+                [&](const Link& link) {
+                    auto pathbuf = link.target()->build_path();
+                    return fmt::format("    ->    {}", pathbuf.as_path().fullpath());
+                },
                 [&](const Directory&) { return String{ "/" }; },
                 [&](const auto&) { return String{ "" }; },
             };
@@ -93,7 +96,7 @@ struct fmt::formatter<adbfsm::tree::Node> : fmt::formatter<std::string_view>
             auto name = node->name() == "/" ? "" : node->name();
             fmt::format_to(ctx.out(), "- {}{}\n", name, additional);
 
-            if (auto* dir = node->as<Directory>()) {
+            if (auto* dir = std::get_if<Directory>(&node->value())) {
                 for (const auto& child : dir->children()) {
                     self(child.get(), depth + 1);
                 }
@@ -122,9 +125,10 @@ public:
 };
 
 template <typename T>
-Expect<T> raise_expect_error(std::errc errc, std::source_location loc = std::source_location::current())
+adbfsm::Unit raise_expect_error(std::errc errc, std::source_location loc = std::source_location::current())
 {
     throw ExpectError{ errc, loc };
+    return {};
 }
 
 String diff_str(Str str1, Str str2)
@@ -145,7 +149,7 @@ namespace mock
     class DummyConnection : public IConnection
     {
     public:
-        Expect<std::generator<ParsedStat>> stat_dir(path::Path) override    // unused
+        Expect<Gen<ParsedStat>> stat_dir(path::Path) override    // unused
         {
             return std::unexpected{ std::errc::inappropriate_io_control_operation };
         }
@@ -191,7 +195,7 @@ int main()
     "constructed tree from raw node have same shape"_test = [&] {
         using namespace adbfsm::tree;
 
-#define unwrap() or_else([](auto e) { return raise_expect_error<Node*>(e); }).value()
+#define unwrap() transform_error([](auto e) { return raise_expect_error<Node*>(e); }).value()
 
         using adbfsm::path::operator""_path;
 
@@ -201,46 +205,46 @@ int main()
 
         auto root = Node{ "/", nullptr, {}, Directory{} };
 
-        auto* hello = root.mkdir("hello", context).unwrap();
+        auto* hello = root.mkdir(context, "hello").unwrap();
 
-        _ = hello->touch("world.txt", context).unwrap();
-        _ = hello->touch("foo.txt", context).unwrap();
-        _ = hello->touch("movie.mp4", context).unwrap();
+        _ = hello->touch(context, "world.txt").unwrap();
+        _ = hello->touch(context, "foo.txt").unwrap();
+        _ = hello->touch(context, "movie.mp4").unwrap();
 
-        auto* bar = hello->mkdir("bar", context).unwrap();
+        auto* bar = hello->mkdir(context, "bar").unwrap();
 
-        _ = bar->touch("baz.txt", context).unwrap();
-        _ = bar->touch("qux.txt", context).unwrap();
-        _ = bar->touch("quux.txt", context).unwrap();
+        _ = bar->touch(context, "baz.txt").unwrap();
+        _ = bar->touch(context, "qux.txt").unwrap();
+        _ = bar->touch(context, "quux.txt").unwrap();
 
-        auto* bye = root.mkdir("bye", context).unwrap();
+        auto* bye = root.mkdir(context, "bye").unwrap();
 
-        _ = bye->touch("world.txt", context).unwrap();
-        _ = bye->touch("movie.mp4", context).unwrap();
-        _ = bye->touch("music.mp3", context).unwrap();
+        _ = bye->touch(context, "world.txt").unwrap();
+        _ = bye->touch(context, "movie.mp4").unwrap();
+        _ = bye->touch(context, "music.mp3").unwrap();
 
-        auto* family = bye->mkdir("family", context).unwrap();
+        auto* family = bye->mkdir(context, "family").unwrap();
 
-        _ = family->touch("dad.txt", context).unwrap();
-        _ = family->touch("mom.txt", context).unwrap();
+        _ = family->touch(context, "dad.txt").unwrap();
+        _ = family->touch(context, "mom.txt").unwrap();
 
-        auto* friends = bye->mkdir("friends", context).unwrap();
+        auto* friends = bye->mkdir(context, "friends").unwrap();
 
-        _ = friends->touch("bob.txt", context).unwrap();
+        _ = friends->touch(context, "bob.txt").unwrap();
 
-        auto* school = friends->mkdir("school", context).unwrap();
+        auto* school = friends->mkdir(context, "school").unwrap();
 
-        _ = school->touch("kal'tsit.txt", context).unwrap();
-        _ = school->touch("closure.txt", context).unwrap();
+        _ = school->touch(context, "kal'tsit.txt").unwrap();
+        _ = school->touch(context, "closure.txt").unwrap();
 
-        auto* work = friends->mkdir("work", context).unwrap();
+        auto* work = friends->mkdir(context, "work").unwrap();
 
-        auto* wife = work->touch("loughshinny <3.txt", context).unwrap();
+        auto* wife = work->touch(context, "loughshinny <3.txt").unwrap();
 
-        _ = work->touch("eblana?.mp4", context).unwrap();
-        _ = school->link("hehe", work, context).unwrap();
-        _ = hello->link("wife", wife, context).unwrap();
-        _ = bye->touch("theresa.txt", context).unwrap();
+        _ = work->touch(context, "eblana?.mp4").unwrap();
+        _ = school->link("hehe", work).unwrap();
+        _ = hello->link("wife", wife).unwrap();
+        _ = bye->touch(context, "theresa.txt").unwrap();
 
         auto tree_str = fmt::format("\n{}", root);
         expect(expected == tree_str) << diff_str(expected, tree_str);
@@ -256,7 +260,7 @@ int main()
 
         auto tree = FileTree{ connection, cache };
 
-#define unwrap(T) or_else([](auto e) { return raise_expect_error<T>(e); }).value()
+#define unwrap(T) transform_error([](auto e) { return raise_expect_error<T>(e); }).value()
 
         using adbfsm::path::operator""_path;
 
@@ -298,15 +302,17 @@ int main()
         tree.unlink("/bye/friends/school/hehe"_path).unwrap(void);
 
         // there is no recursive delete
-        auto* bar = tree.traverse("/hello/bar"_path).unwrap(Node*);
-        if (auto* dir = bar->as<Directory>()) {
-            auto paths = dir->children()    //
-                       | sv::transform([](auto&& node) { return node->build_path(); })
-                       | sr::to<std::vector>();
-            for (auto path : paths) {
-                tree.unlink(adbfsm::path::create(path).value()).unwrap(void);
-            }
+        auto* bar      = tree.traverse("/hello/bar"_path).unwrap(Node*);
+        auto  bar_path = bar->build_path();
+        auto  paths    = std::vector<adbfsm::path::PathBuf>{};
+
+        _ = bar->list([&](Str name) {
+            paths.push_back(adbfsm::path::combine(bar_path.as_path(), name).value());
+        });
+        for (const auto& path : paths) {
+            tree.unlink(path.as_path()).unwrap(void);
         }
+
         tree.rmdir("/hello/bar"_path).unwrap(void);
 
         tree_str = fmt::format("\n{}", tree.root());
