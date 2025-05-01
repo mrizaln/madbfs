@@ -15,7 +15,7 @@ namespace adbfsm
         Uniq<data::IConnection> connection;
         Uniq<data::ICache>      cache;
         tree::FileTree          tree;
-        std::filesystem::path   cache_dir;    // data::ICache is not responsible for deleting the directory
+        path::PathBuf           cache_dir;    // data::ICache is not responsible for deleting the directory
     };
 
     void* init(fuse_conn_info*, fuse_config*);

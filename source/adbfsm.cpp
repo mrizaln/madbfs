@@ -15,12 +15,12 @@ namespace
      *
      * The created directory handling, including its removal, is up to the caller.
      */
-    std::filesystem::path make_temp_dir()
+    adbfsm::path::PathBuf make_temp_dir()
     {
         char adbfsm_template[] = "/tmp/adbfsm-XXXXXX";
         auto temp              = ::mkdtemp(adbfsm_template);
         adbfsm::log_i({ "created temporary directory: {:?}" }, temp);
-        return temp;
+        return adbfsm::path::create_buf(temp).value();
     }
 
     adbfsm::Adbfsm& get_data()
@@ -72,8 +72,8 @@ namespace adbfsm
         auto temp = data->cache_dir;
         delete data;
 
-        adbfsm::log_i({ "cleaned up temporary directory: {:?}" }, temp.c_str());
-        std::filesystem::remove_all(temp);
+        adbfsm::log_i({ "cleaned up temporary directory: {:?}" }, temp.as_path().fullpath());
+        std::filesystem::remove_all(temp.as_path().fullpath());
     }
 
     i32 getattr(const char* path, struct stat* stbuf, [[maybe_unused]] fuse_file_info* fi)
@@ -87,7 +87,7 @@ namespace adbfsm
             return fuse_err(__func__)(maybe_stat.error());
         }
 
-        const auto& stat = **maybe_stat;
+        const auto& stat = maybe_stat->get();
 
         std::memset(stbuf, 0, sizeof(struct stat));
 
@@ -125,8 +125,8 @@ namespace adbfsm
 
         return ok_or(path::create(path), std::errc::operation_not_supported)
             .and_then([](path::Path p) { return get_data().tree.readlink(p); })
-            .and_then([&](tree::Node* node) -> Expect<void> {
-                auto path_buf = node->build_path();    // this will emits absolute path, which we don't want
+            .and_then([&](tree::Node& node) -> Expect<void> {
+                auto path_buf = node.build_path();    // this will emits absolute path, which we don't want
                 auto path     = path_buf.as_path();
                 if (auto pathsize = path.fullpath().size(); pathsize - 1 < size) {
                     // copy path without initial '/'

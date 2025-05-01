@@ -2,12 +2,14 @@
 #include "adbfsm/data/connection.hpp"
 #include "adbfsm/log.hpp"
 
+#include <filesystem>
+
 namespace adbfsm::data
 {
-    Opt<ICache::Path> Cache::get(Id id) const
+    Opt<path::PathBuf> Cache::get(Id id) const
     {
         if (exists(id)) {
-            return m_cache_dir / std::to_string(id.inner());
+            return m_cache_dir.extend_copy(std::to_string(id.inner()));
         }
         return std::nullopt;
     }
@@ -66,14 +68,15 @@ namespace adbfsm::data
             const auto name = entry.path.as_path().fullpath();
             log_w({ "Cache: too big ({} > {}), removing: {:?}" }, new_size, m_max_size, name);
 
-            std::filesystem::remove(m_cache_dir / std::to_string(entry.id.inner()));
+            auto path = m_cache_dir.extend_copy(std::to_string(entry.id.inner())).value();
+            std::filesystem::remove(path.as_path().fullpath());
             new_size -= entry.size;
         }
 
         auto& entry = m_entries.emplace_back(Id::incr(), stat->stat.size, Clock::now(), path.into_buf());
 
-        auto dest = m_cache_dir / std::to_string(entry.id.inner());
-        auto file = connection.pull(path, path::create(dest.c_str()).value());
+        auto dest = m_cache_dir.extend_copy(std::to_string(entry.id.inner())).value();
+        auto file = connection.pull(path, dest);
 
         if (not file.has_value()) {
             log_e({ "Cache: failed to pull file: [{:?}]" }, entry.path.as_path().fullpath());
@@ -95,17 +98,18 @@ namespace adbfsm::data
 
         auto found = sr::find(m_entries_dirty, id, &Entry::id);
         if (found != m_entries_dirty.end()) {
-            auto path = m_cache_dir / std::to_string(id.inner());
-            return connection.push(path::create(path.c_str()).value(), found->path.as_path()).transform([&] {
+            auto path = m_cache_dir.extend_copy(std::to_string(found->id.inner())).value();
+            return connection.push(path, found->path).transform([&] {
                 m_current_size -= found->size;
-                return std::filesystem::remove(path);
+                return std::filesystem::remove(path.as_path().fullpath());
             });
         }
 
         auto exist = std::erase_if(m_entries, [&](const Entry& entry) { return entry.id == id; }) != 0;
         if (exist) {
             m_current_size -= found->size;
-            return std::filesystem::remove(m_cache_dir / std::to_string(id.inner()));
+            auto path       = m_cache_dir.extend_copy(std::to_string(found->id.inner())).value();
+            return std::filesystem::remove(path.as_path().fullpath());
         }
         return exist;
     }
@@ -119,8 +123,8 @@ namespace adbfsm::data
         }
 
         for (const auto& entry : m_entries_dirty) {
-            auto path = m_cache_dir / std::to_string(entry.id.inner());
-            auto res  = connection.push(path::create(path.c_str()).value(), entry.path.as_path());
+            auto path = m_cache_dir.extend_copy(std::to_string(entry.id.inner())).value();
+            auto res  = connection.push(path, entry.path);
             if (not res.has_value()) {
                 return std::unexpected{ res.error() };
             }
@@ -139,9 +143,7 @@ namespace adbfsm::data
             return false;
         }
 
-        auto path = m_cache_dir / std::to_string(found->id.inner());
-        return connection.push(path::create(path.c_str()).value(), found->path.as_path()).transform([] {
-            return true;
-        });
+        auto path = m_cache_dir.extend_copy(std::to_string(found->id.inner())).value();
+        return connection.push(path, found->path).transform([] { return true; });
     }
 }

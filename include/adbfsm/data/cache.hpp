@@ -5,7 +5,6 @@
 
 #include <atomic>
 #include <deque>
-#include <filesystem>
 #include <shared_mutex>
 
 namespace adbfsm::data
@@ -54,11 +53,9 @@ namespace adbfsm::data
     class ICache
     {
     public:
-        using Path = std::filesystem::path;
-
-        virtual Opt<Path> get(Id id) const             = 0;
-        virtual bool      exists(Id id) const          = 0;
-        virtual bool      set_dirty(Id id, bool dirty) = 0;
+        virtual Opt<path::PathBuf> get(Id id) const             = 0;
+        virtual bool               exists(Id id) const          = 0;
+        virtual bool               set_dirty(Id id, bool dirty) = 0;
 
         virtual Expect<Id>   add(IConnection& connection, path::Path path) = 0;
         virtual Expect<bool> remove(IConnection& connection, Id id)        = 0;
@@ -78,8 +75,8 @@ namespace adbfsm::data
     {
     public:
         // size in bytes
-        Cache(std::filesystem::path path, usize max_size)
-            : m_cache_dir{ std::move(path) }
+        Cache(path::Path path, usize max_size)
+            : m_cache_dir{ path.into_buf() }
             , m_max_size{ max_size }
         {
         }
@@ -94,7 +91,7 @@ namespace adbfsm::data
          * The returned path only valid until Cache::add is called. In the case of the entry not exist, it may
          * have been invalidated on Cache::add call. You may want to re-add the entry if that is the case.
          */
-        Opt<ICache::Path> get(Id id) const override;
+        Opt<path::PathBuf> get(Id id) const override;
 
         /**
          * @brief Check whether a cache is exists by its id.
@@ -160,7 +157,7 @@ namespace adbfsm::data
         std::deque<Entry> m_entries;
         std::deque<Entry> m_entries_dirty;
 
-        std::filesystem::path m_cache_dir;
+        path::PathBuf m_cache_dir;
 
         usize m_max_size;
         usize m_current_size = 0;
