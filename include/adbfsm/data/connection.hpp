@@ -3,8 +3,6 @@
 #include "adbfsm/common.hpp"
 #include "adbfsm/data/stat.hpp"
 
-#include <generator>
-
 namespace adbfsm::path
 {
     class Path;
@@ -23,15 +21,15 @@ namespace adbfsm::data
     class IConnection
     {
     public:
-        virtual Expect<std::generator<ParsedStat>> stat_dir(path::Path path)            = 0;
-        virtual Expect<ParsedStat>                 stat(path::Path path)                = 0;
-        virtual Expect<void>                       touch(path::Path path, bool create)  = 0;
-        virtual Expect<void>                       mkdir(path::Path path)               = 0;
-        virtual Expect<void>                       rm(path::Path path, bool recursive)  = 0;
-        virtual Expect<void>                       rmdir(path::Path path)               = 0;
-        virtual Expect<void>                       mv(path::Path from, path::Path to)   = 0;
-        virtual Expect<void>                       pull(path::Path from, path::Path to) = 0;
-        virtual Expect<void>                       push(path::Path from, path::Path to) = 0;
+        virtual Expect<Gen<ParsedStat>> stat_dir(path::Path path)            = 0;
+        virtual Expect<ParsedStat>      stat(path::Path path)                = 0;
+        virtual Expect<void>            touch(path::Path path, bool create)  = 0;
+        virtual Expect<void>            mkdir(path::Path path)               = 0;
+        virtual Expect<void>            rm(path::Path path, bool recursive)  = 0;
+        virtual Expect<void>            rmdir(path::Path path)               = 0;
+        virtual Expect<void>            mv(path::Path from, path::Path to)   = 0;
+        virtual Expect<void>            pull(path::Path from, path::Path to) = 0;
+        virtual Expect<void>            push(path::Path from, path::Path to) = 0;
 
         virtual ~IConnection() = default;
     };
@@ -46,7 +44,7 @@ namespace adbfsm::data
          *
          * @return A generator if successful, or an error if it fails.
          */
-        Expect<std::generator<ParsedStat>> stat_dir(path::Path path) override;
+        Expect<Gen<ParsedStat>> stat_dir(path::Path path) override;
 
         /**
          * @brief Get the stat of a file or directory.
@@ -126,7 +124,7 @@ namespace adbfsm::data
         DeviceStatus status;
     };
 
-    constexpr std::string_view to_string(DeviceStatus status)
+    constexpr Str to_string(DeviceStatus status)
     {
         switch (status) {
         case DeviceStatus::Device: return "device ok";
@@ -145,6 +143,5 @@ namespace adbfsm::data
     /**
      * @brief List connected devices.
      */
-    Expect<std::vector<Device>> list_devices();
-
+    Expect<Vec<Device>> list_devices();
 }

@@ -293,7 +293,7 @@ namespace adbfsm::data
 {
     using namespace std::string_view_literals;
 
-    Expect<std::generator<ParsedStat>> Connection::stat_dir(path::Path path)
+    Expect<Gen<ParsedStat>> Connection::stat_dir(path::Path path)
     {
         // NOTE: somehow adb shell needs double escaping
         const auto path_str = fmt::format("\"{}\"", path.fullpath());
@@ -304,7 +304,7 @@ namespace adbfsm::data
             return std::unexpected{ out.error() };
         }
 
-        auto generator = [](String out) -> std::generator<ParsedStat> {
+        auto generator = [](String out) -> Gen<ParsedStat> {
             auto lines = util::StringSplitter{ out, '\n' };
             while (auto line = lines.next()) {
                 auto parsed = parse_file_stat(util::strip(*line));
