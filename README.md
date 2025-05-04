@@ -4,9 +4,9 @@ The name of the project can be separated as `adb`, `fs`, and `m` which means `ad
 
 This project aims to create a well-built filesystem abstraction over `adb` using `libfuse` that is fast, safe, and reliable while also have have well structured code according to modern C++ (20 and above) practices.
 
-## Why?
+## Motivation
 
-I want to manage my Android phone storage from my computer without using the terrible MTP.
+I want to manage my Android phone storage from my computer without using MTP (it's awful).
 
 This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbfs-rootless) project by Spion, available on GitHub. While `adbfs-rootless` works as intended, I encoutered frequent crashes that affected its reliability. I initially considered contributing fixes directly into the codebase, but found it somewhat dated with practices that don't align well with modern practices. Consequently, I decided to rebuild the project from the ground up to create a more stable and modern solution.
 
@@ -19,12 +19,11 @@ Build dependencies
 
 Library dependencies
 
-- libfuse
-- spdlog
 - fmt
-- subprocess (FetchContent)
-
-> The dependencies are all managed by Conan except when specified
+- libfuse
+- rapidhash
+- reproc
+- spdlog
 
 ## Building
 
@@ -56,12 +55,20 @@ usage: adbfsm [options] <mountpoint>
 
 Options for adbfsm:
     --serial=<s>        serial number of the device to mount
-                        (default: <auto> [detection is similar to adb])
+                          (default: <auto> [detection is similar to adb])
     --loglevel=<l>      log level to use (default: warn)
     --logfile=<f>       log file to write to (default: - for stdout)
-    --cachesize=<n>     maximum size of the cache in MB (default: 500)
-    -h, --help          show this help message
+    --cachesize=<n>     maximum size of the cache in MiB
+                          (default: 512)
+                          (minimum: 128)
+                          (value will be rounded to the next power of 2)
+    --pagesize=<n>      page size for cache & transfer in KiB
+                          (default: 512)
+                          (minimum: 64)
+                          (value will be rounded to the next power of 2)
+    -h   --help         show this help message
     --full-help         show full help message (includes libfuse options)
+
 ```
 
 ### Selecting device
@@ -88,21 +95,24 @@ $ ANDROID_SERIAL=068832516O101622 ./adbfsm
 
 ### Cache size
 
-> As the approach the file management has change, this section is irrelevant at the moment
-
-`adbfsm` use the `/tmp/` directory for caching the files pulled from the phone. This cache can be large so you can limit or increase the size of this cache. The size of the cache also correlates to the largest file that can be viewed/pulled from the phone so make sure to set it according to your need.
+`adbfsm` caches all the read/write operations on the files on the device. This cache is stored in memory. You can control the size of this cache using `--cachesize` option (in MiB). The default value is `512` (512MiB).
 
 ```sh
-$ ./adbfsm --cachesize=1000 <mountpoint>    # using 1GB of cache
+$ ./adbfsm --cachesize=512<mountpoint>    # using 512MiB of cache
 ```
 
-At the moment the cache directory for `adbfsm` can't be changed and the minimum size is `500MB` even when you set it lower it will be set to `500MB`.
+### Page size
 
-If the `/tmp/` directory is using `zram` (`tmpfs`) you might want to be careful to not set the size of the cache too high as it might fill up your RAM quickly
+In the cache, each file is divided into pages. The `--pagesize` option dictates the size of this page (in KiB). Page size also dictates the size of the buffer used to read/write into the file on the device. You can adjust this value according to your use. From my testing, `pagesize` of value `512` (means 512KiB) works well when using USB cable for the `adb` connection. If you are using Wi-Fi connection, you may want to decrease (or increase) this value your liking. The default value is `512` (512KiB).
+
+```sh
+$ ./adbfsm --pagesize=512<mountpoint>    # using 512KiB of page size
+
+```
 
 ### Logging
 
-The default log file is stdout (which goes to nowhere when not run in debug mode). You can manually set the log file using `--logfile` option and set the log level using `--loglevel`.
+The default log file is stdout (which goes to nowhere when not run in foreground mode). You can manually set the log file using `--logfile` option and set the log level using `--loglevel`.
 
 ```sh
 $ ./adbfsm --logfile=adbfsm.log --loglevel=debug <mountpoint>
@@ -123,5 +133,6 @@ $ ./adbfsm --logfile=- --loglevel=debug -d <mountpoint> 2> /dev/null        # th
 - [ ] Periodic cache invalidation. Current implementation only look at the size of current cache and only invalidate oldest entry when newest entry is added and the size exceed the `cachesize` limit.
 - [ ] IPC to talk to the `adbfsm` to control the filesystem parameters like invalidation, timeout, cache size, etc.
 - [x] Implement the filesystem as actual tree for caching the stat.
+- [x] Implement file read and write operation caching in memory.
 - [ ] Implement versioning on each node that expires every certain period of time. When a node expires it needs to query the files from the device again.
 - [x] Implement proper multithreading. Current implementation is practically single threaded (the tree is locked every time it is used) which is not ideal.
