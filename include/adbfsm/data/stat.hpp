@@ -6,6 +6,11 @@
 
 #include <atomic>
 
+namespace adbfsm::tree
+{
+    class Node;
+}
+
 namespace adbfsm::data
 {
     /**
@@ -16,9 +21,7 @@ namespace adbfsm::data
     class Id
     {
     public:
-        friend class Connection;
-
-        static Id from_fd(u64 fd) { return { static_cast<u64>(fd) }; }
+        friend tree::Node;
 
         Id() = default;
         u64 inner() const { return m_inner; }

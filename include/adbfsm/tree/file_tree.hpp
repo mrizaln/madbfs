@@ -19,7 +19,7 @@ namespace adbfsm::tree
     public:
         using Filler = std::function<void(const char* name)>;
 
-        FileTree(data::IConnection& connection);
+        FileTree(data::IConnection& connection, data::Cache& cache);
 
         FileTree(Node&& root)            = delete;
         FileTree& operator=(Node&& root) = delete;
@@ -68,6 +68,7 @@ namespace adbfsm::tree
 
         Node               m_root;
         data::IConnection& m_connection;
+        data::Cache&       m_cache;
         bool               m_root_initialized = false;
     };
 }

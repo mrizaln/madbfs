@@ -12,8 +12,8 @@ namespace adbfsm
     struct Adbfsm
     {
         Uniq<data::IConnection> connection;
+        Uniq<data::Cache>       cache;
         tree::FileTree          tree;
-        path::PathBuf           cache_dir;    // data::ICache is not responsible for deleting the directory
     };
 
     void* init(fuse_conn_info*, fuse_config*);

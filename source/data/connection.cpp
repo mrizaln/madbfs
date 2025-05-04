@@ -132,7 +132,7 @@ namespace
     template <std::invocable<Span<const u8>> Out>
     Expect<usize> exec_fn(Span<const Str> cmd, Str in, Out outfn)
     {
-        // log_d({ "exec command: {::?}" }, cmd);       // quite heavy to log :D
+        // log_d({ "exec command: {::?}" }, cmd);    // quite heavy to log :D
 
         using namespace std::chrono_literals;
 
@@ -465,7 +465,7 @@ namespace adbfsm::data
         return exec(cmd).transform(sink_void);
     }
 
-    Expect<Id> Connection::open(path::Path /* path */, int /* flags */)
+    Expect<u64> Connection::open(path::Path /* path */, int /* flags */)
     {
         /*
          * Since we're using a streaming approach to read/write files, there is no need to do open or
@@ -475,7 +475,7 @@ namespace adbfsm::data
          * Thus, there is really no need to do anything here.
          */
 
-        return Id::incr();
+        return m_counter.fetch_add(1, std::memory_order::relaxed) + 1;
     }
 
     Expect<usize> Connection::read(path::Path path, Span<char> out, off_t offset)

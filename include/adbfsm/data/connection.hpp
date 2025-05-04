@@ -32,7 +32,7 @@ namespace adbfsm::data
 
         // file operations
         virtual Expect<void>  truncate(path::Path path, off_t size)               = 0;
-        virtual Expect<Id>    open(path::Path path, int flags)                    = 0;
+        virtual Expect<u64>   open(path::Path path, int flags)                    = 0;
         virtual Expect<usize> read(path::Path path, Span<char> out, off_t offset) = 0;
         virtual Expect<usize> write(path::Path path, Str in, off_t offset)        = 0;
         virtual Expect<void>  flush(path::Path path)                              = 0;
@@ -117,7 +117,7 @@ namespace adbfsm::data
          * @param path Path to the file on the device.
          * @param flags Flags to open the file with.
          */
-        Expect<Id> open(path::Path path, int flags) override;
+        Expect<u64> open(path::Path path, int flags) override;
 
         /**
          * @brief Read from a file on the device.
@@ -160,6 +160,9 @@ namespace adbfsm::data
          * @param create Indicate whether to create a file if not exist.
          */
         Expect<void> touch(path::Path path, bool create) override;
+
+    private:
+        std::atomic<u64> m_counter = 0;
     };
 
     enum class DeviceStatus

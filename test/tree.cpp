@@ -160,7 +160,7 @@ namespace mock
 
         // file operations
         Expect<void>  truncate(path::Path, off_t) override { return {}; }
-        Expect<Id>    open(path::Path, int) override { return {}; }
+        Expect<u64>   open(path::Path, int) override { return {}; }
         Expect<usize> read(path::Path, Span<char>, off_t) override { return {}; }
         Expect<usize> write(path::Path, Str, off_t) override { return {}; }
         Expect<void>  flush(path::Path) override { return {}; }
@@ -187,7 +187,8 @@ int main()
         using adbfsm::path::operator""_path;
 
         auto connection = mock::DummyConnection{};
-        auto context    = Node::Context{ connection, "/dummy"_path };
+        auto cache      = adbfsm::data::Cache{};
+        auto context    = Node::Context{ connection, cache, "/dummy"_path };
 
         auto root = Node{ "/", nullptr, {}, Directory{} };
 
@@ -242,7 +243,8 @@ int main()
         using namespace adbfsm::tree;
 
         auto connection = mock::DummyConnection{};
-        auto tree       = FileTree{ connection };
+        auto cache      = adbfsm::data::Cache{};
+        auto tree       = FileTree{ connection, cache };
 
 #define unwrap(T) transform_error([](auto e) { return raise_expect_error<T>(e); }).value()
 

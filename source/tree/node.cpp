@@ -216,10 +216,10 @@ namespace adbfsm::tree
     {
         auto lock = std::shared_lock{ m_mutex };
         return regular_file_prelude().and_then([&](RegularFile& file) {
-            return context.connection.open(context.path, flags).transform([&](data::Id id) {
-                auto res = file.open(id);
+            return context.connection.open(context.path, flags).transform([&](u64 fd) {
+                auto res = file.open(fd);
                 assert(res);
-                return id.inner();
+                return fd;
             });
         });
     }
@@ -227,17 +227,20 @@ namespace adbfsm::tree
     Expect<usize> Node::read(Context context, u64 fd, std::span<char> out, off_t offset)
     {
         return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<usize> {
-            if (not file.is_open(data::Id::from_fd(fd))) {
+            if (not file.is_open(fd)) {
                 return Unexpect{ Errc::bad_file_descriptor };
             }
-            return context.connection.read(context.path, out, offset);
+            return context.cache.read(id(), out, offset, [&context](Span<std::byte> out, off_t offset) {
+                auto out_char = Span{ reinterpret_cast<char*>(out.data()), out.size() };
+                return context.connection.read(context.path, out_char, offset);
+            });
         });
     }
 
     Expect<usize> Node::write(Context context, u64 fd, std::string_view in, off_t offset)
     {
         return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<usize> {
-            if (not file.is_open(data::Id::from_fd(fd))) {
+            if (not file.is_open(fd)) {
                 return Unexpect{ Errc::bad_file_descriptor };
             }
             return context.connection.write(context.path, in, offset).transform([&](usize ret) {
@@ -250,7 +253,7 @@ namespace adbfsm::tree
     Expect<void> Node::flush(Context context, u64 fd)
     {
         return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<void> {
-            if (not file.is_open(data::Id::from_fd(fd))) {
+            if (not file.is_open(fd)) {
                 return Unexpect{ Errc::bad_file_descriptor };
             }
             return context.connection.flush(context.path);
@@ -260,7 +263,7 @@ namespace adbfsm::tree
     Expect<void> Node::release(Context context, u64 fd)
     {
         return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<void> {
-            if (not file.close(data::Id::from_fd(fd))) {
+            if (not file.close(fd)) {
                 return Unexpect{ Errc::bad_file_descriptor };
             }
             return context.connection.release(context.path);
