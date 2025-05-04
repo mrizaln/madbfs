@@ -19,13 +19,30 @@ namespace
     auto fuse_err(adbfsm::Str name, const char* path)
     {
         return [=](std::errc err) {
-            if (err != std::errc{}) {
-                auto msg = std::make_error_code(err).message();
-                adbfsm::log_e(
-                    { "{}: {:?} returned with error code [{}]: {}" }, name, path, static_cast<int>(err), msg
-                );
+            const auto errint = static_cast<int>(err);
+            if (errint == 0) {
+                return 0;
             }
-            return -static_cast<int>(err);
+
+            switch (err) {
+            // filter out common errors
+            case std::errc::no_such_file_or_directory:
+            case std::errc::file_exists:
+            case std::errc::not_a_directory:
+            case std::errc::is_a_directory:
+            case std::errc::directory_not_empty:
+            case std::errc::too_many_symbolic_link_levels:
+            case std::errc::permission_denied:
+            case std::errc::read_only_file_system:
+            case std::errc::filename_too_long:
+            case std::errc::invalid_argument:    //
+                return -errint;
+
+            default:
+                const auto msg = std::make_error_code(err).message();
+                adbfsm::log_e({ "{}: {:?} returned with error code [{}]: {}" }, name, path, errint, msg);
+                return -errint;
+            }
         };
     }
 }
