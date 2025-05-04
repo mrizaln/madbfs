@@ -1,6 +1,7 @@
 #pragma once
 
 #include "adbfsm/common.hpp"
+#include "adbfsm/data/cache.hpp"
 #include "adbfsm/data/connection.hpp"
 #include "adbfsm/data/stat.hpp"
 #include "adbfsm/path/path.hpp"
@@ -35,39 +36,39 @@ namespace adbfsm::tree
         RegularFile(RegularFile&& other)
         {
             auto lock  = util::Lock{ m_operated };
-            m_open_ids = std::move(other.m_open_ids);
+            m_open_fds = std::move(other.m_open_fds);
             m_operated = false;
         }
 
-        bool is_open(data::Id id)
+        bool is_open(u64 fd)
         {
             auto lock = util::Lock{ m_operated };
-            return sr::find(m_open_ids, id) != m_open_ids.end();
+            return sr::find(m_open_fds, fd) != m_open_fds.end();
         }
 
-        bool open(data::Id id)
+        bool open(u64 fd)
         {
             auto lock = util::Lock{ m_operated };
-            if (sr::find(m_open_ids, id) != m_open_ids.end()) {
+            if (sr::find(m_open_fds, fd) != m_open_fds.end()) {
                 return false;
             }
-            m_open_ids.push_back(id);
+            m_open_fds.push_back(fd);
             return true;
         }
 
-        bool close(data::Id id)
+        bool close(u64 fd)
         {
             auto lock  = util::Lock{ m_operated };
-            auto found = sr::find(m_open_ids, id);
-            if (found == m_open_ids.end()) {
+            auto found = sr::find(m_open_fds, fd);
+            if (found == m_open_fds.end()) {
                 return false;
             }
-            m_open_ids.erase(found);
+            m_open_fds.erase(found);
             return true;
         }
 
     private:
-        Vec<data::Id>     m_open_ids;            // used to track open files
+        Vec<u64>          m_open_fds;            // used to track open files
         std::atomic<bool> m_operated = false;    // used for locking.
 
         // NOTE: I use atomic to save space; also this is the most suitable one in this case since each locks
@@ -159,11 +160,13 @@ namespace adbfsm::tree
         struct Context
         {
             data::IConnection& connection;
+            data::Cache&       cache;
             const path::Path&  path;    // path for connection
         };
 
         Node(Str name, Node* parent, data::Stat stat, File value)
-            : m_parent{ parent }
+            : m_id{ data::Id::incr() }
+            , m_parent{ parent }
             , m_name{ name }
             , m_stat{ std::move(stat) }
             , m_value{ std::move(value) }
@@ -175,6 +178,8 @@ namespace adbfsm::tree
 
         Node(const Node&)            = delete;
         Node& operator=(const Node&) = delete;
+
+        data::Id id() const { return m_id; };
 
         void set_name(Str name) { m_name = name; }
         void set_parent(Node* parent) { m_parent = parent; }
@@ -432,6 +437,7 @@ namespace adbfsm::tree
             return current->as<RegularFile>();
         }
 
+        data::Id    m_id;
         Node*       m_parent = nullptr;
         std::string m_name   = {};
         data::Stat  m_stat   = {};
