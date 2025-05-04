@@ -78,7 +78,7 @@ namespace adbfsm::args
             "                          (default: <auto> [detection is similar to adb])\n"
             "    --loglevel=<l>      log level to use (default: warn)\n"
             "    --logfile=<f>       log file to write to (default: - for stdout)\n"
-            "    --cachesize=<n>     maximum size of the cache in MiB "
+            "    --cachesize=<n>     maximum size of the cache in MiB\n"
             "                          (default: 512)\n"
             "                          (minimum: 128)\n"
             "                          (value will be rounded to the next power of 2)\n"
