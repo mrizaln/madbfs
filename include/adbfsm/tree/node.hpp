@@ -440,6 +440,10 @@ namespace adbfsm::tree
                 current = &readlink()->get();
             }
 
+            if (auto err = as<Error>(); err.has_value()) {
+                return Unexpect{ err->get().error };
+            }
+
             if (current->is<Directory>()) {
                 return Unexpect{ Errc::is_a_directory };
             } else if (current->is<Other>()) {
@@ -474,22 +478,15 @@ namespace adbfsm::tree
     template <typename T>
     Expect<Ref<T>> Node::as()
     {
-
         constexpr auto errc = [&] {
             if constexpr (std::same_as<Directory, T>) {
                 return Errc::not_a_directory;
             }
             return Errc::invalid_argument;
         }();
-
-        if (auto* val = std::get_if<Error>(&m_value)) {
-            return Unexpect{ val->error };
-        }
-
         if (auto* val = std::get_if<T>(&m_value)) {
             return *val;
         }
-
         return Unexpect{ errc };
     }
 
@@ -502,9 +499,8 @@ namespace adbfsm::tree
             }
             return Errc::invalid_argument;
         }();
-
-        if (auto* dir = std::get_if<T>(&m_value)) {
-            return *dir;
+        if (auto* val = std::get_if<T>(&m_value)) {
+            return *val;
         }
         return Unexpect{ errc };
     }

@@ -11,8 +11,6 @@ namespace adbfsm::tree
         auto found = sr::find_if(m_children, [&](const Uniq<Node>& n) { return n->name() == name; });
         if (found == m_children.end()) {
             return Unexpect{ Errc::no_such_file_or_directory };
-        } else if (auto err = std::get_if<Error>(&found->get()->value()); err) {
-            return Unexpect{ err->error };
         }
         return *found->get();
     }
@@ -29,9 +27,6 @@ namespace adbfsm::tree
         if (found == m_children.end()) {
             auto& back = m_children.emplace_back(std::move(node));
             return Pair{ std::ref(*back.get()), nullptr };
-        } else if (auto err = std::get_if<Error>(&found->get()->value()); err) {
-            *found = std::move(node);
-            return Pair{ std::ref(*found->get()), nullptr };
         } else if (overwrite) {
             auto node_ptr = node.get();
             auto released = std::exchange(*found, std::move(node));
@@ -76,12 +71,18 @@ namespace adbfsm::tree
     Expect<Ref<Node>> Node::traverse(Str name) const
     {
         auto lock = std::shared_lock{ m_mutex };
+        if (auto err = as<Error>(); err.has_value()) {
+            return Unexpect{ err->get().error };
+        }
         return as<Directory>().and_then(proj(&Directory::find, name));
     }
 
     Expect<void> Node::list(std::move_only_function<void(Str)>&& fn) const
     {
         auto lock = std::shared_lock{ m_mutex };
+        if (auto err = as<Error>(); err.has_value()) {
+            return Unexpect{ err->get().error };
+        }
         return as<Directory>().transform([&](const Directory& dir) {
             for (const auto& node : dir.children()) {
                 if (not node->is<Error>()) {
@@ -94,6 +95,9 @@ namespace adbfsm::tree
     Expect<Ref<Node>> Node::build(Str name, data::Stat stat, File file)
     {
         auto lock = std::unique_lock{ m_mutex };
+        if (auto err = as<Error>(); err.has_value()) {
+            return Unexpect{ err->get().error };
+        }
         return as<Directory>()
             .and_then(proj(
                 &Directory::insert,
@@ -106,19 +110,27 @@ namespace adbfsm::tree
     Expect<Uniq<Node>> Node::extract(Str name)
     {
         auto lock = std::unique_lock{ m_mutex };
+        if (auto err = as<Error>(); err.has_value()) {
+            return Unexpect{ err->get().error };
+        }
         return as<Directory>().and_then(proj(&Directory::extract, name));
     }
 
     Expect<Pair<Ref<Node>, Uniq<Node>>> Node::insert(Uniq<Node> node, bool overwrite)
     {
         auto lock = std::unique_lock{ m_mutex };
+        if (auto err = as<Error>(); err.has_value()) {
+            return Unexpect{ err->get().error };
+        }
         return as<Directory>().and_then(proj(&Directory::insert, std::move(node), overwrite));
     }
 
     Expect<Ref<Node>> Node::link(Str name, Node* target)
     {
         auto lock = std::unique_lock{ m_mutex };
-
+        if (auto err = as<Error>(); err.has_value()) {
+            return Unexpect{ err->get().error };
+        }
         return as<Directory>().and_then([&](Directory& dir) -> Expect<Ref<Node>> {
             if (dir.find(name).has_value()) {
                 return Unexpect{ Errc::file_exists };
@@ -146,17 +158,23 @@ namespace adbfsm::tree
     Expect<Ref<Node>> Node::touch(Context context, Str name)
     {
         auto lock = std::unique_lock{ m_mutex };
-
+        if (auto err = as<Error>(); err.has_value()) {
+            return Unexpect{ err->get().error };
+        }
         return as<Directory>().and_then([&](Directory& dir) -> Expect<Ref<Node>> {
+            auto overwrite = false;
             if (auto node = dir.find(name); node.has_value()) {
-                node.transform(proj(&Node::refresh_stat)).value();
-                return context.connection.touch(context.path, false).transform([&] { return *node; });
+                if (not node->get().is<Error>()) {
+                    node.transform(proj(&Node::refresh_stat)).value();
+                    return context.connection.touch(context.path, false).transform([&] { return *node; });
+                }
+                overwrite = true;
             }
             return context.connection.touch(context.path, true)
                 .and_then([&] { return context.connection.stat(context.path); })
                 .and_then([&](data::ParsedStat&& parsed) {
                     auto node = std::make_unique<Node>(name, this, std::move(parsed.stat), RegularFile{});
-                    return dir.insert(std::move(node), false);
+                    return dir.insert(std::move(node), overwrite);
                 })
                 .transform([&](auto&& pair) { return pair.first; });
         });
@@ -165,16 +183,22 @@ namespace adbfsm::tree
     Expect<Ref<Node>> Node::mkdir(Context context, Str name)
     {
         auto lock = std::unique_lock{ m_mutex };
-
+        if (auto err = as<Error>(); err.has_value()) {
+            return Unexpect{ err->get().error };
+        }
         return as<Directory>().and_then([&](Directory& dir) -> Expect<Ref<Node>> {
-            if (dir.find(name).has_value()) {
-                return Unexpect{ Errc::file_exists };
+            auto overwrite = false;
+            if (auto node = dir.find(name); node.has_value()) {
+                if (not node->get().is<Error>()) {
+                    return Unexpect{ Errc::file_exists };
+                }
+                overwrite = true;
             }
             return context.connection.mkdir(context.path)
                 .and_then([&] { return context.connection.stat(context.path); })
                 .and_then([&](data::ParsedStat&& parsed) {
                     auto node = std::make_unique<Node>(name, this, std::move(parsed.stat), Directory{});
-                    return dir.insert(std::move(node), false);
+                    return dir.insert(std::move(node), overwrite);
                 })
                 .transform([&](auto&& pair) { return pair.first; });
         });
@@ -183,7 +207,9 @@ namespace adbfsm::tree
     Expect<void> Node::rm(Context context, Str name, bool recursive)
     {
         auto lock = std::unique_lock{ m_mutex };
-
+        if (auto err = as<Error>(); err.has_value()) {
+            return Unexpect{ err->get().error };
+        }
         return as<Directory>().and_then([&](Directory& dir) -> Expect<void> {
             return dir.find(name).and_then([&](Node& node) -> Expect<void> {
                 if (node.is<Directory>() and not recursive) {
@@ -199,9 +225,11 @@ namespace adbfsm::tree
     Expect<void> Node::rmdir(Context context, Str name)
     {
         auto lock = std::unique_lock{ m_mutex };
-
+        if (auto err = as<Error>(); err.has_value()) {
+            return Unexpect{ err->get().error };
+        }
         return as<Directory>().and_then([&](Directory& dir) {
-            return dir.find(name).and_then([&](Node& node) {
+            return dir.find(name).and_then([&](Node& node) -> Expect<void> {
                 return node.as<Directory>().and_then([&](Directory& target) {
                     return target.children().empty()
                              ? context.connection.rmdir(context.path).transform([&] { dir.erase(name); })
