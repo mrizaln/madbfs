@@ -9,20 +9,6 @@
 
 namespace
 {
-    /**
-     * @brief Create a temporary directory.
-     * @return The path to the temporary directory.
-     *
-     * The created directory handling, including its removal, is up to the caller.
-     */
-    adbfsm::path::PathBuf make_temp_dir()
-    {
-        char adbfsm_template[] = "/tmp/adbfsm-XXXXXX";
-        auto temp              = ::mkdtemp(adbfsm_template);
-        adbfsm::log_i({ "created temporary directory: {:?}" }, temp);
-        return adbfsm::path::create_buf(temp).value();
-    }
-
     adbfsm::Adbfsm& get_data()
     {
         auto ctx = ::fuse_get_context()->private_data;
@@ -51,15 +37,16 @@ namespace adbfsm
         auto* args = static_cast<args::ParsedOpt*>(::fuse_get_context()->private_data);
         assert(args != nullptr and "data should not be empty!");
 
-        auto temp       = make_temp_dir();
         auto connection = std::make_unique<data::Connection>();
+        auto cache      = std::make_unique<data::Cache>();
 
         auto* connection_ptr = connection.get();
+        auto* cache_ptr      = cache.get();
 
         return new Adbfsm{
             .connection = std::move(connection),
-            .tree       = adbfsm::tree::FileTree{ *connection_ptr },
-            .cache_dir  = temp,
+            .cache      = std::move(cache),
+            .tree       = adbfsm::tree::FileTree{ *connection_ptr, *cache_ptr },
         };
     }
 
@@ -67,12 +54,14 @@ namespace adbfsm
     {
         auto* data = static_cast<Adbfsm*>(private_data);
         assert(data != nullptr and "data should not be empty!");
-
-        auto temp = data->cache_dir;
         delete data;
 
-        adbfsm::log_i({ "cleaned up temporary directory: {:?}" }, temp.as_path().fullpath());
-        std::filesystem::remove_all(temp.as_path().fullpath());
+        auto serial = ::getenv("ANDROID_SERIAL");
+        if (serial != nullptr) {
+            log_i({ "adbfsm for device {} succesfully terminated" }, serial);
+        } else [[unlikely]] {
+            log_i({ "adbfsm succesfully terminated" });
+        }
     }
 
     i32 getattr(const char* path, struct stat* stbuf, [[maybe_unused]] fuse_file_info* fi)
