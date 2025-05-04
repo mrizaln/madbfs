@@ -187,7 +187,7 @@ int main()
         using adbfsm::path::operator""_path;
 
         auto connection = mock::DummyConnection{};
-        auto cache      = adbfsm::data::Cache{};
+        auto cache      = adbfsm::data::Cache{ 64 * 1024, 1024 };
         auto context    = Node::Context{ connection, cache, "/dummy"_path };
 
         auto root = Node{ "/", nullptr, {}, Directory{} };
@@ -243,7 +243,7 @@ int main()
         using namespace adbfsm::tree;
 
         auto connection = mock::DummyConnection{};
-        auto cache      = adbfsm::data::Cache{};
+        auto cache      = adbfsm::data::Cache{ 64 * 1024, 1024 };
         auto tree       = FileTree{ connection, cache };
 
 #define unwrap(T) transform_error([](auto e) { return raise_expect_error<T>(e); }).value()

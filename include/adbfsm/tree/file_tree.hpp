@@ -20,6 +20,7 @@ namespace adbfsm::tree
         using Filler = std::function<void(const char* name)>;
 
         FileTree(data::IConnection& connection, data::Cache& cache);
+        ~FileTree();
 
         FileTree(Node&& root)            = delete;
         FileTree& operator=(Node&& root) = delete;

@@ -483,13 +483,14 @@ namespace adbfsm::data
         const auto skip  = fmt::format("skip={}", offset);
         const auto count = fmt::format("count={}", out.size());
         const auto iff   = fmt::format("if=\"{}\"", path.fullpath());
+        const auto bs    = fmt::format("bs={}", m_page_size);
 
         const auto cmd = Array{
             "adb"sv,
             "shell"sv,
             "dd"sv,
             "iflag=skip_bytes,count_bytes"sv,    // https://stackoverflow.com/a/40792605/16506263
-            "bs=65536"sv,                        // https://superuser.com/a/234204
+            Str{ bs },                           // https://superuser.com/a/234204
             Str{ skip },
             Str{ count },
             Str{ iff },
@@ -511,6 +512,7 @@ namespace adbfsm::data
     {
         const auto seek = fmt::format("seek={}", offset);
         const auto off  = fmt::format("of=\"{}\"", path.fullpath());
+        const auto bs   = fmt::format("bs={}", m_page_size);
 
         const auto cmd = Array{
             "adb"sv,
@@ -518,7 +520,7 @@ namespace adbfsm::data
             "dd"sv,
             "oflag=seek_bytes"sv,    // same as above, though I don't know if this is really needed
             "conv=notrunc"sv,        // https://unix.stackexchange.com/a/146923
-            "bs=65536"sv,            // https://superuser.com/a/234204
+            Str{ bs },               // https://superuser.com/a/234204
             Str{ seek },
             Str{ off },
         };

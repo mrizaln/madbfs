@@ -72,9 +72,19 @@ int main(int argc, char** argv)
     auto [opt, args] = std::move(maybe_opt).opt();
 
     adbfsm::log::init(opt.m_log_level, opt.m_log_file);
-    adbfsm::log_i({ "mount device '{}' with cache size {}MB" }, opt.m_serial, opt.m_cachesize);
+    adbfsm::log_i(
+        { "mount device '{}' with cache size {}MiB and page size {}kiB" },
+        opt.m_serial,
+        opt.m_cachesize,
+        opt.m_pagesize
+    );
     if (opt.m_log_file != "-") {
-        fmt::println("[adbfsm] mount device '{}' with cache size {}MB", opt.m_serial, opt.m_cachesize);
+        fmt::println(
+            "[adbfsm] mount device '{}' with cache size {}MiB and page size {}kiB",
+            opt.m_serial,
+            opt.m_cachesize,
+            opt.m_pagesize
+        );
     }
 
     if (::setenv("ANDROID_SERIAL", opt.m_serial.c_str(), 1) < 0) {
