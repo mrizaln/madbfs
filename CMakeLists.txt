@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(adbfsm VERSION 0.0.0)
+project(adbfsm VERSION 0.1.0)
 
 # use unity build. turn off if you don't want to
 set(CMAKE_UNITY_BUILD OFF)
