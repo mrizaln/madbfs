@@ -3,6 +3,7 @@
 #include "adbfsm/common.hpp"
 #include "adbfsm/data/stat.hpp"
 
+#include <bit>
 #include <cassert>
 #include <list>
 #include <mutex>
@@ -13,35 +14,28 @@ namespace adbfsm::data
 {
     using PageIndex = usize;
 
-    static constexpr usize g_page_size      = 64 * 1024;            // 64 KiB
-    static constexpr usize g_max_page_cache = 500 * 1024 * 1024;    // 500 MiB
-
+    // page size is not stored to minimize the memory usage
     class Page
     {
     public:
-        Page(Span<const std::byte> data, usize offset, bool dirty)
-            : m_data{ std::make_unique<std::byte[]>(g_page_size) }
+        Page(usize page_size, Span<const std::byte> data, usize offset, bool set_dirty)
+            : m_data{ std::make_unique<std::byte[]>(page_size) }
             , m_size{ 0 }
         {
-            assert(offset < g_page_size);
-            assert(data.size() <= g_page_size - offset);
             std::copy_n(data.data(), data.size(), m_data.get() + offset);
 
             m_size = offset + data.size();
-            set_dirty(dirty);
+            dirty.store(set_dirty, std::memory_order::release);
         }
 
         Page(Page&& other)
             : m_data{ std::move(other.m_data) }
             , m_size{ other.m_size }
-            , m_dirty{ other.m_dirty.load(std::memory_order::acquire) }
         {
+            dirty.store(other.dirty.load(std::memory_order::acquire), std::memory_order::release);
         }
 
         usize size() const { return m_size; }
-
-        bool is_dirty() { return m_dirty.load(std::memory_order::acquire); }
-        void set_dirty(bool dirty) { m_dirty.store(dirty, std::memory_order::release); }
 
         template <typename T = std::byte>
             requires (sizeof(T) == 1)
@@ -50,18 +44,18 @@ namespace adbfsm::data
             return Span{ reinterpret_cast<const T*>(m_data.get()), size() };
         }
 
-        usize write(Span<const std::byte> data, usize offset)
+        void write(Span<const std::byte> data, usize offset)
         {
-            auto copied = std::min(data.size(), g_page_size - offset);
-            std::copy_n(data.data(), copied, m_data.get() + offset);
-            m_size = offset + copied;
-            return copied;
+            // kinda risky since there is no offset and data size check with the page size
+            std::copy_n(data.data(), data.size(), m_data.get() + offset);
+            m_size = offset + data.size();
         }
+
+        std::atomic<bool> dirty = false;
 
     private:
         Uniq<std::byte[]> m_data;
         usize             m_size;    // will always less than or equal to page_size
-        std::atomic<bool> m_dirty = false;
     };
 
     class Cache
@@ -72,6 +66,7 @@ namespace adbfsm::data
 
         using Lru   = std::list<PageKey>;
         using Pages = std::unordered_map<PageKey, MapEntry>;
+        using Ord   = std::memory_order;
 
         struct PageKey
         {
@@ -86,12 +81,18 @@ namespace adbfsm::data
             Lru::iterator lru_it;    // since it's a list, this always valid
         };
 
+        Cache(usize page_size, usize max_pages)
+            : m_page_size{ std::bit_ceil(page_size) }
+            , m_max_pages{ max_pages }
+        {
+        }
+
         template <std::invocable<Span<std::byte>, off_t> OnMiss>
             requires std::same_as<std::invoke_result_t<OnMiss, Span<std::byte>, off_t>, Expect<usize>>
         Expect<usize> read(Id id, Span<char> out, off_t offset, OnMiss on_miss)
         {
-            auto start = static_cast<usize>(offset) / g_page_size;
-            auto last  = (static_cast<usize>(offset) + out.size() - 1) / g_page_size;
+            auto start = static_cast<usize>(offset) / m_page_size;
+            auto last  = (static_cast<usize>(offset) + out.size() - 1) / m_page_size;
 
             auto total_read = 0uz;
 
@@ -102,8 +103,8 @@ namespace adbfsm::data
                 auto entry = m_pages.find(key);
 
                 if (entry == m_pages.end()) {
-                    auto data = Array<std::byte, g_page_size>{};
-                    auto res  = on_miss(data, static_cast<off_t>(index * g_page_size));
+                    auto data = Vec<std::byte>(m_page_size);
+                    auto res  = on_miss(data, static_cast<off_t>(index * m_page_size));
                     if (not res.has_value()) {
                         return Unexpect{ res.error() };
                     }
@@ -114,7 +115,7 @@ namespace adbfsm::data
                     m_lru.emplace_front(key);
 
                     auto new_entry = MapEntry{
-                        .page   = Page{ { data.begin(), res.value() }, 0, false },
+                        .page   = Page{ m_page_size, { data.begin(), res.value() }, 0, false },
                         .lru_it = m_lru.begin(),
                     };
                     auto [p, _] = m_pages.emplace(key, std::move(new_entry));
@@ -126,7 +127,7 @@ namespace adbfsm::data
                             auto last = m_lru.back();
                             m_lru.pop_back();
                             auto page = m_pages.extract(last);
-                            if (page.mapped().page.is_dirty()) {
+                            if (not page.empty() and page.mapped().page.dirty.load(Ord::acquire)) {
                                 m_orphan_pages.emplace_back(last, std::move(page.mapped().page));
                             }
                         }
@@ -140,7 +141,7 @@ namespace adbfsm::data
 
                 auto local_offset = 0uz;
                 if (index == start) {
-                    local_offset = static_cast<usize>(offset) % g_page_size;
+                    local_offset = static_cast<usize>(offset) % m_page_size;
                 }
 
                 auto read = std::min(data.size() - local_offset, out.size() - total_read);
@@ -165,8 +166,8 @@ namespace adbfsm::data
 
         Expect<usize> write(Id id, Span<const char> in, off_t offset)
         {
-            auto start = static_cast<usize>(offset) / g_page_size;
-            auto last  = (static_cast<usize>(offset) + in.size() - 1) / g_page_size;
+            auto start = static_cast<usize>(offset) / m_page_size;
+            auto last  = (static_cast<usize>(offset) + in.size() - 1) / m_page_size;
 
             auto total_written = 0uz;
 
@@ -178,10 +179,10 @@ namespace adbfsm::data
 
                 auto local_offset = 0uz;
                 if (index == start) {
-                    local_offset = static_cast<usize>(offset) % g_page_size;
+                    local_offset = static_cast<usize>(offset) % m_page_size;
                 }
 
-                auto write      = std::min(g_page_size - local_offset, in.size() - total_written);
+                auto write      = std::min(m_page_size - local_offset, in.size() - total_written);
                 auto write_span = Span{
                     reinterpret_cast<const std::byte*>(in.data()) + total_written,
                     write,
@@ -190,13 +191,13 @@ namespace adbfsm::data
                 if (page == m_pages.end()) {
                     m_lru.emplace_front(key);
                     auto new_entry = MapEntry{
-                        .page   = Page{ write_span, local_offset, true },
+                        .page   = Page{ m_page_size, write_span, local_offset, true },
                         .lru_it = m_lru.begin(),
                     };
                     m_pages.emplace(key, std::move(new_entry));
                 } else {
                     page->second.page.write(write_span, local_offset);
-                    page->second.page.set_dirty(true);
+                    page->second.page.dirty.store(true, Ord::release);
 
                     if (page->second.lru_it != m_lru.begin()) {
                         m_lru.erase(page->second.lru_it);
@@ -213,7 +214,7 @@ namespace adbfsm::data
                         auto last = m_lru.back();
                         m_lru.pop_back();
                         auto page = m_pages.extract(last);
-                        if (page.mapped().page.is_dirty()) {
+                        if (page.mapped().page.dirty.load(Ord::acquire)) {
                             m_orphan_pages.emplace_back(last, std::move(page.mapped().page));
                         }
                     }
@@ -227,7 +228,7 @@ namespace adbfsm::data
             requires std::same_as<std::invoke_result_t<Fun, Span<const std::byte>, off_t>, Expect<usize>>
         Expect<void> flush(Id id, usize size, Fun on_flush)
         {
-            auto num_pages = size / g_page_size + (size % g_page_size == 0 ? 0 : 1);
+            auto num_pages = size / m_page_size + (size % m_page_size == 0 ? 0 : 1);
 
             for (auto index : sv::iota(0uz, num_pages)) {
                 auto read_lock = std::shared_lock{ m_mutex };    // should I use unique_lock here?
@@ -240,14 +241,15 @@ namespace adbfsm::data
                 }
 
                 auto& page = entry->second.page;
-                if (page.is_dirty()) {
-                    page.set_dirty(false);
+                if (page.dirty.load(Ord::acquire)) {
 
                     auto data = page.data_as<std::byte>();
-                    auto res  = on_flush(data, static_cast<off_t>(index * g_page_size));
+                    auto res  = on_flush(data, static_cast<off_t>(index * m_page_size));
                     if (not res.has_value()) {
                         return Unexpect{ res.error() };
                     }
+
+                    page.dirty.store(false, Ord::release);
                 }
             }
             return {};
@@ -273,6 +275,7 @@ namespace adbfsm::data
         Pages m_pages;
         Lru   m_lru;    // most recently used is at the front
 
-        usize m_max_pages = g_max_page_cache / g_page_size;
+        usize m_page_size = 0;
+        usize m_max_pages = 0;
     };
 };

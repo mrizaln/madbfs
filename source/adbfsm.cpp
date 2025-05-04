@@ -54,8 +54,12 @@ namespace adbfsm
         auto* args = static_cast<args::ParsedOpt*>(::fuse_get_context()->private_data);
         assert(args != nullptr and "data should not be empty!");
 
-        auto connection = std::make_unique<data::Connection>();
-        auto cache      = std::make_unique<data::Cache>();
+        auto cache_size = args->m_cachesize * 1024 * 1024;
+        auto page_size  = args->m_pagesize * 1024;
+        auto max_pages  = cache_size / page_size;
+
+        auto connection = std::make_unique<data::Connection>(page_size);
+        auto cache      = std::make_unique<data::Cache>(page_size, max_pages);
 
         auto* connection_ptr = connection.get();
         auto* cache_ptr      = cache.get();
