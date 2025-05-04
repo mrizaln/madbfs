@@ -112,6 +112,7 @@ namespace adbfsm::tree
             // get stat from device
             auto parsed = m_connection.stat(current_path.as_path());
             if (not parsed.has_value()) {
+                std::ignore = current->build(name, {}, Error{ parsed.error() });
                 return Unexpect{ parsed.error() };
             }
             if ((parsed->stat.mode & S_IFMT) != S_IFDIR) {
@@ -137,6 +138,7 @@ namespace adbfsm::tree
         // get stat from device
         auto parsed = m_connection.stat(current_path.as_path());
         if (not parsed.has_value()) {
+            std::ignore = current->build(path.filename(), {}, Error{ parsed.error() });
             return Unexpect{ parsed.error() };
         }
 
@@ -221,7 +223,7 @@ namespace adbfsm::tree
 
     Expect<Ref<const data::Stat>> FileTree::getattr(path::Path path)
     {
-        return traverse_or_build(path).transform(proj(&Node::stat));
+        return traverse_or_build(path).and_then(proj(&Node::stat));
     }
 
     Expect<Ref<Node>> FileTree::readlink(path::Path path)

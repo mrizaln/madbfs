@@ -21,9 +21,10 @@ namespace adbfsm::tree
     class RegularFile;
     class Directory;
     class Link;
-    class Other;
+    struct Other;
+    struct Error;
 
-    using File = Var<RegularFile, Directory, Link, Other>;
+    using File = Var<RegularFile, Directory, Link, Other, Error>;
 
     // TODO: add open flags, use them to determine if file has suitable read/write permission
     class RegularFile
@@ -150,8 +151,19 @@ namespace adbfsm::tree
      *
      * Block files, character files, socket file, etc. should use this type.
      */
-    class Other
+    struct Other
     {
+    };
+
+    /**
+     * @class Error
+     * @brief For error operations.
+     *
+     * For optimization purpose this class cache the last failed node operation.
+     */
+    struct Error
+    {
+        Errc error;
     };
 
     class Node
@@ -189,7 +201,7 @@ namespace adbfsm::tree
         Node*       parent() const { return m_parent; }
         const File& value() const { return m_value; }
 
-        const data::Stat& stat() const { return m_stat; }
+        Expect<Ref<const data::Stat>> stat() const;
 
         Str           printable_type() const;
         path::PathBuf build_path() const;
@@ -462,16 +474,22 @@ namespace adbfsm::tree
     template <typename T>
     Expect<Ref<T>> Node::as()
     {
-        constexpr auto errc = [] {
+
+        constexpr auto errc = [&] {
             if constexpr (std::same_as<Directory, T>) {
                 return Errc::not_a_directory;
             }
             return Errc::invalid_argument;
         }();
 
-        if (auto* dir = std::get_if<T>(&m_value)) {
-            return *dir;
+        if (auto* val = std::get_if<Error>(&m_value)) {
+            return Unexpect{ val->error };
         }
+
+        if (auto* val = std::get_if<T>(&m_value)) {
+            return *val;
+        }
+
         return Unexpect{ errc };
     }
 
@@ -491,13 +509,22 @@ namespace adbfsm::tree
         return Unexpect{ errc };
     }
 
+    inline Expect<Ref<const data::Stat>> Node::stat() const
+    {
+        if (auto err = as<Error>(); err.has_value()) {
+            return Unexpect{ err->get().error };
+        }
+        return m_stat;
+    }
+
     inline Str Node::printable_type() const
     {
         auto visitor = util::Overload{
-            [](const RegularFile&) { return "file"; },
-            [](const Directory&) { return "directory"; },
-            [](const Link&) { return "link"; },
-            [](const Other&) { return "other"; },
+            [](const RegularFile&) { return "file"; },       //
+            [](const Directory&) { return "directory"; },    //
+            [](const Link&) { return "link"; },              //
+            [](const Other&) { return "other"; },            //
+            [](const Error&) { return "error"; },            //
         };
         return std::visit(visitor, m_value);
     }

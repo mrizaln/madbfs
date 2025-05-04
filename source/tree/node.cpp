@@ -11,6 +11,8 @@ namespace adbfsm::tree
         auto found = sr::find_if(m_children, [&](const Uniq<Node>& n) { return n->name() == name; });
         if (found == m_children.end()) {
             return Unexpect{ Errc::no_such_file_or_directory };
+        } else if (auto err = std::get_if<Error>(&found->get()->value()); err) {
+            return Unexpect{ err->error };
         }
         return *found->get();
     }
@@ -27,6 +29,9 @@ namespace adbfsm::tree
         if (found == m_children.end()) {
             auto& back = m_children.emplace_back(std::move(node));
             return Pair{ std::ref(*back.get()), nullptr };
+        } else if (auto err = std::get_if<Error>(&found->get()->value()); err) {
+            *found = std::move(node);
+            return Pair{ std::ref(*found->get()), nullptr };
         } else if (overwrite) {
             auto node_ptr = node.get();
             auto released = std::exchange(*found, std::move(node));
@@ -79,7 +84,9 @@ namespace adbfsm::tree
         auto lock = std::shared_lock{ m_mutex };
         return as<Directory>().transform([&](const Directory& dir) {
             for (const auto& node : dir.children()) {
-                fn(node->name());
+                if (not node->is<Error>()) {
+                    fn(node->name());
+                }
             }
         });
     }
