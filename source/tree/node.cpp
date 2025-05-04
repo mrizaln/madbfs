@@ -250,7 +250,7 @@ namespace adbfsm::tree
             if (not file.is_open(fd)) {
                 return Unexpect{ Errc::bad_file_descriptor };
             }
-            return context.connection.write(context.path, in, offset).transform([&](usize ret) {
+            return context.cache.write(id(), in, offset).transform([&](usize ret) {
                 m_stat.size += ret;
                 return ret;
             });
@@ -263,7 +263,11 @@ namespace adbfsm::tree
             if (not file.is_open(fd)) {
                 return Unexpect{ Errc::bad_file_descriptor };
             }
-            return context.connection.flush(context.path);
+            const auto filesize = static_cast<usize>(stat()->get().size);
+            return context.cache.flush(id(), filesize, [&](Span<const std::byte> in, off_t offset) {
+                auto in_char = Str{ reinterpret_cast<const char*>(in.data()), in.size() };
+                return context.connection.write(context.path, in_char, offset);
+            });
         });
     }
 
@@ -273,7 +277,11 @@ namespace adbfsm::tree
             if (not file.close(fd)) {
                 return Unexpect{ Errc::bad_file_descriptor };
             }
-            return context.connection.release(context.path);
+            const auto filesize = static_cast<usize>(stat()->get().size);
+            return context.cache.flush(id(), filesize, [&](Span<const std::byte> in, off_t offset) {
+                auto in_char = Str{ reinterpret_cast<const char*>(in.data()), in.size() };
+                return context.connection.write(context.path, in_char, offset);
+            });
         });
     }
 
