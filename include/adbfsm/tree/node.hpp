@@ -32,48 +32,42 @@ namespace adbfsm::tree
     public:
         friend Node;
 
+        struct Entry
+        {
+            u64 fd;
+            i32 flags;
+        };
+
         RegularFile() = default;
 
         RegularFile(RegularFile&& other)
+            : m_open_fds{ std::move(other.m_open_fds) }
+            , m_dirty{ other.m_dirty.load(std::memory_order::acquire) }
         {
-            auto lock  = util::Lock{ m_operated };
-            m_open_fds = std::move(other.m_open_fds);
-            m_operated = false;
         }
 
-        bool is_open(u64 fd)
+        bool open(u64 fd, int flags)
         {
-            auto lock = util::Lock{ m_operated };
-            return sr::find(m_open_fds, fd) != m_open_fds.end();
-        }
-
-        bool open(u64 fd)
-        {
-            auto lock = util::Lock{ m_operated };
-            if (sr::find(m_open_fds, fd) != m_open_fds.end()) {
+            if (sr::find(m_open_fds, fd, &Entry::fd) != m_open_fds.end()) {
                 return false;
             }
-            m_open_fds.push_back(fd);
+            m_open_fds.emplace_back(fd, flags);
             return true;
         }
 
         bool close(u64 fd)
         {
-            auto lock  = util::Lock{ m_operated };
-            auto found = sr::find(m_open_fds, fd);
-            if (found == m_open_fds.end()) {
-                return false;
-            }
-            m_open_fds.erase(found);
-            return true;
+            return std::erase_if(m_open_fds, [&](const Entry& e) { return e.fd == fd; }) > 0;
         }
 
-    private:
-        Vec<u64>          m_open_fds;            // used to track open files
-        std::atomic<bool> m_operated = false;    // used for locking.
+        bool is_open(u64 fd) { return sr::find(m_open_fds, fd, &Entry::fd) != m_open_fds.end(); }
+        bool has_open_fds() const { return not m_open_fds.empty(); }
+        bool is_dirty() const { return m_dirty.load(std::memory_order::acquire); }
+        void set_dirty(bool val) { m_dirty.store(val, std::memory_order::release); }
 
-        // NOTE: I use atomic to save space; also this is the most suitable one in this case since each locks
-        // are very short lived as seen above.
+    private:
+        Vec<Entry>        m_open_fds;    // used to track open files
+        std::atomic<bool> m_dirty = false;
     };
 
     class Directory
@@ -458,6 +452,7 @@ namespace adbfsm::tree
         File       m_value;
 
         mutable std::shared_mutex m_mutex;
+        mutable std::shared_mutex m_mutex_file;
     };
 }
 
