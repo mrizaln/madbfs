@@ -63,7 +63,7 @@ Options for adbfsm:
                           (minimum: 128)
                           (value will be rounded to the next power of 2)
     --pagesize=<n>      page size for cache & transfer in KiB
-                          (default: 512)
+                          (default: 128)
                           (minimum: 64)
                           (value will be rounded to the next power of 2)
     -h   --help         show this help message
@@ -103,10 +103,10 @@ $ ./adbfsm --cachesize=512<mountpoint>    # using 512MiB of cache
 
 ### Page size
 
-In the cache, each file is divided into pages. The `--pagesize` option dictates the size of this page (in KiB). Page size also dictates the size of the buffer used to read/write into the file on the device. You can adjust this value according to your use. From my testing, `pagesize` of value `512` (means 512KiB) works well when using USB cable for the `adb` connection. If you are using Wi-Fi connection, you may want to decrease (or increase) this value your liking. The default value is `512` (512KiB).
+In the cache, each file is divided into pages. The `--pagesize` option dictates the size of this page (in KiB). Page size also dictates the size of the buffer used to read/write into the file on the device. You can adjust this value according to your use. From my testing, `pagesize` of value `128` (means 128KiB) works well when using USB cable for the `adb` connection. You may want to decrease or increase this value for your use case. The default value is `128` (128KiB).
 
 ```sh
-$ ./adbfsm --pagesize=512<mountpoint>    # using 512KiB of page size
+$ ./adbfsm --pagesize=128<mountpoint>    # using 128KiB of page size
 
 ```
 

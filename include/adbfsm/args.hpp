@@ -18,7 +18,7 @@ namespace adbfsm::args
         const char* m_log_level = nullptr;
         const char* m_log_file  = nullptr;
         int         m_cachesize = 512;    // in MiB
-        int         m_pagesize  = 512;    // in KiB
+        int         m_pagesize  = 128;    // in KiB
         int         m_rescan    = false;
         int         m_help      = false;
         int         m_full_help = false;
@@ -83,7 +83,7 @@ namespace adbfsm::args
             "                          (minimum: 128)\n"
             "                          (value will be rounded to the next power of 2)\n"
             "    --pagesize=<n>      page size for cache & transfer in KiB\n"
-            "                          (default: 512)\n"
+            "                          (default: 128)\n"
             "                          (minimum: 64)\n"
             "                          (value will be rounded to the next power of 2)\n"
             "    -h   --help         show this help message\n"
