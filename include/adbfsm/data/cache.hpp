@@ -255,7 +255,7 @@ namespace adbfsm::data
             return {};
         }
 
-        std::vector<Pair<PageKey, Page>> get_orphan_pages()
+        Vec<Pair<PageKey, Page>> get_orphan_pages()
         {
             auto write_lock = std::unique_lock{ m_mutex };
             return std::move(m_orphan_pages);
@@ -272,7 +272,7 @@ namespace adbfsm::data
     private:
         mutable std::shared_mutex m_mutex;
 
-        std::vector<Pair<PageKey, Page>> m_orphan_pages;    // dirty but evicted pages
+        Vec<Pair<PageKey, Page>> m_orphan_pages;    // dirty but evicted pages
 
         Pages m_pages;
         Lru   m_lru;    // most recently used is at the front

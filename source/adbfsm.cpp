@@ -89,7 +89,7 @@ namespace adbfsm
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        auto maybe_stat = ok_or(path::create(path), std::errc::operation_not_supported).and_then([](auto p) {
+        auto maybe_stat = ok_or(path::create(path), Errc::operation_not_supported).and_then([](auto p) {
             return get_data().tree.getattr(p);
         });
         if (not maybe_stat.has_value()) {
@@ -132,7 +132,7 @@ namespace adbfsm
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        return ok_or(path::create(path), std::errc::operation_not_supported)
+        return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([](path::Path p) { return get_data().tree.readlink(p); })
             .and_then([&](tree::Node& node) -> Expect<void> {
                 auto path_buf = node.build_path();    // this will emits absolute path, which we don't want
@@ -144,7 +144,7 @@ namespace adbfsm
                     return {};
                 } else {
                     log_e({ "readlink: path size is too long: {} vs {}" }, size, pathsize);
-                    return std::unexpected{ std::errc::filename_too_long };
+                    return Unexpect{ Errc::filename_too_long };
                 }
             })
             .transform_error(fuse_err(__func__, path))
@@ -155,7 +155,7 @@ namespace adbfsm
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        return ok_or(path::create(path), std::errc::operation_not_supported)
+        return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([](path::Path p) { return get_data().tree.mknod(p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
@@ -165,7 +165,7 @@ namespace adbfsm
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        return ok_or(path::create(path), std::errc::operation_not_supported)
+        return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([](path::Path p) { return get_data().tree.mkdir(p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
@@ -175,7 +175,7 @@ namespace adbfsm
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        return ok_or(path::create(path), std::errc::operation_not_supported)
+        return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([](auto p) { return get_data().tree.unlink(p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
@@ -185,7 +185,7 @@ namespace adbfsm
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        return ok_or(path::create(path), std::errc::operation_not_supported)
+        return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([](auto p) { return get_data().tree.rmdir(p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
@@ -200,10 +200,10 @@ namespace adbfsm
         auto to_path   = path::create(to);
 
         if (not from_path.has_value()) {
-            return fuse_err(__func__, from)(std::errc::operation_not_supported);
+            return fuse_err(__func__, from)(Errc::operation_not_supported);
         }
         if (not to_path.has_value()) {
-            return fuse_err(__func__, to)(std::errc::operation_not_supported);
+            return fuse_err(__func__, to)(Errc::operation_not_supported);
         }
 
         return get_data()
@@ -216,7 +216,7 @@ namespace adbfsm
     {
         log_i({ "{}: [size={}] {:?}" }, __func__, size, path);
 
-        return ok_or(path::create(path), std::errc::operation_not_supported)
+        return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([&](auto p) { return get_data().tree.truncate(p, size); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
@@ -226,7 +226,7 @@ namespace adbfsm
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        return ok_or(path::create(path), std::errc::operation_not_supported)
+        return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([&](auto p) { return get_data().tree.open(p, fi->flags); })
             .transform([&](auto fd) { fi->fh = fd; })
             .transform_error(fuse_err(__func__, path))
@@ -237,7 +237,7 @@ namespace adbfsm
     {
         log_i({ "{}: [offset={}|size={}] {:?}" }, __func__, offset, size, path);
 
-        auto res = ok_or(path::create(path), std::errc::operation_not_supported).and_then([&](auto p) {
+        auto res = ok_or(path::create(path), Errc::operation_not_supported).and_then([&](auto p) {
             return get_data().tree.read(p, fi->fh, { buf, size }, offset);
         });
         return res.has_value() ? static_cast<i32>(res.value()) : fuse_err(__func__, path)(res.error());
@@ -247,7 +247,7 @@ namespace adbfsm
     {
         log_i({ "{}: [offset={}|size={}] {:?}" }, __func__, offset, size, path);
 
-        auto res = ok_or(path::create(path), std::errc::operation_not_supported).and_then([&](auto p) {
+        auto res = ok_or(path::create(path), Errc::operation_not_supported).and_then([&](auto p) {
             return get_data().tree.write(p, fi->fh, { buf, size }, offset);
         });
         return res.has_value() ? static_cast<i32>(res.value()) : fuse_err(__func__, path)(res.error());
@@ -257,7 +257,7 @@ namespace adbfsm
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        return ok_or(path::create(path), std::errc::operation_not_supported)
+        return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([&](auto p) { return get_data().tree.flush(p, fi->fh); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
@@ -267,7 +267,7 @@ namespace adbfsm
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        return ok_or(path::create(path), std::errc::operation_not_supported)
+        return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([&](auto p) { return get_data().tree.release(p, fi->fh); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
@@ -286,7 +286,7 @@ namespace adbfsm
 
         const auto fill = [&](const char* name) { filler(buf, name, nullptr, 0, FUSE_FILL_DIR_PLUS); };
 
-        return ok_or(path::create(path), std::errc::operation_not_supported)
+        return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([&](auto p) { return get_data().tree.readdir(p, fill); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
@@ -305,7 +305,7 @@ namespace adbfsm
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
-        return ok_or(path::create(path), std::errc::operation_not_supported)
+        return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([&](auto p) { return get_data().tree.utimens(p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);

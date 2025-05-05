@@ -96,7 +96,7 @@ namespace adbfsm
             if (opt.has_value()) {
                 return std::move(opt).value();
             } else {
-                return std::unexpected{ err };
+                return Unexpect{ err };
             }
         }
 

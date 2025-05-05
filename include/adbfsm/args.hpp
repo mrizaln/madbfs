@@ -26,9 +26,9 @@ namespace adbfsm::args
 
     struct ParsedOpt
     {
-        std::string               m_serial;
+        String                    m_serial;
         spdlog::level::level_enum m_log_level;
-        std::string               m_log_file;
+        String                    m_log_file;
         usize                     m_cachesize;
         usize                     m_pagesize;
         bool                      m_rescan;
@@ -49,11 +49,11 @@ namespace adbfsm::args
         Opt&&  opt()  && { return std::move(std::get<Opt>(m_result));  }
         Exit&& exit() && { return std::move(std::get<Exit>(m_result)); }
 
-        std::variant<Opt, Exit> m_result;
+        Var<Opt, Exit> m_result;
         // clang-format on
     };
 
-    static constexpr auto adbfsm_opt_spec = std::array<fuse_opt, 9>{ {
+    static constexpr auto adbfsm_opt_spec = Array<fuse_opt, 9>{ {
         // clang-format off
         { "--serial=%s",    offsetof(AdbfsmOpt, m_serial),    true },
         { "--loglevel=%s",  offsetof(AdbfsmOpt, m_log_level), true },
@@ -91,7 +91,7 @@ namespace adbfsm::args
         );
     };
 
-    inline std::optional<spdlog::level::level_enum> parse_level_str(std::string_view level)
+    inline Opt<spdlog::level::level_enum> parse_level_str(Str level)
     {
         // clang-format off
         if      (level == "trace")      return spdlog::level::trace;
@@ -105,7 +105,7 @@ namespace adbfsm::args
         // clang-format on
     }
 
-    inline data::DeviceStatus check_serial(std::string_view serial)
+    inline data::DeviceStatus check_serial(Str serial)
     {
         if (auto maybe_devices = data::list_devices(); maybe_devices.has_value()) {
             auto found = sr::find(*maybe_devices, serial, &data::Device::serial);
@@ -116,7 +116,7 @@ namespace adbfsm::args
         return data::DeviceStatus::Unknown;
     }
 
-    inline std::string get_serial()
+    inline String get_serial()
     {
         auto maybe_devices = data::list_devices();
         if (not maybe_devices.has_value()) {
@@ -124,7 +124,7 @@ namespace adbfsm::args
         }
         auto devices = *maybe_devices                                                                 //
                      | sv::filter([](auto&& d) { return d.status == data::DeviceStatus::Device; })    //
-                     | sr::to<std::vector>();
+                     | sr::to<Vec<data::Device>>();
 
         if (devices.empty()) {
             return {};

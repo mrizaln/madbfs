@@ -145,9 +145,9 @@ namespace adbfsm::util
         Str                m_remainder;
     };
 
-    inline std::vector<Str> split(Str str, SplitDelim delim)
+    inline Vec<Str> split(Str str, SplitDelim delim)
     {
-        auto vec = std::vector<Str>{};
+        auto vec = Vec<Str>{};
         StringSplitter{ str, delim }.while_next([&](Str str) { vec.push_back(str); });
         return vec;
     }

@@ -108,8 +108,8 @@ namespace adbfsm::tree
          * @return A pair containing the added node and overwriten node if overwrite happens.
          *
          * - If insertion happen without overwrite, right will be null.
-         * - If insertion happen with overwrite and flag right will be non-null.
-         * - If overwrite happen when flag not enabled, error will be returned.
+         * - If insertion happen with overwrite flag set, right will be non-null.
+         * - If overwrite happen when overwrite flag not set, error will be returned.
          */
         Expect<Pair<Ref<Node>, Uniq<Node>>> insert(Uniq<Node> node, bool overwrite);
 
@@ -452,10 +452,10 @@ namespace adbfsm::tree
             return current->as<RegularFile>();
         }
 
-        Node*       m_parent = nullptr;
-        std::string m_name   = {};
-        data::Stat  m_stat   = {};
-        File        m_value;
+        Node*      m_parent = nullptr;
+        String     m_name   = {};
+        data::Stat m_stat   = {};
+        File       m_value;
 
         mutable std::shared_mutex m_mutex;
     };
@@ -525,7 +525,7 @@ namespace adbfsm::tree
 
     inline path::PathBuf Node::build_path() const
     {
-        auto path = m_name | sv::reverse | sr::to<std::string>();
+        auto path = m_name | sv::reverse | sr::to<String>();
         auto iter = std::back_inserter(path);
 
         for (auto current = m_parent; current != nullptr; current = current->m_parent) {

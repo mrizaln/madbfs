@@ -4,8 +4,6 @@ namespace
 {
     adbfsm::Gen<adbfsm::Str> iter_path_impl(adbfsm::Str path)
     {
-        using namespace adbfsm;
-
         assert(not path.empty() and path.front() == '/');
         co_yield "/";
 
@@ -19,7 +17,7 @@ namespace
                 co_return;
             }
 
-            auto it = sr::find(path | sv::drop(index), '/');
+            auto it = adbfsm::sr::find(path | adbfsm::sv::drop(index), '/');
             if (it == path.end()) {
                 auto res = path.substr(index);
                 co_yield res;

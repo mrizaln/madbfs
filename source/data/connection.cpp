@@ -14,15 +14,13 @@
 
 namespace
 {
-    using namespace adbfsm;
-
-    static constexpr Str no_device           = "adb: no devices/emulators found";
-    static constexpr Str device_offline      = "adb: device offline";
-    static constexpr Str permission_denied   = " Permission denied";
-    static constexpr Str no_such_file_or_dir = " No such file or directory";
-    static constexpr Str not_a_directory     = " Not a directory";
-    static constexpr Str inaccessible        = " inaccessible or not found";
-    static constexpr Str read_only           = " Read-only file system";
+    static constexpr adbfsm::Str no_device           = "adb: no devices/emulators found";
+    static constexpr adbfsm::Str device_offline      = "adb: device offline";
+    static constexpr adbfsm::Str permission_denied   = " Permission denied";
+    static constexpr adbfsm::Str no_such_file_or_dir = " No such file or directory";
+    static constexpr adbfsm::Str not_a_directory     = " Not a directory";
+    static constexpr adbfsm::Str inaccessible        = " inaccessible or not found";
+    static constexpr adbfsm::Str read_only           = " Read-only file system";
 
     enum class Error
     {
@@ -35,36 +33,36 @@ namespace
         ReadOnly,
     };
 
-    std::errc to_errc(Error err)
+    adbfsm::Errc to_errc(Error err)
     {
         switch (err) {
-        case Error::Unknown: return std::errc::io_error;
-        case Error::NoDev: return std::errc::no_such_device;
-        case Error::PermDenied: return std::errc::permission_denied;
-        case Error::NoSuchFileOrDir: return std::errc::no_such_file_or_directory;
-        case Error::NotADir: return std::errc::not_a_directory;
-        case Error::Inaccessible: return std::errc::operation_not_supported;    // program not accessible
-        case Error::ReadOnly: return std::errc::read_only_file_system;
+        case Error::Unknown: return adbfsm::Errc::io_error;
+        case Error::NoDev: return adbfsm::Errc::no_such_device;
+        case Error::PermDenied: return adbfsm::Errc::permission_denied;
+        case Error::NoSuchFileOrDir: return adbfsm::Errc::no_such_file_or_directory;
+        case Error::NotADir: return adbfsm::Errc::not_a_directory;
+        case Error::Inaccessible: return adbfsm::Errc::operation_not_supported;    // program not accessible
+        case Error::ReadOnly: return adbfsm::Errc::read_only_file_system;
         default: std::terminate();
         }
     }
 
-    Error parse_stderr(Str str)
+    Error parse_stderr(adbfsm::Str str)
     {
-        auto splitter = util::StringSplitter{ str, '\n' };
+        auto splitter = adbfsm::util::StringSplitter{ str, '\n' };
         while (auto line = splitter.next()) {
             if (*line == no_device or *line == device_offline) {
                 return Error::NoDev;
             }
 
-            auto rev       = String{ line->rbegin(), line->rend() };
-            auto rev_strip = util::strip(rev);
-            auto err       = util::StringSplitter{ rev_strip, ':' }.next();
+            auto rev       = adbfsm::String{ line->rbegin(), line->rend() };
+            auto rev_strip = adbfsm::util::strip(rev);
+            auto err       = adbfsm::util::StringSplitter{ rev_strip, ':' }.next();
             if (not err) {
                 continue;
             }
 
-            auto eq = [&](auto rhs) { return sr::equal(*err, rhs | sv::reverse); };
+            auto eq = [&](auto rhs) { return adbfsm::sr::equal(*err, rhs | adbfsm::sv::reverse); };
 
             // clang-format off
             if      (eq(permission_denied))     return Error::PermDenied;
@@ -79,7 +77,7 @@ namespace
         return Error::Unknown;
     }
 
-    Expect<String> exec(Span<const Str> cmd)
+    adbfsm::Expect<adbfsm::String> exec(adbfsm::Span<const adbfsm::Str> cmd)
     {
         // log_d({ "exec command: {::?}" }, cmd);       // quite heavy to log :D
 
@@ -92,30 +90,30 @@ namespace
 
         opts.redirect.err.type = reproc::redirect::pipe;
 
-        auto out = String{};
-        auto err = String{};
+        auto out = adbfsm::String{};
+        auto err = adbfsm::String{};
 
         auto ec             = proc.start(args, opts);
         auto ec_drain       = reproc::drain(proc, Sink{ out }, Sink{ err });
         auto [ret, ec_wait] = proc.wait(10s);
 
         if (ec) {
-            log_e({ "failed to start command {}: {}" }, cmd, ec.message());
-            return std::unexpected{ std::errc::protocol_error };
+            adbfsm::log_e({ "failed to start command {}: {}" }, cmd, ec.message());
+            return adbfsm::Unexpect{ adbfsm::Errc::protocol_error };
         }
         if (ec_wait) {
-            log_e({ "failed to execute command {}: {}" }, cmd, ec_wait.message());
-            return std::unexpected{ std::errc::timed_out };
+            adbfsm::log_e({ "failed to execute command {}: {}" }, cmd, ec_wait.message());
+            return adbfsm::Unexpect{ adbfsm::Errc::timed_out };
         }
         if (ec_drain) {
-            log_e({ "failed to drain command output {}: {}" }, cmd, ec_drain.message());
-            return std::unexpected{ static_cast<std::errc>(ec_drain.value()) };
+            adbfsm::log_e({ "failed to drain command output {}: {}" }, cmd, ec_drain.message());
+            return adbfsm::Unexpect{ static_cast<adbfsm::Errc>(ec_drain.value()) };
         }
 
         if (ret != 0) {
-            const auto& errmsg = not err.empty() ? err : out;
-            log_w({ "non-zero command status ({}) {}: err: [{}]" }, ret, cmd, util::strip(errmsg));
-            return std::unexpected{ to_errc(parse_stderr(errmsg)) };
+            auto errmsg = not err.empty() ? adbfsm::util::strip(err) : adbfsm::util::strip(out);
+            adbfsm::log_w({ "non-zero command status ({}) {}: err: [{}]" }, ret, cmd, errmsg);
+            return adbfsm::Unexpect{ to_errc(parse_stderr(errmsg)) };
         }
         return std::move(out);
     }
@@ -129,8 +127,8 @@ namespace
      *
      * @return The number of bytes written to the command's stdin.
      */
-    template <std::invocable<Span<const u8>> Out>
-    Expect<usize> exec_fn(Span<const Str> cmd, Str in, Out outfn)
+    template <std::invocable<adbfsm::Span<const adbfsm::u8>> Out>
+    adbfsm::Expect<adbfsm::usize> exec_fn(adbfsm::Span<const adbfsm::Str> cmd, adbfsm::Str in, Out outfn)
     {
         // log_d({ "exec command: {::?}" }, cmd);    // quite heavy to log :D
 
@@ -149,21 +147,21 @@ namespace
         auto write_in = 0uz;
 
         if (not in.empty()) {
-            auto [write, ec_in] = proc.write(reinterpret_cast<const u8*>(in.data()), in.size());
+            auto [write, ec_in] = proc.write(reinterpret_cast<const adbfsm::u8*>(in.data()), in.size());
             if (ec_in) {
-                log_e({ "failed to write command input {}: {}" }, cmd, ec_in.message());
-                return std::unexpected{ std::errc::protocol_error };
+                adbfsm::log_e({ "failed to write command input {}: {}" }, cmd, ec_in.message());
+                return adbfsm::Unexpect{ adbfsm::Errc::protocol_error };
             }
             if (ec_in = proc.close(reproc::stream::in); ec_in) {
-                log_e({ "failed to close command input {}: {}" }, cmd, ec_in.message());
-                return std::unexpected{ std::errc::protocol_error };
+                adbfsm::log_e({ "failed to close command input {}: {}" }, cmd, ec_in.message());
+                return adbfsm::Unexpect{ adbfsm::Errc::protocol_error };
             }
             write_in = write;
         }
 
-        auto err = String{};
-        auto out = [&](reproc::stream, const u8* buffer, usize size) {
-            outfn(Span{ buffer, size });
+        auto err = adbfsm::String{};
+        auto out = [&](reproc::stream, const adbfsm::u8* buffer, adbfsm::usize size) {
+            outfn(adbfsm::Span{ buffer, size });
             return std::error_code{};
         };
 
@@ -171,27 +169,28 @@ namespace
         auto [ret, ec_wait] = proc.wait(10s);
 
         if (ec) {
-            log_e({ "failed to start command {}: {}" }, cmd, ec.message());
-            return std::unexpected{ std::errc::protocol_error };
+            adbfsm::log_e({ "failed to start command {}: {}" }, cmd, ec.message());
+            return adbfsm::Unexpect{ adbfsm::Errc::protocol_error };
         }
         if (ec_wait) {
-            log_e({ "failed to execute command {}: {}" }, cmd, ec_wait.message());
-            return std::unexpected{ std::errc::timed_out };
+            adbfsm::log_e({ "failed to execute command {}: {}" }, cmd, ec_wait.message());
+            return adbfsm::Unexpect{ adbfsm::Errc::timed_out };
         }
         if (ec_drain) {
-            log_e({ "failed to drain command output {}: {}" }, cmd, ec_drain.message());
-            return std::unexpected{ static_cast<std::errc>(ec_drain.value()) };
+            adbfsm::log_e({ "failed to drain command output {}: {}" }, cmd, ec_drain.message());
+            return adbfsm::Unexpect{ static_cast<adbfsm::Errc>(ec_drain.value()) };
         }
 
         if (ret != 0) {
-            log_w({ "non-zero command status ({}) {}: err: [{}]" }, ret, cmd, util::strip(err));
-            return std::unexpected{ to_errc(parse_stderr(err)) };
+            auto errmsg = adbfsm::util::strip(err);
+            adbfsm::log_w({ "non-zero command status ({}) {}: err: [{}]" }, ret, cmd, errmsg);
+            return adbfsm::Unexpect{ to_errc(parse_stderr(err)) };
         }
 
         return write_in;
     }
 
-    mode_t parse_mode(Str str)
+    mode_t parse_mode(adbfsm::Str str)
     {
         if (str.size() != 10) {
             return 0;
@@ -241,17 +240,17 @@ namespace
 
     template <typename T>
         requires std::is_fundamental_v<T>
-    constexpr Opt<T> parse_fundamental(Str str)
+    constexpr adbfsm::Opt<T> parse_fundamental(adbfsm::Str str)
     {
         auto t         = T{};
         auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), t);
-        if (ptr != str.data() + str.size() or ec != std::errc{}) {
+        if (ptr != str.data() + str.size() or ec != adbfsm::Errc{}) {
             return {};
         }
         return t;
     }
 
-    Opt<time_t> parse_time(Str ymd, Str hmsms, Str offset)
+    adbfsm::Opt<time_t> parse_time(adbfsm::Str ymd, adbfsm::Str hmsms, adbfsm::Str offset)
     {
         // using std::chrono::parse function (the milliseconds part is not able to be parsed)
         // parseable format: "2024-11-02 20:09:18 -0700"
@@ -265,12 +264,12 @@ namespace
         for (auto ch : offset) { buffer << ch; }
         // clang-format on
 
-        auto time = Timestamp{};
+        auto time = adbfsm::Timestamp{};
         if (buffer >> std::chrono::parse(format, time)) {
-            return Clock::to_time_t(time);
+            return adbfsm::Clock::to_time_t(time);
         };
 
-        log_w({ "parse_time: failed to parse time [{} {} {}]" }, ymd, hms, offset);
+        adbfsm::log_w({ "parse_time: failed to parse time [{} {} {}]" }, ymd, hms, offset);
         return {};
     }
 
@@ -294,31 +293,31 @@ namespace
      *
      * TODO: implement different parsing strategy for non-regular files
      */
-    Opt<data::ParsedStat> parse_file_stat(Str str)
+    adbfsm::Opt<adbfsm::data::ParsedStat> parse_file_stat(adbfsm::Str str)
     {
-        auto result = util::split_n<8>(str, ' ');
+        auto result = adbfsm::util::split_n<8>(str, ' ');
         if (not result) {
-            log_w({ "parse_file_stat: string can't be split into 8 parts [{}]" }, str);
+            adbfsm::log_w({ "parse_file_stat: string can't be split into 8 parts [{}]" }, str);
             return std::nullopt;
         }
 
         auto [to_be_stat, remainder] = *result;
 
         auto path = remainder;
-        auto link = Str{};
+        auto link = adbfsm::Str{};
 
         // NOTE: special case, ignore
         if (remainder == "." or remainder == "..") {
             return std::nullopt;
         }
 
-        if (auto arrow = remainder.find(" -> "); arrow != String::npos) {
+        if (auto arrow = remainder.find(" -> "); arrow != adbfsm::String::npos) {
             path = remainder.substr(0, arrow);
             link = remainder.substr(arrow + 4);
         }
 
-        if (to_be_stat[0].find_first_of('?') != String::npos) {
-            log_w({ "parse_file_stat: failed, file contains unparsable data [{}]" }, to_be_stat[0]);
+        if (to_be_stat[0].find_first_of('?') != adbfsm::String::npos) {
+            adbfsm::log_w({ "parse_file_stat: failed, file contains unparsable data [{}]" }, to_be_stat[0]);
             return std::nullopt;
         }
 
@@ -336,7 +335,7 @@ namespace
 
         // TODO: cache the uid and gid
 
-        auto stat = data::Stat{
+        auto stat = adbfsm::data::Stat{
             .links = parse_fundamental<nlink_t>(to_be_stat[1]).value_or(0),
             .size  = parse_fundamental<off_t>(to_be_stat[4]).value_or(0),
             .mtime = parse_time(to_be_stat[5], to_be_stat[6], to_be_stat[7]).value(),
@@ -346,10 +345,10 @@ namespace
         };
 
         if ((stat.mode & S_IFMT) == S_IFLNK and link.empty()) {
-            log_e({ "parse_file_stat: link is empty for [{}] when it should not be" }, path);
+            adbfsm::log_e({ "parse_file_stat: link is empty for [{}] when it should not be" }, path);
         }
 
-        return data::ParsedStat{
+        return adbfsm::data::ParsedStat{
             .stat    = stat,
             .path    = path,
             .link_to = link,
@@ -357,7 +356,7 @@ namespace
     }
 
     // NOTE: somehow adb shell needs double escaping
-    String quoted(path::Path path)
+    adbfsm::String quoted(adbfsm::path::Path path)
     {
         return fmt::format("\"{}\"", path.fullpath());
     }
@@ -375,7 +374,7 @@ namespace adbfsm::data
 
         auto out = exec(cmd);
         if (not out.has_value()) {
-            return std::unexpected{ out.error() };
+            return Unexpect{ out.error() };
         }
 
         auto generator = [](String out) -> Gen<ParsedStat> {
@@ -399,13 +398,13 @@ namespace adbfsm::data
 
         auto out = exec(cmd);
         if (not out.has_value()) {
-            return std::unexpected{ out.error() };
+            return Unexpect{ out.error() };
         }
 
         auto parsed = parse_file_stat(util::strip(*out));
         if (not parsed.has_value()) {
             log_e({ "Connection::stat: parsing stat failed [{}]" }, path.fullpath());
-            return std::unexpected{ std::errc::io_error };
+            return Unexpect{ Errc::io_error };
         }
 
         return std::move(parsed).value();
@@ -554,16 +553,16 @@ namespace adbfsm::data
         return exec(cmd).transform(sink_void);
     }
 
-    Expect<std::vector<Device>> list_devices()
+    Expect<Vec<Device>> list_devices()
     {
         const auto cmd = Array{ "adb"sv, "devices"sv };
         auto       out = exec(cmd);
 
         if (not out.has_value()) {
-            return std::unexpected{ out.error() };
+            return Unexpect{ out.error() };
         }
 
-        auto devices = std::vector<Device>{};
+        auto devices = Vec<Device>{};
 
         auto line_splitter = util::StringSplitter{ *out, { '\n' } };
         std::ignore        = line_splitter.next();    // skip the first line

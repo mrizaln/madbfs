@@ -22,7 +22,7 @@ namespace
     // resolve relative path
     adbfsm::String resolve_path(adbfsm::path::Path parent, adbfsm::Str path)
     {
-        auto parents = std::vector<adbfsm::Str>{};
+        auto parents = adbfsm::Vec<adbfsm::Str>{};
         if (path.front() != '/') {
             parents = adbfsm::util::split(parent.fullpath(), '/');
         }

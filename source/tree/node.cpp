@@ -259,7 +259,7 @@ namespace adbfsm::tree
         });
     }
 
-    Expect<usize> Node::read(Context context, u64 fd, std::span<char> out, off_t offset)
+    Expect<usize> Node::read(Context context, u64 fd, Span<char> out, off_t offset)
     {
         return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<usize> {
             if (not file.is_open(fd)) {
@@ -272,7 +272,7 @@ namespace adbfsm::tree
         });
     }
 
-    Expect<usize> Node::write(Context context, u64 fd, std::string_view in, off_t offset)
+    Expect<usize> Node::write(Context context, u64 fd, Str in, off_t offset)
     {
         return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<usize> {
             if (not file.is_open(fd)) {
