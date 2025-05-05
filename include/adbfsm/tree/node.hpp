@@ -497,43 +497,4 @@ namespace adbfsm::tree
         }
         return Unexpect{ errc };
     }
-
-    inline Expect<Ref<const data::Stat>> Node::stat() const
-    {
-        if (auto err = as<Error>(); err.has_value()) {
-            return Unexpect{ err->get().error };
-        }
-        return m_stat;
-    }
-
-    inline Str Node::printable_type() const
-    {
-        auto visitor = util::Overload{
-            [](const RegularFile&) { return "file"; },       //
-            [](const Directory&) { return "directory"; },    //
-            [](const Link&) { return "link"; },              //
-            [](const Other&) { return "other"; },            //
-            [](const Error&) { return "error"; },            //
-        };
-        return std::visit(visitor, m_value);
-    }
-
-    inline path::PathBuf Node::build_path() const
-    {
-        auto path = m_name | sv::reverse | sr::to<String>();
-        auto iter = std::back_inserter(path);
-
-        for (auto current = m_parent; current != nullptr; current = current->m_parent) {
-            *iter = '/';
-            sr::copy(current->m_name | sv::reverse, iter);
-        }
-
-        // if the last path is root, we need to remove the last /
-        if (path.size() > 2 and path[path.size() - 1] == '/' and path[path.size() - 2] == '/') {
-            path.pop_back();
-        }
-        sr::reverse(path);
-
-        return path::create_buf(std::move(path)).value();
-    }
 }

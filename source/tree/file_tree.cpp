@@ -237,12 +237,12 @@ namespace adbfsm::tree
 
     Expect<Ref<const data::Stat>> FileTree::getattr(path::Path path)
     {
-        return traverse_or_build(path).and_then(proj(&Node::stat));
+        return traverse_or_build(path).and_then(&Node::stat);
     }
 
     Expect<Ref<Node>> FileTree::readlink(path::Path path)
     {
-        return traverse_or_build(path).and_then(proj(&Node::readlink));
+        return traverse_or_build(path).and_then(&Node::readlink);
     }
 
     Expect<Ref<Node>> FileTree::mknod(path::Path path)
