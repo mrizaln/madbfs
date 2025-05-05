@@ -100,11 +100,11 @@ namespace adbfsm
 
         std::memset(stbuf, 0, sizeof(struct stat));
 
-        stbuf->st_ino   = 1;    // fake inode number;
-        stbuf->st_mode  = static_cast<__mode_t>(stat.mode);
-        stbuf->st_nlink = static_cast<__nlink_t>(stat.links);
-        stbuf->st_uid   = static_cast<__uid_t>(stat.uid);
-        stbuf->st_gid   = static_cast<__gid_t>(stat.gid);
+        stbuf->st_ino   = static_cast<ino_t>(stat.id.inner());
+        stbuf->st_mode  = static_cast<mode_t>(stat.mode);
+        stbuf->st_nlink = static_cast<nlink_t>(stat.links);
+        stbuf->st_uid   = static_cast<uid_t>(stat.uid);
+        stbuf->st_gid   = static_cast<gid_t>(stat.gid);
 
         switch (stbuf->st_mode & S_IFMT) {
         case S_IFBLK:    // TODO: implement parse_file_stat but for block and character devices
@@ -116,8 +116,8 @@ namespace adbfsm
         default: stbuf->st_size = 0;
         }
 
-        stbuf->st_blksize = 512;
-        stbuf->st_blocks  = (stbuf->st_size + 256) / 512;
+        stbuf->st_blksize = static_cast<blksize_t>(get_data().cache->page_size());
+        stbuf->st_blocks  = stbuf->st_size / stbuf->st_blksize + (stbuf->st_size % stbuf->st_blksize != 0);
 
         auto time = timespec{ .tv_sec = stat.mtime, .tv_nsec = 0 };
 

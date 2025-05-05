@@ -228,7 +228,7 @@ namespace adbfsm::data
             requires std::same_as<std::invoke_result_t<Fun, Span<const std::byte>, off_t>, Expect<usize>>
         Expect<void> flush(Id id, usize size, Fun on_flush)
         {
-            auto num_pages = size / m_page_size + (size % m_page_size == 0 ? 0 : 1);
+            auto num_pages = size / m_page_size + (size % m_page_size != 0);
 
             for (auto index : sv::iota(0uz, num_pages)) {
                 auto read_lock = std::shared_lock{ m_mutex };    // should I use unique_lock here?
@@ -266,6 +266,8 @@ namespace adbfsm::data
             auto read_lock = std::shared_lock{ m_mutex };
             return not m_orphan_pages.empty();
         }
+
+        usize page_size() const { return m_page_size; }
 
     private:
         mutable std::shared_mutex m_mutex;

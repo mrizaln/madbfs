@@ -6,11 +6,6 @@
 
 #include <atomic>
 
-namespace adbfsm::tree
-{
-    class Node;
-}
-
 namespace adbfsm::data
 {
     /**
@@ -21,7 +16,7 @@ namespace adbfsm::data
     class Id
     {
     public:
-        friend tree::Node;
+        friend struct Stat;
 
         Id() = default;
         u64 inner() const { return m_inner; }
@@ -43,11 +38,12 @@ namespace adbfsm::data
 
     struct Stat
     {
-        mode_t  mode  = 0;    // -rwxrwxrwx
+        Id      id    = Id::incr();
         nlink_t links = 1;
-        uid_t   uid   = 0;
-        gid_t   gid   = 0;
         off_t   size  = 0;
         time_t  mtime = {};    // last modification time (only seconds part is used)
+        mode_t  mode  = 0;     // -rwxrwxrwx
+        uid_t   uid   = 0;
+        gid_t   gid   = 0;
     };
 }

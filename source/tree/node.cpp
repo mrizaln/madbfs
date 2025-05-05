@@ -142,12 +142,12 @@ namespace adbfsm::tree
             // dummy stat for symlink based on
             // lrw-r--r--  root root 21 2024-10-05 09:19:29.000000000 +0700 /sdcard -> /storage/self/primary
             auto dummy_stat = data::Stat{
-                .mode  = S_IFLNK | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,    // mode: "lrw-r--r--"
                 .links = 1,
-                .uid   = 0,
-                .gid   = 0,
                 .size  = 21,
                 .mtime = Clock::to_time_t(Clock::now()),
+                .mode  = S_IFLNK | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,    // mode: "lrw-r--r--"
+                .uid   = 0,
+                .gid   = 0,
             };
 
             auto node = std::make_unique<Node>(name, this, std::move(dummy_stat), Link{ target });

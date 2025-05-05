@@ -337,12 +337,12 @@ namespace
         // TODO: cache the uid and gid
 
         auto stat = data::Stat{
-            .mode  = parse_mode(to_be_stat[0]),
             .links = parse_fundamental<nlink_t>(to_be_stat[1]).value_or(0),
-            .uid   = maybe_uid ? maybe_uid->pw_uid : 98,
-            .gid   = maybe_grp ? maybe_grp->gr_gid : 98,
             .size  = parse_fundamental<off_t>(to_be_stat[4]).value_or(0),
             .mtime = parse_time(to_be_stat[5], to_be_stat[6], to_be_stat[7]).value(),
+            .mode  = parse_mode(to_be_stat[0]),
+            .uid   = maybe_uid ? maybe_uid->pw_uid : 98,
+            .gid   = maybe_grp ? maybe_grp->gr_gid : 98,
         };
 
         if ((stat.mode & S_IFMT) == S_IFLNK and link.empty()) {
