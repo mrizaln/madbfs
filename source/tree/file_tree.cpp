@@ -1,7 +1,7 @@
 #include "adbfsm/tree/file_tree.hpp"
 #include "adbfsm/log.hpp"
 #include "adbfsm/tree/node.hpp"
-#include "adbfsm/util.hpp"
+#include "adbfsm/util/split.hpp"
 
 namespace
 {

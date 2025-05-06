@@ -1,5 +1,5 @@
 #include "adbfsm/log.hpp"
-#include "adbfsm/util.hpp"
+#include "adbfsm/util/split.hpp"
 
 #include "adbfsm/data/connection.hpp"
 #include "adbfsm/path/path.hpp"
