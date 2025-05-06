@@ -36,8 +36,11 @@ namespace
 
     adbfsm::Str get_no_dev_serial()
     {
-        static auto no_dev_serial = fmt::format("adb: device '{}' not found", ::getenv("ANDROID_SERIAL"));
-        return no_dev_serial;
+        if (auto* serial = std::getenv("ANDROID_SERIAL"); serial != nullptr) {
+            static auto no_dev_serial = fmt::format("adb: device '{}' not found", serial);
+            return no_dev_serial;
+        }
+        return {};
     }
 
     adbfsm::Errc to_errc(Error err)
@@ -388,7 +391,8 @@ namespace adbfsm::data
         }
 
         auto generator = [](String out) -> Gen<ParsedStat> {
-            auto lines = util::StringSplitter{ out, '\n' };
+            auto lines  = util::StringSplitter{ out, '\n' };
+            std::ignore = lines.next();    // ignore first line: "[total ...]"
             while (auto line = lines.next()) {
                 auto parsed = parse_file_stat(util::strip(*line));
                 if (not parsed.has_value()) {

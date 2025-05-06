@@ -57,8 +57,12 @@ int main(int argc, char** argv)
 {
     fmt::println("[adbfsm] checking adb availability...");
     if (auto status = adbfsm::data::start_connection(); not status.has_value()) {
-        fmt::println(stderr, "error: failed to start adb server, make sure adb is installed and in PATH");
-        fmt::println(stderr, "{}", std::make_error_code(status.error()).message());
+        const auto msg = std::make_error_code(status.error()).message();
+        fmt::println(stderr, "\nerror: failed to start adb server [{}].", msg);
+        fmt::println(stderr, "\nnote: make sure adb is installed and in PATH.");
+        fmt::println(stderr, "note: make sure phone debugging permission is enabled.");
+        fmt::println(stderr, "      phone with its screen locked might denies adb connection.");
+        fmt::println(stderr, "      you might need to unlock your device first to be able to use adb.");
         return 1;
     }
 
