@@ -31,7 +31,14 @@ namespace
         NotADir,
         Inaccessible,
         ReadOnly,
+        TryAgain,
     };
+
+    adbfsm::Str get_no_dev_serial()
+    {
+        static auto no_dev_serial = fmt::format("adb: device '{}' not found", ::getenv("ANDROID_SERIAL"));
+        return no_dev_serial;
+    }
 
     adbfsm::Errc to_errc(Error err)
     {
@@ -43,6 +50,7 @@ namespace
         case Error::NotADir: return adbfsm::Errc::not_a_directory;
         case Error::Inaccessible: return adbfsm::Errc::operation_not_supported;    // program not accessible
         case Error::ReadOnly: return adbfsm::Errc::read_only_file_system;
+        case Error::TryAgain: return adbfsm::Errc::resource_unavailable_try_again;
         default: std::terminate();
         }
     }
@@ -53,6 +61,8 @@ namespace
         while (auto line = splitter.next()) {
             if (*line == no_device or *line == device_offline) {
                 return Error::NoDev;
+            } else if (*line == get_no_dev_serial()) {
+                return Error::TryAgain;
             }
 
             auto rev       = adbfsm::String{ line->rbegin(), line->rend() };
@@ -65,12 +75,12 @@ namespace
             auto eq = [&](auto rhs) { return adbfsm::sr::equal(*err, rhs | adbfsm::sv::reverse); };
 
             // clang-format off
-            if      (eq(permission_denied))     return Error::PermDenied;
-            else if (eq(no_such_file_or_dir))   return Error::NoSuchFileOrDir;
-            else if (eq(not_a_directory))       return Error::NotADir;
-            else if (eq(inaccessible))          return Error::Inaccessible;
-            else if (eq(read_only))             return Error::ReadOnly;
-            else                                return Error::Unknown;
+            if      (eq(permission_denied))   return Error::PermDenied;
+            else if (eq(no_such_file_or_dir)) return Error::NoSuchFileOrDir;
+            else if (eq(not_a_directory))     return Error::NotADir;
+            else if (eq(inaccessible))        return Error::Inaccessible;
+            else if (eq(read_only))           return Error::ReadOnly;
+            else                              return Error::Unknown;
             // clang-format on
         }
 
