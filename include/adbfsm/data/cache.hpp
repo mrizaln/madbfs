@@ -268,7 +268,7 @@ namespace adbfsm::data
         usize page_size() const { return m_page_size; }
 
     private:
-        mutable strt::shared_futex_micro m_mutex;
+        mutable strt::shared_futex m_mutex;
 
         Vec<Pair<PageKey, Page>> m_orphan_pages;    // dirty but evicted pages
 
