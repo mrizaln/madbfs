@@ -1,8 +1,8 @@
 #include "adbfsm/tree/node.hpp"
 #include "adbfsm/data/connection.hpp"
+#include "adbfsm/util.hpp"
 
 #include <fcntl.h>
-#include <mutex>
 
 namespace adbfsm::tree
 {
@@ -109,7 +109,7 @@ namespace adbfsm::tree
 
     Expect<Ref<Node>> Node::traverse(Str name) const
     {
-        auto lock = std::shared_lock{ m_mutex };
+        auto lock = strt::shared_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -118,7 +118,7 @@ namespace adbfsm::tree
 
     Expect<void> Node::list(std::move_only_function<void(Str)>&& fn) const
     {
-        auto lock = std::shared_lock{ m_mutex };
+        auto lock = strt::shared_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -133,7 +133,7 @@ namespace adbfsm::tree
 
     Expect<Ref<Node>> Node::build(Str name, data::Stat stat, File file)
     {
-        auto lock = std::unique_lock{ m_mutex };
+        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -148,7 +148,7 @@ namespace adbfsm::tree
 
     Expect<Uniq<Node>> Node::extract(Str name)
     {
-        auto lock = std::unique_lock{ m_mutex };
+        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -157,7 +157,7 @@ namespace adbfsm::tree
 
     Expect<Pair<Ref<Node>, Uniq<Node>>> Node::insert(Uniq<Node> node, bool overwrite)
     {
-        auto lock = std::unique_lock{ m_mutex };
+        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -166,7 +166,7 @@ namespace adbfsm::tree
 
     Expect<Ref<Node>> Node::link(Str name, Node* target)
     {
-        auto lock = std::unique_lock{ m_mutex };
+        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -176,7 +176,7 @@ namespace adbfsm::tree
             }
 
             // NOTE: we can't really make a symlink on android from adb (unless rooted device iirc), so this
-            // operation actuall not creating any link on the adb device, just on the in-memory filetree.
+            // operation actually not creating any link on the adb device, just on the in-memory filetree.
 
             // dummy stat for symlink based on
             // lrw-r--r--  root root 21 2024-10-05 09:19:29.000000000 +0700 /sdcard -> /storage/self/primary
@@ -196,7 +196,7 @@ namespace adbfsm::tree
 
     Expect<Ref<Node>> Node::touch(Context context, Str name)
     {
-        auto lock = std::unique_lock{ m_mutex };
+        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -221,7 +221,7 @@ namespace adbfsm::tree
 
     Expect<Ref<Node>> Node::mkdir(Context context, Str name)
     {
-        auto lock = std::unique_lock{ m_mutex };
+        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -245,7 +245,7 @@ namespace adbfsm::tree
 
     Expect<void> Node::rm(Context context, Str name, bool recursive)
     {
-        auto lock = std::unique_lock{ m_mutex };
+        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -263,7 +263,7 @@ namespace adbfsm::tree
 
     Expect<void> Node::rmdir(Context context, Str name)
     {
-        auto lock = std::unique_lock{ m_mutex };
+        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -280,7 +280,7 @@ namespace adbfsm::tree
 
     Expect<void> Node::truncate(Context context, off_t size)
     {
-        auto lock = std::shared_lock{ m_mutex };
+        auto lock = strt::shared_lock{ m_mutex };
         return regular_file_prelude().and_then([&]([[maybe_unused]] RegularFile& file) {
             return context.connection.truncate(context.path, size).transform([&] { m_stat.size = size; });
         });
@@ -288,9 +288,9 @@ namespace adbfsm::tree
 
     Expect<u64> Node::open(Context context, int flags)
     {
-        auto lock = std::shared_lock{ m_mutex };
+        auto lock = strt::shared_lock{ m_mutex };
         return regular_file_prelude().and_then([&](RegularFile& file) {
-            auto read_lock = std::shared_lock{ m_mutex_file };
+            auto read_lock = strt::shared_lock{ m_mutex_file };
             return context.connection.open(context.path, flags).transform([&](u64 fd) {
                 auto res = file.open(fd, flags);
                 assert(res);
@@ -305,7 +305,7 @@ namespace adbfsm::tree
             if (not file.is_open(fd)) {
                 return Unexpect{ Errc::bad_file_descriptor };
             }
-            auto read_lock = std::shared_lock{ m_mutex_file };
+            auto read_lock = strt::shared_lock{ m_mutex_file };
             return context.cache.read(id(), out, offset, [&context](Span<std::byte> out, off_t offset) {
                 auto out_char = Span{ reinterpret_cast<char*>(out.data()), out.size() };
                 return context.connection.read(context.path, out_char, offset);
@@ -319,7 +319,7 @@ namespace adbfsm::tree
             if (not file.is_open(fd)) {
                 return Unexpect{ Errc::bad_file_descriptor };
             }
-            auto write_lock = std::unique_lock{ m_mutex_file };
+            auto write_lock = strt::exclusive_lock{ m_mutex_file };
             file.set_dirty(true);
             return context.cache.write(id(), in, offset).transform([&](usize ret) {
                 m_stat.size += ret;
@@ -338,7 +338,7 @@ namespace adbfsm::tree
                 return {};    // no write, do nothing
             }
             file.set_dirty(false);
-            auto write_lock = std::unique_lock{ m_mutex_file };
+            auto write_lock = strt::exclusive_lock{ m_mutex_file };
             auto filesize   = static_cast<usize>(stat()->get().size);
             return context.cache.flush(id(), filesize, [&](Span<const std::byte> in, off_t offset) {
                 auto in_char = Str{ reinterpret_cast<const char*>(in.data()), in.size() };
@@ -357,7 +357,7 @@ namespace adbfsm::tree
                 return {};    // no write, do nothing
             }
             file.set_dirty(false);
-            auto write_lock = std::unique_lock{ m_mutex_file };
+            auto write_lock = strt::exclusive_lock{ m_mutex_file };
             auto filesize   = static_cast<usize>(stat()->get().size);
             return context.cache.flush(id(), filesize, [&](Span<const std::byte> in, off_t offset) {
                 auto in_char = Str{ reinterpret_cast<const char*>(in.data()), in.size() };
@@ -368,7 +368,7 @@ namespace adbfsm::tree
 
     Expect<void> Node::utimens(Context context)
     {
-        auto lock = std::shared_lock{ m_mutex };
+        auto lock = strt::shared_lock{ m_mutex };
         return context.connection.touch(context.path, false)
             .and_then([&] { return context.connection.stat(context.path); })
             .transform([&](data::ParsedStat&& parsed) { m_stat = parsed.stat; });
@@ -376,7 +376,7 @@ namespace adbfsm::tree
 
     Expect<Ref<Node>> Node::readlink()
     {
-        auto lock    = std::shared_lock{ m_mutex };
+        auto lock    = strt::shared_lock{ m_mutex };
         auto current = this;
         while (current->is<Link>()) {
             current = &current->as<Link>()->get().target();

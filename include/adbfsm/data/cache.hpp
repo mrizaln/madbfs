@@ -3,11 +3,12 @@
 #include "adbfsm/common.hpp"
 #include "adbfsm/data/stat.hpp"
 
+#include <shared_futex/shared_futex.hpp>
+
 #include <bit>
 #include <cassert>
 #include <list>
 #include <mutex>
-#include <shared_mutex>
 #include <unordered_map>
 
 namespace adbfsm::data
@@ -97,7 +98,7 @@ namespace adbfsm::data
             auto total_read = 0uz;
 
             for (auto index : sv::iota(start, last + 1)) {
-                auto read_lock = std::shared_lock{ m_mutex };
+                auto upgrade_lock = strt::upgradeable_lock{ m_mutex };
 
                 auto key   = PageKey{ id, index };
                 auto entry = m_pages.find(key);
@@ -109,8 +110,7 @@ namespace adbfsm::data
                         return Unexpect{ res.error() };
                     }
 
-                    read_lock.unlock();
-                    auto write_lock = std::unique_lock{ m_mutex };
+                    auto write_lock = strt::upgrade_lock(std::move(upgrade_lock));
 
                     m_lru.emplace_front(key);
 
@@ -118,6 +118,7 @@ namespace adbfsm::data
                         .page   = Page{ m_page_size, { data.begin(), res.value() }, 0, false },
                         .lru_it = m_lru.begin(),
                     };
+
                     auto [p, _] = m_pages.emplace(key, std::move(new_entry));
                     entry       = p;
 
@@ -132,32 +133,29 @@ namespace adbfsm::data
                             }
                         }
                     }
-
-                    write_lock.unlock();
-                    read_lock.lock();
+                } else {
+                    upgrade_lock.unlock();
                 }
 
-                auto data = entry->second.page.data_as<char>();
+                auto read_lock = strt::shared_lock{ m_mutex };
 
                 auto local_offset = 0uz;
                 if (index == start) {
                     local_offset = static_cast<usize>(offset) % m_page_size;
                 }
 
+                auto data = entry->second.page.data_as<char>();
                 auto read = std::min(data.size() - local_offset, out.size() - total_read);
                 std::copy_n(data.data() + local_offset, read, out.data() + total_read);
                 total_read += read;
 
                 if (entry->second.lru_it != m_lru.begin()) {
                     read_lock.unlock();
-                    auto write_lock = std::unique_lock{ m_mutex };
+                    auto write_lock = strt::exclusive_lock{ m_mutex };
 
                     m_lru.erase(entry->second.lru_it);
                     m_lru.push_front(entry->first);
                     entry->second.lru_it = m_lru.begin();
-
-                    write_lock.unlock();
-                    read_lock.lock();
                 }
             }
 
@@ -172,7 +170,7 @@ namespace adbfsm::data
             auto total_written = 0uz;
 
             for (auto index : sv::iota(start, last + 1)) {
-                auto write_lock = std::unique_lock{ m_mutex };
+                auto write_lock = strt::exclusive_lock{ m_mutex };
 
                 auto key  = PageKey{ id, index };
                 auto page = m_pages.find(key);
@@ -231,7 +229,7 @@ namespace adbfsm::data
             auto num_pages = size / m_page_size + (size % m_page_size != 0);
 
             for (auto index : sv::iota(0uz, num_pages)) {
-                auto read_lock = std::shared_lock{ m_mutex };    // should I use unique_lock here?
+                auto read_lock = strt::shared_lock{ m_mutex };
 
                 auto key   = PageKey{ id, index };
                 auto entry = m_pages.find(key);
@@ -257,20 +255,20 @@ namespace adbfsm::data
 
         Vec<Pair<PageKey, Page>> get_orphan_pages()
         {
-            auto write_lock = std::unique_lock{ m_mutex };
+            auto write_lock = strt::exclusive_lock{ m_mutex };
             return std::move(m_orphan_pages);
         }
 
         bool has_orphan_pages() const
         {
-            auto read_lock = std::shared_lock{ m_mutex };
+            auto read_lock = strt::shared_lock{ m_mutex };
             return not m_orphan_pages.empty();
         }
 
         usize page_size() const { return m_page_size; }
 
     private:
-        mutable std::shared_mutex m_mutex;
+        mutable strt::shared_futex_micro m_mutex;
 
         Vec<Pair<PageKey, Page>> m_orphan_pages;    // dirty but evicted pages
 

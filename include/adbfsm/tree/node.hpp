@@ -5,15 +5,14 @@
 #include "adbfsm/data/connection.hpp"
 #include "adbfsm/data/stat.hpp"
 #include "adbfsm/path/path.hpp"
-#include "adbfsm/util.hpp"
 
+#include <shared_futex/shared_futex.hpp>
 #include <sys/types.h>
 
 #include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <functional>
-#include <shared_mutex>
 
 namespace adbfsm::tree
 {
@@ -451,8 +450,8 @@ namespace adbfsm::tree
         data::Stat m_stat   = {};
         File       m_value;
 
-        mutable std::shared_mutex m_mutex;
-        mutable std::shared_mutex m_mutex_file;
+        mutable strt::shared_futex_micro m_mutex;
+        mutable strt::shared_futex_micro m_mutex_file;
     };
 }
 
