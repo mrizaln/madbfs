@@ -9,11 +9,23 @@
 
 namespace adbfsm
 {
-    struct Adbfsm
+    class Adbfsm
     {
-        Uniq<data::IConnection> connection;
-        Uniq<data::Cache>       cache;
-        tree::FileTree          tree;
+    public:
+        Adbfsm(Uniq<data::IConnection> connection, Uniq<data::Cache> cache)
+            : m_connection{ std::move(connection) }
+            , m_cache{ std::move(cache) }
+            , m_tree{ *m_connection, *m_cache }
+        {
+        }
+
+        tree::FileTree&    tree() { return m_tree; }
+        const data::Cache& cache() const { return *m_cache; }
+
+    private:
+        Uniq<data::IConnection> m_connection;
+        Uniq<data::Cache>       m_cache;
+        tree::FileTree          m_tree;
     };
 
     void* init(fuse_conn_info*, fuse_config*);
