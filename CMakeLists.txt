@@ -14,9 +14,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(fmt REQUIRED)
 find_package(libfuse REQUIRED)
+find_package(nlohmann_json REQUIRED)
 find_package(rapidhash REQUIRED)
 find_package(reproc++ REQUIRED)
-find_package(simdjson REQUIRED)
 find_package(spdlog REQUIRED)
 
 include(cmake/fetched-libs.cmake)
@@ -39,11 +39,11 @@ target_link_libraries(
         Sockpp::sockpp
         fmt::fmt
         libfuse::libfuse
+        nlohmann_json::nlohmann_json
         rapidhash::rapidhash
         reproc::reproc
         shared_futex
         spdlog::spdlog
-        simdjson::simdjson
 )
 target_include_directories(adbfsm-lib PUBLIC include)
 
