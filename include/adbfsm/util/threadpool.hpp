@@ -44,8 +44,12 @@ namespace adbfsm::util
 
         ~Threadpool()
         {
+#ifdef NDEBUG
+            stop(false);
+#else
             auto remainder = stop(false);
             assert(remainder == 0);
+#endif
         }
 
         template <typename... Args, std::invocable<Args...> Fn>
