@@ -8,7 +8,6 @@
 #include <bit>
 #include <cassert>
 #include <list>
-#include <mutex>
 #include <unordered_map>
 
 namespace adbfsm::data
@@ -19,44 +18,70 @@ namespace adbfsm::data
     class Page
     {
     public:
-        Page(usize page_size, Span<const std::byte> data, usize offset, bool set_dirty)
-            : m_data{ std::make_unique<std::byte[]>(page_size) }
+        Page(usize page_size)
+            : m_data{ std::make_unique<char[]>(page_size) }
             , m_size{ 0 }
         {
-            std::copy_n(data.data(), data.size(), m_data.get() + offset);
-
-            m_size = offset + data.size();
-            dirty.store(set_dirty, std::memory_order::release);
         }
 
         Page(Page&& other)
+            : Page{ std::move(other), strt::exclusive_lock{ other.m_mutex } }
+        {
+        }
+
+        usize read(Span<char> out, usize offset)
+        {
+            auto lock = strt::shared_lock{ m_mutex };
+            auto size = std::min((m_size & ~dirty_bit) - offset, out.size());
+            std::copy_n(m_data.get() + offset, size, out.data());
+            return size;
+        }
+
+        usize write(Span<const char> in, usize offset)
+        {
+            // NOTE: kinda risky since there is no offset and data size check with the page size
+            auto lock = strt::exclusive_lock{ m_mutex };
+            auto size = offset + in.size();
+            std::copy_n(in.data(), in.size(), m_data.get() + offset);
+            m_size = static_cast<u32>(size) | (m_size & dirty_bit);
+            return in.size();
+        }
+
+        usize size() const
+        {
+            auto lock = strt::shared_lock{ m_mutex };
+            return m_size & ~dirty_bit;
+        };
+
+        bool is_dirty() const
+        {
+            auto lock = strt::shared_lock{ m_mutex };
+            return m_size & dirty_bit;
+        }
+
+        void set_dirty(bool set)
+        {
+            auto lock = strt::exclusive_lock{ m_mutex };
+            if (set) {
+                m_size |= dirty_bit;
+            } else {
+                m_size &= ~dirty_bit;
+            }
+        }
+
+    private:
+        Page(Page&& other, strt::exclusive_lock<strt::shared_futex_micro>)
             : m_data{ std::move(other.m_data) }
             , m_size{ other.m_size }
         {
-            dirty.store(other.dirty.load(std::memory_order::acquire), std::memory_order::release);
         }
 
-        usize size() const { return m_size; }
+        static constexpr auto dirty_bit = 0x10000000_u32;
 
-        template <typename T = std::byte>
-            requires (sizeof(T) == 1)
-        Span<const T> data_as() const
-        {
-            return Span{ reinterpret_cast<const T*>(m_data.get()), size() };
-        }
+        Uniq<char[]> m_data;
+        u32          m_size;    // will always less than or equal to page_size
 
-        void write(Span<const std::byte> data, usize offset)
-        {
-            // kinda risky since there is no offset and data size check with the page size
-            std::copy_n(data.data(), data.size(), m_data.get() + offset);
-            m_size = offset + data.size();
-        }
-
-        std::atomic<bool> dirty = false;
-
-    private:
-        Uniq<std::byte[]> m_data;
-        usize             m_size;    // will always less than or equal to page_size
+        mutable strt::shared_futex_micro m_mutex;
     };
 
     class Cache
@@ -88,8 +113,8 @@ namespace adbfsm::data
         {
         }
 
-        template <std::invocable<Span<std::byte>, off_t> OnMiss>
-            requires std::same_as<std::invoke_result_t<OnMiss, Span<std::byte>, off_t>, Expect<usize>>
+        template <std::invocable<Span<char>, off_t> OnMiss>
+            requires std::same_as<std::invoke_result_t<OnMiss, Span<char>, off_t>, Expect<usize>>
         Expect<usize> read(Id id, Span<char> out, off_t offset, OnMiss on_miss)
         {
             auto start = static_cast<usize>(offset) / m_page_size;
@@ -104,31 +129,33 @@ namespace adbfsm::data
                 auto entry = m_pages.find(key);
 
                 if (entry == m_pages.end()) {
-                    auto data = Vec<std::byte>(m_page_size);
-                    auto res  = on_miss(data, static_cast<off_t>(index * m_page_size));
+                    m_lru.emplace_front(key);
+                    auto [p, _] = m_pages.emplace(key, MapEntry{ { m_page_size }, m_lru.begin() });
+                    entry       = p;
+
+                    upgrade_lock.unlock();
+
+                    // since this temporary location is unchanging, making this static might be beneficial
+                    thread_local static auto data = Vec<char>{};
+                    data.resize(m_page_size);
+
+                    auto res = on_miss(data, static_cast<off_t>(index * m_page_size));
                     if (not res.has_value()) {
                         return Unexpect{ res.error() };
                     }
 
-                    auto write_lock = strt::upgrade_lock(std::move(upgrade_lock));
-
-                    m_lru.emplace_front(key);
-
-                    auto new_entry = MapEntry{
-                        .page   = Page{ m_page_size, { data.begin(), res.value() }, 0, false },
-                        .lru_it = m_lru.begin(),
-                    };
-
-                    auto [p, _] = m_pages.emplace(key, std::move(new_entry));
-                    entry       = p;
+                    auto write_span = Span{ data.data(), res.value() };
+                    entry->second.page.write(write_span, 0);
 
                     if (m_pages.size() > m_max_pages) {
+                        auto write_lock = strt::upgrade_lock(std::move(upgrade_lock));
+
                         auto delta = m_pages.size() - m_max_pages;
                         while (delta-- > 0) {
                             auto last = m_lru.back();
                             m_lru.pop_back();
                             auto page = m_pages.extract(last);
-                            if (not page.empty() and page.mapped().page.dirty.load(Ord::acquire)) {
+                            if (not page.empty() and page.mapped().page.is_dirty()) {
                                 m_orphan_pages.emplace_back(last, std::move(page.mapped().page));
                             }
                         }
@@ -144,10 +171,9 @@ namespace adbfsm::data
                     local_offset = static_cast<usize>(offset) % m_page_size;
                 }
 
-                auto data = entry->second.page.data_as<char>();
-                auto read = std::min(data.size() - local_offset, out.size() - total_read);
-                std::copy_n(data.data() + local_offset, read, out.data() + total_read);
-                total_read += read;
+                auto& page     = entry->second.page;
+                auto  out_sub  = Span{ out.data() + total_read, out.size() - total_read };
+                total_read    += page.read(out_sub, local_offset);
 
                 if (entry->second.lru_it != m_lru.begin()) {
                     read_lock.unlock();
@@ -182,26 +208,23 @@ namespace adbfsm::data
 
                 auto write      = std::min(m_page_size - local_offset, in.size() - total_written);
                 auto write_span = Span{
-                    reinterpret_cast<const std::byte*>(in.data()) + total_written,
+                    reinterpret_cast<const char*>(in.data()) + total_written,
                     write,
                 };
 
                 if (page == m_pages.end()) {
                     m_lru.emplace_front(key);
-                    auto new_entry = MapEntry{
-                        .page   = Page{ m_page_size, write_span, local_offset, true },
-                        .lru_it = m_lru.begin(),
-                    };
-                    m_pages.emplace(key, std::move(new_entry));
-                } else {
-                    page->second.page.write(write_span, local_offset);
-                    page->second.page.dirty.store(true, Ord::release);
+                    auto [p, _] = m_pages.emplace(key, MapEntry{ { m_page_size }, m_lru.begin() });
+                    page        = p;
+                }
 
-                    if (page->second.lru_it != m_lru.begin()) {
-                        m_lru.erase(page->second.lru_it);
-                        m_lru.push_front(page->first);
-                        page->second.lru_it = m_lru.begin();
-                    }
+                page->second.page.write(write_span, local_offset);
+                page->second.page.set_dirty(true);
+
+                if (page->second.lru_it != m_lru.begin()) {
+                    m_lru.erase(page->second.lru_it);
+                    m_lru.push_front(page->first);
+                    page->second.lru_it = m_lru.begin();
                 }
 
                 total_written += write;
@@ -212,7 +235,7 @@ namespace adbfsm::data
                         auto last = m_lru.back();
                         m_lru.pop_back();
                         auto page = m_pages.extract(last);
-                        if (page.mapped().page.dirty.load(Ord::acquire)) {
+                        if (page.mapped().page.is_dirty()) {
                             m_orphan_pages.emplace_back(last, std::move(page.mapped().page));
                         }
                     }
@@ -222,8 +245,8 @@ namespace adbfsm::data
             return total_written;
         }
 
-        template <std::invocable<Span<const std::byte>, off_t> Fun>
-            requires std::same_as<std::invoke_result_t<Fun, Span<const std::byte>, off_t>, Expect<usize>>
+        template <std::invocable<Span<const char>, off_t> Fun>
+            requires std::same_as<std::invoke_result_t<Fun, Span<const char>, off_t>, Expect<usize>>
         Expect<void> flush(Id id, usize size, Fun on_flush)
         {
             auto num_pages = size / m_page_size + (size % m_page_size != 0);
@@ -239,15 +262,21 @@ namespace adbfsm::data
                 }
 
                 auto& page = entry->second.page;
-                if (page.dirty.load(Ord::acquire)) {
+                if (page.is_dirty()) {
 
-                    auto data = page.data_as<std::byte>();
-                    auto res  = on_flush(data, static_cast<off_t>(index * m_page_size));
+                    // since this temporary location is unchanging, making this static might be beneficial
+                    thread_local static auto data = Vec<char>{};
+                    data.resize(m_page_size);
+
+                    auto read = page.read(data, 0);
+                    page.set_dirty(false);
+
+                    auto read_span = Span{ data.data(), read };
+
+                    auto res = on_flush(read_span, static_cast<off_t>(index * m_page_size));
                     if (not res.has_value()) {
                         return Unexpect{ res.error() };
                     }
-
-                    page.dirty.store(false, Ord::release);
                 }
             }
             return {};
