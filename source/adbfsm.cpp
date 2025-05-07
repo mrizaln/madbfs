@@ -1,14 +1,17 @@
 #include "adbfsm/adbfsm.hpp"
 #include "adbfsm/args.hpp"
+#include "adbfsm/data/ipc.hpp"
 #include "adbfsm/log.hpp"
 
 #include <fcntl.h>
+#include <nlohmann/json.hpp>
 
 #include <cassert>
 #include <cstring>
 
 namespace
 {
+
     adbfsm::Adbfsm& get_data()
     {
         auto ctx = ::fuse_get_context()->private_data;
@@ -49,6 +52,25 @@ namespace
 
 namespace adbfsm
 {
+    Adbfsm::Adbfsm(Uniq<data::IConnection> connection, Uniq<data::Cache> cache)
+        : m_connection{ std::move(connection) }
+        , m_cache{ std::move(cache) }
+        , m_tree{ *m_connection, *m_cache }
+    {
+        auto ipc = data::Ipc::create();
+        if (not ipc.has_value()) {
+            const auto msg = std::make_error_code(ipc.error()).message();
+            log_e({ "Adbfsm: failed to initialize ipc: {}" }, msg);
+            return;
+        }
+
+        const auto path = ipc->path();
+        log_i({ "Adbfsm: succesfully created ipc: {}" }, path.fullpath());
+        m_ipc = std::move(*ipc);
+
+        m_ipc->launch([](data::ipc::Op) -> nlohmann::json { return "hello"; });
+    }
+
     void* init(fuse_conn_info*, fuse_config*)
     {
         auto* args = static_cast<args::ParsedOpt*>(::fuse_get_context()->private_data);

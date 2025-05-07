@@ -1,6 +1,7 @@
 #pragma once
 
 #include "adbfsm/data/connection.hpp"
+#include "adbfsm/data/ipc.hpp"
 #include "adbfsm/tree/file_tree.hpp"
 
 #define FUSE_USE_VERSION 31
@@ -12,12 +13,7 @@ namespace adbfsm
     class Adbfsm
     {
     public:
-        Adbfsm(Uniq<data::IConnection> connection, Uniq<data::Cache> cache)
-            : m_connection{ std::move(connection) }
-            , m_cache{ std::move(cache) }
-            , m_tree{ *m_connection, *m_cache }
-        {
-        }
+        Adbfsm(Uniq<data::IConnection> connection, Uniq<data::Cache> cache);
 
         tree::FileTree&    tree() { return m_tree; }
         const data::Cache& cache() const { return *m_cache; }
@@ -26,6 +22,7 @@ namespace adbfsm
         Uniq<data::IConnection> m_connection;
         Uniq<data::Cache>       m_cache;
         tree::FileTree          m_tree;
+        Opt<data::Ipc>          m_ipc;
     };
 
     void* init(fuse_conn_info*, fuse_config*);
