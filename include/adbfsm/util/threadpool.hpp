@@ -81,7 +81,7 @@ namespace adbfsm::util
 
             {
                 auto lock = std::unique_lock{ m_mutex };
-                auto fn   = [func = std::forward<Func>(func), ... args = std::forward<Args>(args)]() {
+                auto fn   = [func = std::forward<Func>(func), ... args = std::forward<Args>(args)]() mutable {
                     func(std::forward<Args>(args)...);
                 };
                 m_tasks.emplace_back(std::move(fn));
