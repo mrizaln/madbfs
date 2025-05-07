@@ -2,6 +2,7 @@
 #include "adbfsm/args.hpp"
 #include "adbfsm/data/ipc.hpp"
 #include "adbfsm/log.hpp"
+#include "adbfsm/util/overload.hpp"
 
 #include <fcntl.h>
 #include <nlohmann/json.hpp>
@@ -68,7 +69,24 @@ namespace adbfsm
         log_i({ "Adbfsm: succesfully created ipc: {}" }, path.fullpath());
         m_ipc = std::move(*ipc);
 
-        m_ipc->launch([](data::ipc::Op) -> nlohmann::json { return "hello"; });
+        m_ipc->launch([this](data::ipc::Op op) { return ipc_handler(op); });
+    }
+
+    nlohmann::json Adbfsm::ipc_handler(data::ipc::Op op)
+    {
+        namespace ipc = data::ipc;
+
+        auto overload = util::Overload{
+            [&](ipc::Help&) { /* TODO: implement */ },
+            [&](ipc::InvalidateCache&) { /* TODO: implement */ },
+            [&](ipc::SetPageSize&) { /* TODO: implement */ },
+            [&](ipc::GetPageSize&) { /* TODO: implement */ },
+            [&](ipc::SetCacheSize&) { /* TODO: implement */ },
+            [&](ipc::GetCacheSize&) { /* TODO: implement */ },
+        };
+        std::visit(overload, op);
+
+        return "hello";
     }
 
     void* init(fuse_conn_info*, fuse_config*)

@@ -19,6 +19,8 @@ namespace adbfsm
         const data::Cache& cache() const { return *m_cache; }
 
     private:
+        nlohmann::json ipc_handler(data::ipc::Op op);
+
         Uniq<data::IConnection> m_connection;
         Uniq<data::Cache>       m_cache;
         tree::FileTree          m_tree;
