@@ -14,14 +14,15 @@ namespace adbfsm::data
     namespace ipc
     {
         // clang-format off
-        struct Help         {};
-        struct SetPageSize  { usize kib; };
-        struct GetPageSize  {};
-        struct SetCacheSize { usize mib; };
-        struct GetCacheSize {};
+        struct Help            {};
+        struct InvalidateCache {};
+        struct SetPageSize     { usize kib; };
+        struct GetPageSize     {};
+        struct SetCacheSize    { usize mib; };
+        struct GetCacheSize    {};
         // clang-format on
 
-        using Op = Var<Help, SetPageSize, GetPageSize, SetCacheSize, GetCacheSize>;
+        using Op = Var<Help, InvalidateCache, SetPageSize, GetPageSize, SetCacheSize, GetCacheSize>;
     }
 
     class Ipc

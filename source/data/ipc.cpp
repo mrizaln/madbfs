@@ -5,11 +5,12 @@
 
 namespace adbfsm::data::ipc::names
 {
-    constexpr auto set_page_size  = "set_page_size";
-    constexpr auto get_page_size  = "get_page_size";
-    constexpr auto set_cache_size = "set_cache_size";
-    constexpr auto get_cache_size = "get_cache_size";
-    constexpr auto help           = "help";
+    constexpr auto help             = "help";
+    constexpr auto invalidate_cache = "invalidate_cache";
+    constexpr auto set_page_size    = "set_page_size";
+    constexpr auto get_page_size    = "get_page_size";
+    constexpr auto set_cache_size   = "set_cache_size";
+    constexpr auto get_cache_size   = "get_cache_size";
 }
 
 namespace adbfsm::data
@@ -71,6 +72,8 @@ namespace adbfsm::data
 
         if (op == ipc::names::help) {
             return ipc::Op{ ipc::Help{} };
+        } else if (op == ipc::names::invalidate_cache) {
+            return ipc::Op{ ipc::InvalidateCache{} };
         } else if (op == ipc::names::set_page_size) {
             return ipc::Op{ ipc::SetPageSize{ .kib = json.at("value").at("kib") } };
         } else if (op == ipc::names::get_page_size) {
