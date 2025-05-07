@@ -20,7 +20,7 @@ namespace adbfsm::data
     Expect<Str> receive(sockpp::unix_socket& sock, String& buffer)
     {
         auto len_buffer = LenInfo{};
-        auto len_res    = sock.read(len_buffer.data(), len_buffer.size());
+        auto len_res    = sock.read_n(len_buffer.data(), len_buffer.size());
         if (not len_res) {
             return Unexpect{ static_cast<Errc>(len_res.error().value()) };
         } else if (len_res.value() != len_buffer.size()) {
@@ -48,7 +48,7 @@ namespace adbfsm::data
 
     Expect<void> send(sockpp::unix_socket& sock, Str msg)
     {
-        auto len = std::bit_cast<LenInfo>(static_cast<u32>(msg.size()));
+        auto len = std::bit_cast<LenInfo>(::htonl(static_cast<u32>(msg.size())));
         if (auto res = sock.write_n(len.data(), len.size()); not res) {
             return Unexpect{ static_cast<Errc>(res.error().value()) };
         }
@@ -56,7 +56,7 @@ namespace adbfsm::data
         auto res = sock.write_n(msg.data(), msg.size());
         if (not res) {
             return Unexpect{ static_cast<Errc>(res.error().value()) };
-        } else if (res.value() != 0) {
+        } else if (res.value() != msg.size()) {
             return Unexpect{ Errc::connection_reset };
         }
 
@@ -131,7 +131,8 @@ namespace adbfsm::data
     void Ipc::launch(OnOp on_op)
     {
         m_running = true;
-        m_thread  = std::jthread{ [this, on_op = std::move(on_op)](std::stop_token st) mutable {
+        m_threadpool->run();
+        m_thread = std::jthread{ [this, on_op = std::move(on_op)](std::stop_token st) mutable {
             run(st, std::move(on_op));
         } };
     }
@@ -157,39 +158,41 @@ namespace adbfsm::data
                 continue;
             }
 
-            auto       sock = res.release();
-            const auto peer = sock.peer_address().to_string();
-
-            log_i({ "{}: new ipc connection from {}" }, __func__, peer);
+            auto sock = res.release();
+            log_i({ "{}: new ipc connection from peer" }, __func__);
 
             auto op_str = receive(sock, buffer);
             if (not op_str) {
                 const auto msg = std::make_error_code(op_str.error()).message();
-                log_e({ "{}: failed to receve message from peer {}: {}" }, __func__, peer, msg);
+                log_w({ "{}: failed to receve message from peer: {}" }, __func__, msg);
                 continue;
             }
 
-            auto op = Opt<ipc::Op>{};
             try {
-                op = parse_msg(op_str.value());
+                auto op = parse_msg(op_str.value());
                 if (not op.has_value()) {
                     m_threadpool->enqueue_detached([sock = std::move(sock)] mutable {
                         auto json       = nlohmann::json{};
                         json["status"]  = "error";
                         json["message"] = "invalid operation";
 
-                        auto msg    = nlohmann::to_string(json);
-                        std::ignore = send(sock, msg);
+                        auto msg = nlohmann::to_string(json);
+                        if (auto res = send(sock, msg); not res) {
+                            const auto msg = std::make_error_code(res.error()).message();
+                            log_w({ "run | threadpool: failed to send message: {}" }, msg);
+                        }
                     });
-                    continue;
                 } else {
                     m_threadpool->enqueue_detached([&on_op, sock = std::move(sock), op = *op] mutable {
                         auto response      = nlohmann::json{};
                         response["status"] = "success";
                         response["value"]  = on_op(op);
 
-                        auto msg    = nlohmann::to_string(response);
-                        std::ignore = send(sock, msg);
+                        auto msg = nlohmann::to_string(response);
+                        if (auto res = send(sock, msg); not res) {
+                            const auto msg = std::make_error_code(res.error()).message();
+                            log_w({ "run | threadpool: failed to send message: {}" }, msg);
+                        }
                     });
                 }
             } catch (const std::exception& e) {
@@ -198,8 +201,11 @@ namespace adbfsm::data
                     json["status"]  = "error";
                     json["message"] = std::move(what);
 
-                    auto msg    = nlohmann::to_string(json);
-                    std::ignore = send(sock, msg);
+                    auto msg = nlohmann::to_string(json);
+                    if (auto res = send(sock, msg); not res) {
+                        const auto msg = std::make_error_code(res.error()).message();
+                        log_w({ "run | threadpool: failed to send message: {}" }, msg);
+                    }
                 });
                 continue;
             }
