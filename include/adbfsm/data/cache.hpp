@@ -82,7 +82,12 @@ namespace adbfsm::data
         Vec<Pair<PageKey, Page>> get_orphan_pages();
         bool                     has_orphan_pages() const;
 
+        void invalidate();
+        void set_page_size(usize new_page_size);
+        void set_max_pages(usize new_max_pages);
+
         usize page_size() const { return m_page_size; }
+        usize max_pages() const { return m_max_pages; }
 
     private:
         mutable strt::shared_futex m_mutex;

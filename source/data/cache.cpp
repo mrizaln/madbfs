@@ -262,4 +262,30 @@ namespace adbfsm::data
         auto read_lock = strt::shared_lock{ m_mutex };
         return not m_orphan_pages.empty();
     }
+
+    void Cache::invalidate()
+    {
+        auto lock = strt::exclusive_lock{ m_mutex };
+        m_pages.clear();
+        m_lru.clear();
+        m_orphan_pages.clear();
+    }
+
+    void Cache::set_page_size(usize new_page_size)
+    {
+        auto lock   = strt::exclusive_lock{ m_mutex };
+        m_page_size = new_page_size;
+        m_pages.clear();
+        m_lru.clear();
+        m_orphan_pages.clear();
+    }
+
+    void Cache::set_max_pages(usize new_max_pages)
+    {
+        auto lock   = strt::exclusive_lock{ m_mutex };
+        m_max_pages = new_max_pages;
+        m_pages.clear();
+        m_lru.clear();
+        m_orphan_pages.clear();
+    }
 }
