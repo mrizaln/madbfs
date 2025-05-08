@@ -1,6 +1,6 @@
 #include "adbfsm/tree/node.hpp"
 #include "adbfsm/data/connection.hpp"
-#include "adbfsm/util.hpp"
+#include "adbfsm/util/overload.hpp"
 
 #include <fcntl.h>
 
@@ -306,7 +306,7 @@ namespace adbfsm::tree
                 return Unexpect{ Errc::bad_file_descriptor };
             }
             auto read_lock = strt::shared_lock{ m_mutex_file };
-            return context.cache.read(id(), out, offset, [&context](Span<std::byte> out, off_t offset) {
+            return context.cache.read(id(), out, offset, [&context](Span<char> out, off_t offset) {
                 auto out_char = Span{ reinterpret_cast<char*>(out.data()), out.size() };
                 return context.connection.read(context.path, out_char, offset);
             });
@@ -340,7 +340,7 @@ namespace adbfsm::tree
             file.set_dirty(false);
             auto write_lock = strt::exclusive_lock{ m_mutex_file };
             auto filesize   = static_cast<usize>(stat()->get().size);
-            return context.cache.flush(id(), filesize, [&](Span<const std::byte> in, off_t offset) {
+            return context.cache.flush(id(), filesize, [&](Span<const char> in, off_t offset) {
                 auto in_char = Str{ reinterpret_cast<const char*>(in.data()), in.size() };
                 return context.connection.write(context.path, in_char, offset);
             });
@@ -359,7 +359,7 @@ namespace adbfsm::tree
             file.set_dirty(false);
             auto write_lock = strt::exclusive_lock{ m_mutex_file };
             auto filesize   = static_cast<usize>(stat()->get().size);
-            return context.cache.flush(id(), filesize, [&](Span<const std::byte> in, off_t offset) {
+            return context.cache.flush(id(), filesize, [&](Span<const char> in, off_t offset) {
                 auto in_char = Str{ reinterpret_cast<const char*>(in.data()), in.size() };
                 return context.connection.write(context.path, in_char, offset);
             });

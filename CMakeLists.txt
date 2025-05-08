@@ -14,6 +14,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(fmt REQUIRED)
 find_package(libfuse REQUIRED)
+find_package(nlohmann_json REQUIRED)
 find_package(rapidhash REQUIRED)
 find_package(reproc++ REQUIRED)
 find_package(spdlog REQUIRED)
@@ -25,7 +26,9 @@ target_sources(
     adbfsm-lib
     PRIVATE
         source/adbfsm.cpp
+        source/data/cache.cpp
         source/data/connection.cpp
+        source/data/ipc.cpp
         source/path/path.cpp
         source/tree/file_tree.cpp
         source/tree/node.cpp
@@ -34,12 +37,14 @@ target_sources(
 target_link_libraries(
     adbfsm-lib
     PUBLIC
+        Sockpp::sockpp
         fmt::fmt
         libfuse::libfuse
+        nlohmann_json::nlohmann_json
         rapidhash::rapidhash
         reproc::reproc
+        shared_futex
         spdlog::spdlog
-        fetch::shared_futex
 )
 target_include_directories(adbfsm-lib PUBLIC include)
 
