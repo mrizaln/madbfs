@@ -1,4 +1,5 @@
 #include "adbfsm/data/cache.hpp"
+#include "adbfsm/log.hpp"
 
 namespace adbfsm::data
 {
@@ -109,7 +110,6 @@ namespace adbfsm::data
 
                 auto res = entry->second.page.write_fn(0, [&] -> Expect<Span<const char>> {
                     write_lock.unlock();    // lock must still be held before page lock
-
                     return on_miss(data, static_cast<off_t>(index * m_page_size)).transform([&](usize len) {
                         return Span{ data.data(), len };
                     });
@@ -269,6 +269,7 @@ namespace adbfsm::data
         m_pages.clear();
         m_lru.clear();
         m_orphan_pages.clear();
+        log_i({ "{}: cache invalidated" }, __func__);
     }
 
     void Cache::set_page_size(usize new_page_size)
@@ -278,6 +279,7 @@ namespace adbfsm::data
         m_pages.clear();
         m_lru.clear();
         m_orphan_pages.clear();
+        log_i({ "{}: page size changed to: {}" }, __func__, new_page_size);
     }
 
     void Cache::set_max_pages(usize new_max_pages)
@@ -287,5 +289,6 @@ namespace adbfsm::data
         m_pages.clear();
         m_lru.clear();
         m_orphan_pages.clear();
+        log_i({ "{}: max pages can be stored changed to: {}" }, __func__, new_max_pages);
     }
 }

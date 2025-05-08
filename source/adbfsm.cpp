@@ -76,17 +76,59 @@ namespace adbfsm
     {
         namespace ipc = data::ipc;
 
-        auto overload = util::Overload{
-            [&](ipc::Help&) { /* TODO: implement */ },
-            [&](ipc::InvalidateCache&) { /* TODO: implement */ },
-            [&](ipc::SetPageSize&) { /* TODO: implement */ },
-            [&](ipc::GetPageSize&) { /* TODO: implement */ },
-            [&](ipc::SetCacheSize&) { /* TODO: implement */ },
-            [&](ipc::GetCacheSize&) { /* TODO: implement */ },
-        };
-        std::visit(overload, op);
+        constexpr usize lowest_page_size  = 64 * 1024;
+        constexpr usize highest_page_size = 4 * 1024 * 1024;
+        constexpr usize lowest_max_pages  = 128;
 
-        return "hello";
+        auto overload = util::Overload{
+            [&](ipc::Help) {
+                return nlohmann::json("not implemented yet :P");    // TODO: implement
+            },
+            [&](ipc::InvalidateCache) {
+                m_cache->invalidate();
+                return nlohmann::json{};
+            },
+            [&](ipc::SetPageSize size) {
+                auto old_size = m_cache->page_size();
+                auto new_size = std::bit_ceil(size.kib * 1024);
+                new_size      = std::clamp(new_size, lowest_page_size, highest_page_size);
+                m_cache->set_page_size(new_size);
+
+                auto old_max = m_cache->max_pages();
+                auto new_max = std::bit_ceil(old_max * old_size / new_size);
+                new_max      = std::max(new_max, lowest_max_pages);
+                m_cache->set_max_pages(new_max);
+
+                auto json              = nlohmann::json{};
+                json["old_page_size"]  = old_size / 1024;
+                json["old_cache_size"] = old_max * old_size / 1024 / 1024;
+                json["new_page_size"]  = new_size / 1024;
+                json["new_cache_size"] = new_max * new_size / 1024 / 1024;
+                return json;
+            },
+            [&](ipc::GetPageSize) {
+                auto size = m_cache->page_size();
+                return nlohmann::json(size);
+            },
+            [&](ipc::SetCacheSize size) {
+                auto page    = m_cache->page_size();
+                auto old_max = m_cache->max_pages();
+                auto new_max = std::bit_ceil(size.mib * 1024 * 1024 / page);
+                new_max      = std::max(new_max, lowest_max_pages);
+                m_cache->set_max_pages(new_max);
+
+                auto json              = nlohmann::json{};
+                json["old_cache_size"] = old_max * page / 1024 / 1024;
+                json["new_cache_size"] = new_max * page / 1024 / 1024;
+                return json;
+            },
+            [&](ipc::GetCacheSize) {
+                auto page      = m_cache->page_size();
+                auto num_pages = m_cache->max_pages();
+                return nlohmann::json(page * num_pages / 1024 / 1024);
+            },
+        };
+        return std::visit(overload, op);
     }
 
     void* init(fuse_conn_info*, fuse_config*)
