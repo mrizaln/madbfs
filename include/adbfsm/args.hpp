@@ -14,14 +14,13 @@ namespace adbfsm::args
     // NOTE: don't set default value here for string, set them in the parse() function
     struct AdbfsmOpt
     {
-        const char* serial    = nullptr;
-        const char* log_level = nullptr;
-        const char* log_file  = nullptr;
-        int         cachesize = 512;    // in MiB
-        int         pagesize  = 128;    // in KiB
-        int         rescan    = false;
-        int         help      = false;
-        int         full_help = false;
+        const char* serial     = nullptr;
+        const char* log_level  = nullptr;
+        const char* log_file   = nullptr;
+        int         cache_size = 512;    // in MiB
+        int         page_size  = 128;    // in KiB
+        int         help       = false;
+        int         full_help  = false;
     };
 
     struct ParsedOpt
@@ -31,7 +30,6 @@ namespace adbfsm::args
         String                    log_file;
         usize                     cachesize;
         usize                     pagesize;
-        bool                      rescan;
     };
 
     struct ParseResult
@@ -55,14 +53,14 @@ namespace adbfsm::args
 
     static constexpr auto adbfsm_opt_spec = Array<fuse_opt, 9>{ {
         // clang-format off
-        { "--serial=%s",    offsetof(AdbfsmOpt, serial),    true },
-        { "--loglevel=%s",  offsetof(AdbfsmOpt, log_level), true },
-        { "--logfile=%s",   offsetof(AdbfsmOpt, log_file),  true },
-        { "--cachesize=%d", offsetof(AdbfsmOpt, cachesize), true },
-        { "--pagesize=%d",  offsetof(AdbfsmOpt, pagesize),  true },
-        { "-h",             offsetof(AdbfsmOpt, help),      true },
-        { "--help",         offsetof(AdbfsmOpt, help),      true },
-        { "--full-help",    offsetof(AdbfsmOpt, full_help), true },
+        { "--serial=%s",     offsetof(AdbfsmOpt, serial),     true },
+        { "--log-level=%s",  offsetof(AdbfsmOpt, log_level),  true },
+        { "--log-file=%s",   offsetof(AdbfsmOpt, log_file),   true },
+        { "--cache-size=%d", offsetof(AdbfsmOpt, cache_size), true },
+        { "--page-size=%d",  offsetof(AdbfsmOpt, page_size),  true },
+        { "-h",              offsetof(AdbfsmOpt, help),       true },
+        { "--help",          offsetof(AdbfsmOpt, help),       true },
+        { "--full-help",     offsetof(AdbfsmOpt, full_help),  true },
         // clang-format on
         FUSE_OPT_END,
     } };
@@ -74,20 +72,21 @@ namespace adbfsm::args
         fmt::print(
             out,
             "Options for adbfsm:\n"
-            "    --serial=<s>        serial number of the device to mount\n"
-            "                          (default: <auto> [detection is similar to adb])\n"
-            "    --loglevel=<l>      log level to use (default: warn)\n"
-            "    --logfile=<f>       log file to write to (default: - for stdout)\n"
-            "    --cachesize=<n>     maximum size of the cache in MiB\n"
-            "                          (default: 512)\n"
-            "                          (minimum: 128)\n"
-            "                          (value will be rounded to the next power of 2)\n"
-            "    --pagesize=<n>      page size for cache & transfer in KiB\n"
-            "                          (default: 128)\n"
-            "                          (minimum: 64)\n"
-            "                          (value will be rounded to the next power of 2)\n"
-            "    -h   --help         show this help message\n"
-            "    --full-help         show full help message (includes libfuse options)\n"
+            "    --serial=<s>         serial number of the device to mount\n"
+            "                           (you can omit this [detection is similar to adb])\n"
+            "                           (will prompt if more than one device exists)\n"
+            "    --log-level=<l>      log level to use (default: warn)\n"
+            "    --log-file=<f>       log file to write to (default: - for stdout)\n"
+            "    --cache-size=<n>     maximum size of the cache in MiB\n"
+            "                           (default: 512)\n"
+            "                           (minimum: 128)\n"
+            "                           (value will be rounded to the next power of 2)\n"
+            "    --page-size=<n>      page size for cache & transfer in KiB\n"
+            "                           (default: 128)\n"
+            "                           (minimum: 64)\n"
+            "                           (value will be rounded to the next power of 2)\n"
+            "    -h   --help          show this help message\n"
+            "    --full-help          show full help message (includes libfuse options)\n"
         );
     };
 
@@ -229,9 +228,8 @@ namespace adbfsm::args
                 .serial    = adbfsm_opt.serial,
                 .log_level = log_level.value(),
                 .log_file  = adbfsm_opt.log_file,
-                .cachesize = std::bit_ceil(std::max(static_cast<usize>(adbfsm_opt.cachesize), 128uz)),
-                .pagesize  = std::bit_ceil(std::max(static_cast<usize>(adbfsm_opt.pagesize), 64uz)),
-                .rescan    = static_cast<bool>(adbfsm_opt.rescan),
+                .cachesize = std::bit_ceil(std::max(static_cast<usize>(adbfsm_opt.cache_size), 128uz)),
+                .pagesize  = std::bit_ceil(std::max(static_cast<usize>(adbfsm_opt.page_size), 64uz)),
             },
             .args = args,
         };
