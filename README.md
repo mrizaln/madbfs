@@ -54,21 +54,21 @@ The help message can help you start using this program
 usage: adbfsm [options] <mountpoint>
 
 Options for adbfsm:
-    --serial=<s>        serial number of the device to mount
-                          (default: <auto> [detection is similar to adb])
-    --loglevel=<l>      log level to use (default: warn)
-    --logfile=<f>       log file to write to (default: - for stdout)
-    --cachesize=<n>     maximum size of the cache in MiB
-                          (default: 512)
-                          (minimum: 128)
-                          (value will be rounded to the next power of 2)
-    --pagesize=<n>      page size for cache & transfer in KiB
-                          (default: 128)
-                          (minimum: 64)
-                          (value will be rounded to the next power of 2)
-    -h   --help         show this help message
-    --full-help         show full help message (includes libfuse options)
-
+    --serial=<s>         serial number of the device to mount
+                           (you can omit this [detection is similar to adb])
+                           (will prompt if more than one device exists)
+    --log-level=<l>      log level to use (default: warn)
+    --log-file=<f>       log file to write to (default: - for stdout)
+    --cache-size=<n>     maximum size of the cache in MiB
+                           (default: 512)
+                           (minimum: 128)
+                           (value will be rounded to the next power of 2)
+    --page-size=<n>      page size for cache & transfer in KiB
+                           (default: 128)
+                           (minimum: 64)
+                           (value will be rounded to the next power of 2)
+    -h   --help          show this help message
+    --full-help          show full help message (includes libfuse options)
 ```
 
 ### Selecting device
@@ -95,27 +95,27 @@ $ ANDROID_SERIAL=068832516O101622 ./adbfsm
 
 ### Cache size
 
-`adbfsm` caches all the read/write operations on the files on the device. This cache is stored in memory. You can control the size of this cache using `--cachesize` option (in MiB). The default value is `512` (512MiB).
+`adbfsm` caches all the read/write operations on the files on the device. This cache is stored in memory. You can control the size of this cache using `--cache-size` option (in MiB). The default value is `512` (512MiB).
 
 ```sh
-$ ./adbfsm --cachesize=512<mountpoint>    # using 512MiB of cache
+$ ./adbfsm --cache-size=512<mountpoint>    # using 512MiB of cache
 ```
 
 ### Page size
 
-In the cache, each file is divided into pages. The `--pagesize` option dictates the size of this page (in KiB). Page size also dictates the size of the buffer used to read/write into the file on the device. You can adjust this value according to your use. From my testing, `pagesize` of value `128` (means 128KiB) works well when using USB cable for the `adb` connection. You may want to decrease or increase this value for your use case. The default value is `128` (128KiB).
+In the cache, each file is divided into pages. The `--page-size` option dictates the size of this page (in KiB). Page size also dictates the size of the buffer used to read/write into the file on the device. You can adjust this value according to your use. From my testing, `page-size` of value `128` (means 128KiB) works well when using USB cable for the `adb` connection. You may want to decrease or increase this value for your use case. The default value is `128` (128KiB).
 
 ```sh
-$ ./adbfsm --pagesize=128<mountpoint>    # using 128KiB of page size
+$ ./adbfsm --page-size=128<mountpoint>    # using 128KiB of page size
 
 ```
 
 ### Logging
 
-The default log file is stdout (which goes to nowhere when not run in foreground mode). You can manually set the log file using `--logfile` option and set the log level using `--loglevel`.
+The default log file is stdout (which goes to nowhere when not run in foreground mode). You can manually set the log file using `--log-file` option and set the log level using `--log-level`.
 
 ```sh
-$ ./adbfsm --logfile=adbfsm.log --loglevel=debug <mountpoint>
+$ ./adbfsm --log-file=adbfsm.log --log-level=debug <mountpoint>
 ```
 
 ### Debug mode
@@ -123,15 +123,15 @@ $ ./adbfsm --logfile=adbfsm.log --loglevel=debug <mountpoint>
 As part of debugging functionality `libfuse` has provided debug mode through `-d` flag. You can use this to monitor `adbfsm` operations (if you don't want to use log file or want to see the log in real-time). If the debugging information is too verbose, you can use `-f` instead to make adbfsm run in foreground mode without printing `fuse` debug information.
 
 ```sh
-$ ./adbfsm --logfile=- --loglevel=debug -d <mountpoint>                     # this will print the libfuse debug messages and adbfsm log messages
-$ ./adbfsm --logfile=- --loglevel=debug -d <mountpoint> 2> /dev/null        # this will print only adbfsm log messages since libfuse debug messages are printed to stderr
+$ ./adbfsm --log-file=- --log-level=debug -d <mountpoint>                     # this will print the libfuse debug messages and adbfsm log messages
+$ ./adbfsm --log-file=- --log-level=debug -d <mountpoint> 2> /dev/null        # this will print only adbfsm log messages since libfuse debug messages are printed to stderr
 ```
 
 ## TODO
 
 - [ ] Automatic unmount on device disconnect.
-- [ ] Periodic cache invalidation. Current implementation only look at the size of current cache and only invalidate oldest entry when newest entry is added and the size exceed the `cachesize` limit.
-- [ ] IPC to talk to the `adbfsm` to control the filesystem parameters like invalidation, timeout, cache size, etc.
+- [ ] Periodic cache invalidation. Current implementation only look at the size of current cache and only invalidate oldest entry when newest entry is added and the size exceed the `cache-size` limit.
+- [x] IPC to talk to the `adbfsm` to control the filesystem parameters like invalidation, timeout, cache size, etc.
 - [x] Implement the filesystem as actual tree for caching the stat.
 - [x] Implement file read and write operation caching in memory.
 - [ ] Implement versioning on each node that expires every certain period of time. When a node expires it needs to query the files from the device again.
