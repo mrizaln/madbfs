@@ -163,7 +163,7 @@ namespace mock
         Expect<void>  truncate(path::Path, off_t) override { return {}; }
         Expect<u64>   open(path::Path, int) override { return {}; }
         Expect<usize> read(path::Path, Span<char>, off_t) override { return {}; }
-        Expect<usize> write(path::Path, Str, off_t) override { return {}; }
+        Expect<usize> write(path::Path, Span<const char>, off_t) override { return {}; }
         Expect<void>  flush(path::Path) override { return {}; }
         Expect<void>  release(path::Path) override { return {}; }
 

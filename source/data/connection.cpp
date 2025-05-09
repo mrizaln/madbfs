@@ -141,7 +141,11 @@ namespace
      * @return The number of bytes written to the command's stdin.
      */
     template <std::invocable<adbfsm::Span<const adbfsm::u8>> Out>
-    adbfsm::Expect<adbfsm::usize> exec_fn(adbfsm::Span<const adbfsm::Str> cmd, adbfsm::Str in, Out outfn)
+    adbfsm::Expect<adbfsm::usize> exec_fn(
+        adbfsm::Span<const adbfsm::Str> cmd,
+        adbfsm::Span<const char>        in,
+        Out                             outfn
+    )
     {
         // log_d({ "exec command: {::?}" }, cmd);    // quite heavy to log :D
 
@@ -521,7 +525,7 @@ namespace adbfsm::data
         return exec_fn(cmd, "", outfn).transform([&](usize) { return read_count; });
     }
 
-    Expect<usize> Connection::write(path::Path path, Str in, off_t offset)
+    Expect<usize> Connection::write(path::Path path, Span<const char> in, off_t offset)
     {
         const auto seek = fmt::format("seek={}", offset);
         const auto off  = fmt::format("of=\"{}\"", path.fullpath());

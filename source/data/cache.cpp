@@ -108,6 +108,7 @@ namespace adbfsm::data
                 thread_local static auto data = Vec<char>{};
                 data.resize(m_page_size);
 
+                // lock page then write to it
                 auto res = entry->second.page.write_fn(0, [&] -> Expect<Span<const char>> {
                     write_lock.unlock();    // lock must still be held before page lock
                     return on_miss(data, static_cast<off_t>(index * m_page_size)).transform([&](usize len) {
@@ -178,10 +179,7 @@ namespace adbfsm::data
             }
 
             auto write      = std::min(m_page_size - local_offset, in.size() - total_written);
-            auto write_span = Span{
-                reinterpret_cast<const char*>(in.data()) + total_written,
-                write,
-            };
+            auto write_span = Span{ in.data() + total_written, write };
 
             if (page == m_pages.end()) {
                 m_lru.emplace_front(key);

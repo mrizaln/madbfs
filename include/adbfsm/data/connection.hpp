@@ -31,12 +31,12 @@ namespace adbfsm::data
         virtual Expect<void> mv(path::Path from, path::Path to)  = 0;
 
         // file operations
-        virtual Expect<void>  truncate(path::Path path, off_t size)               = 0;
-        virtual Expect<u64>   open(path::Path path, int flags)                    = 0;
-        virtual Expect<usize> read(path::Path path, Span<char> out, off_t offset) = 0;
-        virtual Expect<usize> write(path::Path path, Str in, off_t offset)        = 0;
-        virtual Expect<void>  flush(path::Path path)                              = 0;
-        virtual Expect<void>  release(path::Path path)                            = 0;
+        virtual Expect<void>  truncate(path::Path path, off_t size)                     = 0;
+        virtual Expect<u64>   open(path::Path path, int flags)                          = 0;
+        virtual Expect<usize> read(path::Path path, Span<char> out, off_t offset)       = 0;
+        virtual Expect<usize> write(path::Path path, Span<const char> in, off_t offset) = 0;
+        virtual Expect<void>  flush(path::Path path)                                    = 0;
+        virtual Expect<void>  release(path::Path path)                                  = 0;
 
         // directory operation (adding file) or file operation (update time)
         virtual Expect<void> touch(path::Path path, bool create) = 0;
@@ -140,7 +140,7 @@ namespace adbfsm::data
          * @param in Buffer to write from.
          * @param offset Offset to write to.
          */
-        Expect<usize> write(path::Path path, Str in, off_t offset) override;
+        Expect<usize> write(path::Path path, Span<const char> in, off_t offset) override;
 
         /**
          * @brief Flush a file on the device.
