@@ -14,55 +14,55 @@ namespace adbfsm::args
     // NOTE: don't set default value here for string, set them in the parse() function
     struct AdbfsmOpt
     {
-        const char* m_serial    = nullptr;
-        const char* m_log_level = nullptr;
-        const char* m_log_file  = nullptr;
-        int         m_cachesize = 512;    // in MiB
-        int         m_pagesize  = 128;    // in KiB
-        int         m_rescan    = false;
-        int         m_help      = false;
-        int         m_full_help = false;
+        const char* serial    = nullptr;
+        const char* log_level = nullptr;
+        const char* log_file  = nullptr;
+        int         cachesize = 512;    // in MiB
+        int         pagesize  = 128;    // in KiB
+        int         rescan    = false;
+        int         help      = false;
+        int         full_help = false;
     };
 
     struct ParsedOpt
     {
-        String                    m_serial;
-        spdlog::level::level_enum m_log_level;
-        String                    m_log_file;
-        usize                     m_cachesize;
-        usize                     m_pagesize;
-        bool                      m_rescan;
+        String                    serial;
+        spdlog::level::level_enum log_level;
+        String                    log_file;
+        usize                     cachesize;
+        usize                     pagesize;
+        bool                      rescan;
     };
 
     struct ParseResult
     {
         // clang-format off
-        struct Opt  { ParsedOpt m_opt; fuse_args m_fuse_args; };
-        struct Exit { int m_status; };
+        struct Opt  { ParsedOpt opt; fuse_args args; };
+        struct Exit { int status; };
 
-        ParseResult(Opt opt)    : m_result{ std::move(opt) } {}
-        ParseResult(int status) : m_result{ Exit{ status } } {}
+        ParseResult(Opt opt)    : result{ std::move(opt) } {}
+        ParseResult(int status) : result{ Exit{ status } } {}
 
-        bool is_opt()  const { return std::holds_alternative<Opt>(m_result);  }
-        bool is_exit() const { return std::holds_alternative<Exit>(m_result); }
+        bool is_opt()  const { return std::holds_alternative<Opt>(result);  }
+        bool is_exit() const { return std::holds_alternative<Exit>(result); }
 
-        Opt&&  opt()  && { return std::move(std::get<Opt>(m_result));  }
-        Exit&& exit() && { return std::move(std::get<Exit>(m_result)); }
+        Opt&&  opt()  && { return std::move(std::get<Opt>(result));  }
+        Exit&& exit() && { return std::move(std::get<Exit>(result)); }
 
-        Var<Opt, Exit> m_result;
+        Var<Opt, Exit> result;
         // clang-format on
     };
 
     static constexpr auto adbfsm_opt_spec = Array<fuse_opt, 9>{ {
         // clang-format off
-        { "--serial=%s",    offsetof(AdbfsmOpt, m_serial),    true },
-        { "--loglevel=%s",  offsetof(AdbfsmOpt, m_log_level), true },
-        { "--logfile=%s",   offsetof(AdbfsmOpt, m_log_file),  true },
-        { "--cachesize=%d", offsetof(AdbfsmOpt, m_cachesize), true },
-        { "--pagesize=%d",  offsetof(AdbfsmOpt, m_pagesize),  true },
-        { "-h",             offsetof(AdbfsmOpt, m_help),      true },
-        { "--help",         offsetof(AdbfsmOpt, m_help),      true },
-        { "--full-help",    offsetof(AdbfsmOpt, m_full_help), true },
+        { "--serial=%s",    offsetof(AdbfsmOpt, serial),    true },
+        { "--loglevel=%s",  offsetof(AdbfsmOpt, log_level), true },
+        { "--logfile=%s",   offsetof(AdbfsmOpt, log_file),  true },
+        { "--cachesize=%d", offsetof(AdbfsmOpt, cachesize), true },
+        { "--pagesize=%d",  offsetof(AdbfsmOpt, pagesize),  true },
+        { "-h",             offsetof(AdbfsmOpt, help),      true },
+        { "--help",         offsetof(AdbfsmOpt, help),      true },
+        { "--full-help",    offsetof(AdbfsmOpt, full_help), true },
         // clang-format on
         FUSE_OPT_END,
     } };
@@ -175,9 +175,9 @@ namespace adbfsm::args
 
         // NOTE: these strings must be malloc-ed since fuse_opt_parse will free them
         auto adbfsm_opt = AdbfsmOpt{
-            .m_serial    = get_serial_env(),
-            .m_log_level = ::strdup("warn"),
-            .m_log_file  = ::strdup("-"),
+            .serial    = get_serial_env(),
+            .log_level = ::strdup("warn"),
+            .log_file  = ::strdup("-"),
         };
 
         if (fuse_opt_parse(&args, &adbfsm_opt, adbfsm_opt_spec.data(), NULL) != 0) {
@@ -187,11 +187,11 @@ namespace adbfsm::args
             return 1;
         }
 
-        if (adbfsm_opt.m_help) {
+        if (adbfsm_opt.help) {
             show_help(argv[0], false);
             ::fuse_opt_free_args(&args);
             return 0;
-        } else if (adbfsm_opt.m_full_help) {
+        } else if (adbfsm_opt.full_help) {
             show_help(argv[0], false);
             fmt::println(stdout, "\nOptions for libfuse:");
             ::fuse_cmdline_help();
@@ -200,40 +200,40 @@ namespace adbfsm::args
             return 0;
         }
 
-        auto log_level = parse_level_str(adbfsm_opt.m_log_level);
+        auto log_level = parse_level_str(adbfsm_opt.log_level);
         if (not log_level.has_value()) {
-            fmt::println(stderr, "error: invalid log level '{}'", adbfsm_opt.m_log_level);
+            fmt::println(stderr, "error: invalid log level '{}'", adbfsm_opt.log_level);
             fmt::println(stderr, "valid log levels: trace, debug, info, warn, error, critical, off");
             ::fuse_opt_free_args(&args);
             return 1;
         }
 
-        if (adbfsm_opt.m_serial == nullptr) {
+        if (adbfsm_opt.serial == nullptr) {
             auto serial = get_serial();
             if (serial.empty()) {
                 fmt::println(stderr, "error: no device found, make sure your device is connected");
                 ::fuse_opt_free_args(&args);
                 return 1;
             }
-            adbfsm_opt.m_serial = ::strdup(serial.c_str());
-        } else if (auto status = check_serial(adbfsm_opt.m_serial); status != data::DeviceStatus::Device) {
+            adbfsm_opt.serial = ::strdup(serial.c_str());
+        } else if (auto status = check_serial(adbfsm_opt.serial); status != data::DeviceStatus::Device) {
             fmt::println(
-                stderr, "error: serial '{} 'is not valid ({})", adbfsm_opt.m_serial, to_string(status)
+                stderr, "error: serial '{} 'is not valid ({})", adbfsm_opt.serial, to_string(status)
             );
             ::fuse_opt_free_args(&args);
             return 1;
         }
 
         return ParseResult::Opt{
-            .m_opt = {
-                .m_serial    = adbfsm_opt.m_serial,
-                .m_log_level = log_level.value(),
-                .m_log_file  = adbfsm_opt.m_log_file,
-                .m_cachesize = std::bit_ceil(std::max(static_cast<usize>(adbfsm_opt.m_cachesize), 128uz)),
-                .m_pagesize  = std::bit_ceil(std::max(static_cast<usize>(adbfsm_opt.m_pagesize), 64uz)),
-                .m_rescan    = static_cast<bool>(adbfsm_opt.m_rescan),
+            .opt = {
+                .serial    = adbfsm_opt.serial,
+                .log_level = log_level.value(),
+                .log_file  = adbfsm_opt.log_file,
+                .cachesize = std::bit_ceil(std::max(static_cast<usize>(adbfsm_opt.cachesize), 128uz)),
+                .pagesize  = std::bit_ceil(std::max(static_cast<usize>(adbfsm_opt.pagesize), 64uz)),
+                .rescan    = static_cast<bool>(adbfsm_opt.rescan),
             },
-            .m_fuse_args = args,
+            .args = args,
         };
     }
 }

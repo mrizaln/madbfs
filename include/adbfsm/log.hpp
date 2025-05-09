@@ -17,8 +17,8 @@ namespace adbfsm::log
     template <typename... Args>
     struct FmtWithLoc
     {
-        fmt::format_string<Args...> m_fmt;
-        spdlog::source_loc          m_loc;
+        fmt::format_string<Args...> fmt;
+        spdlog::source_loc          loc;
 
         consteval static spdlog::source_loc to_spdlog_source_loc(const std::source_location& loc)
         {
@@ -27,14 +27,14 @@ namespace adbfsm::log
 
         template <typename Str>
         consteval FmtWithLoc(Str&& fmt, const std::source_location& loc = std::source_location::current())
-            : m_fmt{ std::forward<Str>(fmt) }
-            , m_loc{ to_spdlog_source_loc(loc) }
+            : fmt{ std::forward<Str>(fmt) }
+            , loc{ to_spdlog_source_loc(loc) }
         {
         }
 
         FmtWithLoc(FmtWithLoc&& other)
-            : m_fmt{ std::move(other.m_fmt) }
-            , m_loc{ std::move(other.m_loc) }
+            : fmt{ std::move(other.fmt) }
+            , loc{ std::move(other.loc) }
         {
         }
 
@@ -82,7 +82,7 @@ namespace adbfsm::log
     template <typename... Args>
     inline void log(spdlog::level::level_enum level, FmtWithLoc<Args...> fmt, Args&&... args)
     {
-        spdlog::log(fmt.m_loc, level, fmt.m_fmt, std::forward<Args>(args)...);
+        spdlog::log(fmt.loc, level, fmt.fmt, std::forward<Args>(args)...);
     }
 }
 

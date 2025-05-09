@@ -71,27 +71,27 @@ int main(int argc, char** argv)
 
     auto maybe_opt = adbfsm::args::parse(argc, argv);
     if (maybe_opt.is_exit()) {
-        return std::move(maybe_opt).exit().m_status;
+        return std::move(maybe_opt).exit().status;
     }
     auto [opt, args] = std::move(maybe_opt).opt();
 
-    adbfsm::log::init(opt.m_log_level, opt.m_log_file);
+    adbfsm::log::init(opt.log_level, opt.log_file);
     adbfsm::log_i(
         { "mount device '{}' with cache size {}MiB and page size {}kiB" },
-        opt.m_serial,
-        opt.m_cachesize,
-        opt.m_pagesize
+        opt.serial,
+        opt.cachesize,
+        opt.pagesize
     );
-    if (opt.m_log_file != "-") {
+    if (opt.log_file != "-") {
         fmt::println(
             "[adbfsm] mount device '{}' with cache size {}MiB and page size {}kiB",
-            opt.m_serial,
-            opt.m_cachesize,
-            opt.m_pagesize
+            opt.serial,
+            opt.cachesize,
+            opt.pagesize
         );
     }
 
-    if (::setenv("ANDROID_SERIAL", opt.m_serial.c_str(), 1) < 0) {
+    if (::setenv("ANDROID_SERIAL", opt.serial.c_str(), 1) < 0) {
         fmt::println(stderr, "error: failed to set env variable 'ANDROID_SERIAL' ({})", strerror(errno));
         return 1;
     }

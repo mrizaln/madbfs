@@ -12,12 +12,12 @@ namespace adbfsm::util
         using Variant = Var<char, Span<const char>>;
 
         constexpr SplitDelim(Str delim)
-            : m_variant{ delim }
+            : variant{ delim }
         {
         }
 
         constexpr SplitDelim(char delim)
-            : m_variant{ delim }
+            : variant{ delim }
         {
         }
 
@@ -31,10 +31,10 @@ namespace adbfsm::util
                     return sr::find(value, ch) != value.end();
                 }
             };
-            return std::visit(visitor, m_variant);
+            return std::visit(visitor, variant);
         }
 
-        Variant m_variant;
+        Variant variant;
     };
 
     class StringSplitter
@@ -101,8 +101,8 @@ namespace adbfsm::util
     template <usize N>
     struct SplitResult
     {
-        std::array<Str, N> m_result;
-        Str                m_remainder;
+        std::array<Str, N> result;
+        Str                remainder;
     };
 
     inline Vec<Str> split(Str str, SplitDelim delim)

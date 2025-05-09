@@ -208,10 +208,10 @@ namespace adbfsm::path::inline literals
         template <usize N>
         struct FixedStr
         {
-            char m_data[N]{};
+            char data[N]{};
             constexpr FixedStr() = default;
-            constexpr FixedStr(const char (&str)[N]) { std::ranges::copy_n(str, N, m_data); }
-            constexpr Str str() const { return { m_data, N - 1 }; }
+            constexpr FixedStr(const char (&str)[N]) { std::ranges::copy_n(str, N, data); }
+            constexpr Str str() const { return { data, N - 1 }; }
         };
     }
 

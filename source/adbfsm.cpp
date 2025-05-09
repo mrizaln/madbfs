@@ -136,8 +136,8 @@ namespace adbfsm
         auto* args = static_cast<args::ParsedOpt*>(::fuse_get_context()->private_data);
         assert(args != nullptr and "data should not be empty!");
 
-        auto cache_size = args->m_cachesize * 1024 * 1024;
-        auto page_size  = args->m_pagesize * 1024;
+        auto cache_size = args->cachesize * 1024 * 1024;
+        auto page_size  = args->pagesize * 1024;
         auto max_pages  = cache_size / page_size;
 
         return new Adbfsm{
@@ -176,13 +176,13 @@ namespace adbfsm
         std::memset(stbuf, 0, sizeof(struct stat));
 
         stbuf->st_ino   = static_cast<ino_t>(stat.id.inner());
-        stbuf->st_mode  = static_cast<mode_t>(stat.mode);
-        stbuf->st_nlink = static_cast<nlink_t>(stat.links);
-        stbuf->st_uid   = static_cast<uid_t>(stat.uid);
-        stbuf->st_gid   = static_cast<gid_t>(stat.gid);
+        stbuf->st_mode  = stat.mode;
+        stbuf->st_nlink = stat.links;
+        stbuf->st_uid   = stat.uid;
+        stbuf->st_gid   = stat.gid;
 
         switch (stbuf->st_mode & S_IFMT) {
-        case S_IFBLK:    // TODO: implement parse_file_stat but for block and character devices
+        case S_IFBLK:
         case S_IFCHR: stbuf->st_size = 0; break;
         case S_IFREG: stbuf->st_size = stat.size; break;
         case S_IFSOCK:

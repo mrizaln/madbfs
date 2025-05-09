@@ -384,6 +384,7 @@ namespace adbfsm::data
     using namespace std::string_view_literals;
     using namespace std::string_literals;
 
+    // TODO: use `find -maxdepth 1 -exec stat -t {} +` instead
     Expect<Gen<ParsedStat>> Connection::statdir(path::Path path)
     {
         const auto qpath = quoted(path);
@@ -409,6 +410,7 @@ namespace adbfsm::data
         return generator(std::move(out).value());
     }
 
+    // TODO: use `stat` command instead
     Expect<ParsedStat> Connection::stat(path::Path path)
     {
         const auto qpath = quoted(path);
