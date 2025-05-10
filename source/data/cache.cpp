@@ -3,7 +3,6 @@
 
 namespace adbfsm::data
 {
-    // page size is not stored to minimize the memory usage
     Page::Page(usize page_size)
         : m_data{ std::make_unique<char[]>(page_size) }
         , m_size{ 0 }

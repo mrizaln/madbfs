@@ -214,8 +214,6 @@ namespace adbfsm::data
             }
         }
 
-        log_d({ "{}: shutdown" }, __func__);
-
         m_threadpool->stop(true);
     }
 }
