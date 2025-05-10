@@ -120,7 +120,6 @@ namespace adbfsm::tree
         bool            m_has_readdir = false;
     };
 
-    // TODO: add a way to check if the link is broken
     class Link
     {
     public:
@@ -198,7 +197,7 @@ namespace adbfsm::tree
         Str           printable_type() const;
         path::PathBuf build_path() const;
 
-        void refresh_stat() { m_stat.mtime = Clock::to_time_t(Clock::now()); }
+        void refresh_stat();
 
         /**
          * @brief Check whether node is synced with device.

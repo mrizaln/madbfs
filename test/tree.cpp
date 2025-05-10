@@ -147,11 +147,12 @@ namespace mock
     using namespace adbfsm;
     using namespace adbfsm::data;
 
-    class DummyConnection : public IConnection
+    class DummyConnection final : public IConnection
     {
     public:
         Expect<Gen<ParsedStat>> statdir(path::Path) override { return adbfsm::Unexpect{ {} }; }
-        Expect<ParsedStat>      stat(path::Path) override { return ParsedStat{}; }
+        Expect<Stat>            stat(path::Path) override { return Stat{}; }
+        Expect<path::PathBuf>   readlink(path::Path path) override { return path.into_buf(); };
 
         // directory operations
         Expect<void> mkdir(path::Path) override { return {}; }

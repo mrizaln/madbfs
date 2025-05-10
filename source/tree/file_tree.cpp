@@ -1,57 +1,6 @@
 #include "adbfsm/tree/file_tree.hpp"
 #include "adbfsm/log.hpp"
 #include "adbfsm/tree/node.hpp"
-#include "adbfsm/util/split.hpp"
-
-namespace
-{
-    // dumb unescape function, it will skip '\' in a string
-    adbfsm::String unescape(adbfsm::Str str)
-    {
-        auto right     = 0uz;
-        auto unescaped = adbfsm::String{};
-
-        while (right < str.size()) {
-            right     += str[right] == '\\';
-            unescaped += str[right++];
-        }
-
-        return unescaped;
-    }
-
-    // resolve relative path
-    adbfsm::String resolve_path(adbfsm::path::Path parent, adbfsm::Str path)
-    {
-        auto parents = adbfsm::Vec<adbfsm::Str>{};
-        if (path.front() != '/') {
-            parents = adbfsm::util::split(parent.fullpath(), '/');
-        }
-
-        adbfsm::util::StringSplitter{ path, '/' }.while_next([&](adbfsm::Str str) {
-            if (str == ".") {
-                return;
-            } else if (str == "..") {
-                if (not parents.empty()) {
-                    parents.pop_back();
-                }
-                return;
-            }
-            parents.push_back(str);
-        });
-
-        if (parents.empty()) {
-            return "/";
-        }
-
-        auto resolved = adbfsm::String{};
-        for (auto path : parents) {
-            resolved += '/';
-            resolved += path;
-        }
-
-        return resolved;
-    }
-}
 
 namespace adbfsm::tree
 {
@@ -100,11 +49,11 @@ namespace adbfsm::tree
         if (path.is_root()) {
             // workaround to initialize root stat on getattr
             if (not m_root_initialized) {
-                auto parsed = m_connection.stat(path);
-                if (not parsed.has_value()) {
-                    return Unexpect{ parsed.error() };
+                auto stat = m_connection.stat(path);
+                if (not stat.has_value()) {
+                    return Unexpect{ stat.error() };
                 }
-                m_root.set_stat(parsed->stat);
+                m_root.set_stat(*stat);
                 m_root_initialized = true;
             }
             return m_root;
@@ -124,17 +73,17 @@ namespace adbfsm::tree
             }
 
             // get stat from device
-            auto parsed = m_connection.stat(current_path.as_path());
-            if (not parsed.has_value()) {
-                std::ignore = current->build(name, {}, Error{ parsed.error() });
-                return Unexpect{ parsed.error() };
+            auto stat = m_connection.stat(current_path.as_path());
+            if (not stat.has_value()) {
+                std::ignore = current->build(name, {}, Error{ stat.error() });
+                return Unexpect{ stat.error() };
             }
-            if ((parsed->stat.mode & S_IFMT) != S_IFDIR) {
+            if ((stat->mode & S_IFMT) != S_IFDIR) {
                 return Unexpect{ Errc::not_a_directory };
             }
 
             // build the node
-            auto built = current->build(name, parsed->stat, Directory{});
+            auto built = current->build(name, *stat, Directory{});
             if (not built.has_value()) {
                 return Unexpect{ built.error() };
             }
@@ -150,33 +99,29 @@ namespace adbfsm::tree
         assert(res and "extend failed");
 
         // get stat from device
-        auto parsed = m_connection.stat(current_path.as_path());
-        if (not parsed.has_value()) {
-            std::ignore = current->build(path.filename(), {}, Error{ parsed.error() });
-            return Unexpect{ parsed.error() };
+        auto stat = m_connection.stat(current_path.as_path());
+        if (not stat.has_value()) {
+            std::ignore = current->build(path.filename(), {}, Error{ stat.error() });
+            return Unexpect{ stat.error() };
         }
 
-        // build the node depending on the node kind
-        auto built = Opt<Expect<Ref<Node>>>{};
+        const auto name = path.filename();
 
-        switch (parsed->stat.mode & S_IFMT) {
-        case S_IFREG: built = current->build(path.filename(), parsed->stat, RegularFile{}); break;
-        case S_IFDIR: built = current->build(path.filename(), parsed->stat, Directory{}); break;
+        switch (stat->mode & S_IFMT) {
+        case S_IFREG: return current->build(name, *stat, RegularFile{}); break;
+        case S_IFDIR: return current->build(name, *stat, Directory{}); break;
         case S_IFLNK: {
-            auto target = resolve_path(path.parent_path(), unescape(parsed->link_to));
-
-            auto target_node = traverse_or_build(path::create(target).value());
-            if (not target_node.has_value()) {
-                log_e({ "{}: can't found target: {:?}" }, __func__, target);
-                return Unexpect{ target_node.error() };
-            }
-
-            built = current->build(path.filename(), parsed->stat, Link{ &target_node->get() });
+            return m_connection.readlink(path).and_then([&](path::PathBuf target) {
+                return traverse_or_build(target.as_path())
+                    .transform_error([&](Errc err) {
+                        log_e({ "{}: can't found target: {:?}" }, __func__, target.as_path().fullpath());
+                        return err;
+                    })
+                    .and_then([&](Node& node) { return current->build(name, *stat, Link{ &node }); });
+            });
         } break;
-        default: built = current->build(path.filename(), parsed->stat, Other{}); break;
+        default: return current->build(name, *stat, Other{}); break;
         }
-
-        return built.value()->get();
     }
 
     Expect<void> FileTree::readdir(path::Path path, Filler filler)
@@ -192,31 +137,31 @@ namespace adbfsm::tree
         }
 
         if (base->has_synced()) {
-            return base->list([&](Str name) { filler(name.data()); });
+            return base->list([&](Str name) {
+                // the underlying data is null-terminated string
+                filler(name.data());
+            });
         }
 
         // NOTE: base must be a Directory here, since traverse_or_build below code is an else branch of
         // conditional above
 
-        return m_connection.statdir(path).transform([&](auto stats) {
-            for (auto stat : stats) {
-                auto file = unescape(stat.path);
-
+        return m_connection.statdir(path).transform([&](Gen<data::ParsedStat> stats) {
+            auto buf = String{};
+            for (auto [stat, name] : stats) {
                 auto built = Opt<Expect<Ref<Node>>>{};
 
-                switch (stat.stat.mode & S_IFMT) {
-                case S_IFREG: built = base->build(file, stat.stat, RegularFile{}); break;
-                case S_IFDIR: built = base->build(file, stat.stat, Directory{}); break;
+                switch (stat.mode & S_IFMT) {
+                case S_IFREG: built = base->build(name, stat, RegularFile{}); break;
+                case S_IFDIR: built = base->build(name, stat, Directory{}); break;
                 case S_IFLNK: {
-                    auto target      = resolve_path(path, unescape(stat.link_to));
-                    auto target_node = traverse_or_build(path::create(target).value());
-                    if (not target_node.has_value()) {
-                        log_w({ "readdir: target can't found target: {:?}" }, target);
-                        continue;
-                    }
-                    built = base->build(file, stat.stat, Link{ &target_node->get() });
+                    // clang-format off
+                    built = m_connection.readlink(path.extend_copy(name)->as_path())
+                        .and_then([&](path::PathBuf target) { return traverse_or_build(target.as_path()); })
+                        .and_then([&](Node& node) { return base->build(name, stat, Link{ &node }); });
+                    // clang-format on
                 } break;
-                default: built = base->build(file, stat.stat, Other{}); break;
+                default: built = base->build(name, stat, Other{}); break;
                 }
 
                 if (not built.has_value()) {
@@ -224,11 +169,13 @@ namespace adbfsm::tree
                         { "readdir: {} [{}/{}]" },
                         std::make_error_code(built->error()).message(),
                         path.fullpath(),
-                        stat.path
+                        name
                     );
                 }
 
-                filler(file.c_str());
+                // the underlying data may be not null-terminated
+                buf = name;
+                filler(buf.c_str());
             }
 
             base->set_synced();
@@ -285,7 +232,6 @@ namespace adbfsm::tree
             return Unexpect{ from_node.error() };
         }
 
-        // TODO: manage cache also
         return m_connection.mv(from, to)
             .transform([&] { return std::ref(*from_node->get().parent()); })    // non-root (always exists)
             .and_then(proj(&Node::extract, from.filename()))
