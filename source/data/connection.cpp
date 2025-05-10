@@ -90,7 +90,7 @@ namespace
         return Error::Unknown;
     }
 
-    adbfsm::Expect<adbfsm::String> exec(adbfsm::Span<const adbfsm::Str> cmd)
+    adbfsm::Expect<adbfsm::String> exec(adbfsm::Span<const adbfsm::Str> cmd, bool check = true)
     {
         // adbfsm::log_d({ "exec command: {::?}" }, cmd);    // quite heavy to log :D
 
@@ -123,7 +123,7 @@ namespace
             return adbfsm::Unexpect{ static_cast<adbfsm::Errc>(ec_drain.value()) };
         }
 
-        if (ret != 0) {
+        if (check and ret != 0) {
             auto errmsg = not err.empty() ? adbfsm::util::strip(err) : adbfsm::util::strip(out);
             adbfsm::log_w({ "non-zero command status ({}) {}: err: [{}]" }, ret, cmd, errmsg);
             return adbfsm::Unexpect{ to_errc(parse_stderr(errmsg)) };
@@ -306,7 +306,7 @@ namespace adbfsm::data
             "{}"sv,  "+"sv,
         };
 
-        auto out = exec(cmd);
+        auto out = exec(cmd, false);
         if (not out.has_value()) {
             return Unexpect{ out.error() };
         }
