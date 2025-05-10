@@ -91,6 +91,14 @@ namespace adbfsm::tree
         return path::create_buf(std::move(path)).value();
     }
 
+    void Node::refresh_stat()
+    {
+        auto now     = Clock::to_time_t(Clock::now());
+        m_stat.atime = now;
+        m_stat.mtime = now;
+        m_stat.ctime = now;
+    }
+
     bool Node::has_synced() const
     {
         // should have locked but bool is atomic anyway in x64
@@ -184,6 +192,8 @@ namespace adbfsm::tree
                 .links = 1,
                 .size  = 21,
                 .mtime = Clock::to_time_t(Clock::now()),
+                .atime = Clock::to_time_t(Clock::now()),
+                .ctime = Clock::to_time_t(Clock::now()),
                 .mode  = S_IFLNK | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,    // mode: "lrw-r--r--"
                 .uid   = 0,
                 .gid   = 0,
@@ -211,8 +221,8 @@ namespace adbfsm::tree
             }
             return context.connection.touch(context.path, true)
                 .and_then([&] { return context.connection.stat(context.path); })
-                .and_then([&](data::ParsedStat&& parsed) {
-                    auto node = std::make_unique<Node>(name, this, std::move(parsed.stat), RegularFile{});
+                .and_then([&](data::Stat stat) {
+                    auto node = std::make_unique<Node>(name, this, std::move(stat), RegularFile{});
                     return dir.insert(std::move(node), overwrite);
                 })
                 .transform([&](auto&& pair) { return pair.first; });
@@ -235,8 +245,8 @@ namespace adbfsm::tree
             }
             return context.connection.mkdir(context.path)
                 .and_then([&] { return context.connection.stat(context.path); })
-                .and_then([&](data::ParsedStat&& parsed) {
-                    auto node = std::make_unique<Node>(name, this, std::move(parsed.stat), Directory{});
+                .and_then([&](data::Stat stat) {
+                    auto node = std::make_unique<Node>(name, this, std::move(stat), Directory{});
                     return dir.insert(std::move(node), overwrite);
                 })
                 .transform([&](auto&& pair) { return pair.first; });
@@ -368,7 +378,7 @@ namespace adbfsm::tree
         auto lock = strt::shared_lock{ m_mutex };
         return context.connection.touch(context.path, false)
             .and_then([&] { return context.connection.stat(context.path); })
-            .transform([&](data::ParsedStat&& parsed) { m_stat = parsed.stat; });
+            .transform([&](data::Stat stat) { m_stat = std::move(stat); });
     }
 
     Expect<Ref<Node>> Node::readlink()

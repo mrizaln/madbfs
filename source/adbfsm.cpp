@@ -210,12 +210,10 @@ namespace adbfsm
         return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([](path::Path p) { return get_data().tree().readlink(p); })
             .and_then([&](tree::Node& node) -> Expect<void> {
-                auto path_buf = node.build_path();    // this will emits absolute path, which we don't want
-                auto path     = path_buf.as_path();
-                if (auto pathsize = path.fullpath().size(); pathsize - 1 < size) {
-                    // copy path without initial '/'
-                    std::memcpy(buf, path.fullpath().data() + 1, pathsize);
-
+                auto target_buf = node.build_path();    // this will emits absolute path, which we don't want
+                auto target     = target_buf.as_path();
+                if (auto pathsize = target.fullpath().size(); pathsize - 1 < size) {
+                    std::memcpy(buf, target.fullpath().data() + 1, pathsize);    // copy without initial '/'
                     return {};
                 } else {
                     log_e({ "readlink: path size is too long: {} vs {}" }, size, pathsize);

@@ -6,6 +6,7 @@
 namespace adbfsm::path
 {
     class Path;
+    class PathBuf;
 }
 
 namespace adbfsm::data
@@ -13,16 +14,16 @@ namespace adbfsm::data
     struct ParsedStat
     {
         Stat stat;
-        Str  path;       // may contains escaped characters
-        Str  link_to;    // may be empty and may contains escaped characters
+        Str  path;
     };
 
     // NOTE: I made this interface to make Node and FileTree testable
     class IConnection
     {
     public:
-        virtual Expect<Gen<ParsedStat>> statdir(path::Path path) = 0;
-        virtual Expect<ParsedStat>      stat(path::Path path)    = 0;
+        virtual Expect<Gen<ParsedStat>> statdir(path::Path path)  = 0;
+        virtual Expect<Stat>            stat(path::Path path)     = 0;
+        virtual Expect<path::PathBuf>   readlink(path::Path path) = 0;
 
         // directory operations
         virtual Expect<void> mkdir(path::Path path)              = 0;
@@ -44,7 +45,7 @@ namespace adbfsm::data
         virtual ~IConnection() = default;
     };
 
-    class Connection : public IConnection
+    class Connection final : public IConnection
     {
     public:
         Connection(usize page_size)
@@ -71,7 +72,14 @@ namespace adbfsm::data
          *
          * @return The stat of the file or directory.
          */
-        Expect<ParsedStat> stat(path::Path path) override;
+        Expect<Stat> stat(path::Path path) override;
+
+        /**
+         * @brief Get the real file pointed by a symlink.
+         *
+         * @param path The path to the file or directory.
+         */
+        Expect<path::PathBuf> readlink(path::Path path) override;
 
         /**
          * @brief Make a directory on the device.

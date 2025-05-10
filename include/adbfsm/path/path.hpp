@@ -184,7 +184,7 @@ namespace adbfsm::path
 
         const auto dirname_end = prev;
 
-        // in case the basename contains repeated '//' like in the case '/home/user/documents/////note.md'
+        // in case the basename contains repeated '/' like in the case '/home/user/documents/////note.md'
         auto basename_start = prev;
         while (path[basename_start] == '/') {
             ++basename_start;

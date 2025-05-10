@@ -42,7 +42,9 @@ namespace adbfsm::data
         nlink_t links = 1;
         off_t   size  = 0;
         time_t  mtime = {};    // last modification time (only seconds part is used)
-        mode_t  mode  = 0;     // -rwxrwxrwx
+        time_t  atime = {};
+        time_t  ctime = {};
+        mode_t  mode  = 0;    // -rwxrwxrwx
         uid_t   uid   = 0;
         gid_t   gid   = 0;
     };

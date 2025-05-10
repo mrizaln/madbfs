@@ -1,6 +1,6 @@
 #pragma once
 
-#include "adbfsm/common.hpp"    // for type aliases and namespace aliases (sr & sv)
+#include "adbfsm/common.hpp"
 
 #include <algorithm>
 #include <variant>
