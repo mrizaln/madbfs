@@ -92,7 +92,7 @@ namespace
 
     adbfsm::Expect<adbfsm::String> exec(adbfsm::Span<const adbfsm::Str> cmd)
     {
-        // log_d({ "exec command: {::?}" }, cmd);       // quite heavy to log :D
+        // adbfsm::log_d({ "exec command: {::?}" }, cmd);    // quite heavy to log :D
 
         using Sink = reproc::sink::string;
         using namespace std::chrono_literals;
@@ -147,7 +147,7 @@ namespace
         Out                             outfn
     )
     {
-        // log_d({ "exec command: {::?}" }, cmd);    // quite heavy to log :D
+        // adbfsm::log_d({ "exec command: {::?}" }, cmd);    // quite heavy to log :D
 
         using namespace std::chrono_literals;
 
@@ -207,169 +207,83 @@ namespace
         return write_in;
     }
 
-    mode_t parse_mode(adbfsm::Str str)
-    {
-        if (str.size() != 10) {
-            return 0;
-        }
-
-        auto fmode = mode_t{ 0 };
-
-        switch (str[0]) {
-        case 's': fmode |= S_IFSOCK; break;
-        case 'l': fmode |= S_IFLNK; break;
-        case '-': fmode |= S_IFREG; break;
-        case 'd': fmode |= S_IFDIR; break;
-        case 'b': fmode |= S_IFBLK; break;
-        case 'c': fmode |= S_IFCHR; break;
-        case 'p': fmode |= S_IFIFO; break;
-        }
-
-        fmode |= str[1] == 'r' ? S_IRUSR : 0;
-        fmode |= str[2] == 'w' ? S_IWUSR : 0;
-
-        switch (str[3]) {
-        case 'x': fmode |= S_IXUSR; break;
-        case 's': fmode |= S_ISUID | S_IXUSR; break;
-        case 'S': fmode |= S_ISUID; break;
-        }
-
-        fmode |= str[4] == 'r' ? S_IRGRP : 0;
-        fmode |= str[5] == 'w' ? S_IWGRP : 0;
-
-        switch (str[6]) {
-        case 'x': fmode |= S_IXGRP; break;
-        case 's': fmode |= S_ISGID | S_IXGRP; break;
-        case 'S': fmode |= S_ISGID; break;
-        }
-
-        fmode |= str[7] == 'r' ? S_IROTH : 0;
-        fmode |= str[8] == 'w' ? S_IWOTH : 0;
-
-        switch (str[9]) {
-        case 'x': fmode |= S_IXOTH; break;
-        case 't': fmode |= S_ISVTX | S_IXOTH; break;
-        case 'T': fmode |= S_ISVTX; break;
-        }
-
-        return fmode;
-    }
-
     template <typename T>
         requires std::is_fundamental_v<T>
-    constexpr adbfsm::Opt<T> parse_fundamental(adbfsm::Str str)
+    constexpr adbfsm::Opt<T> parse_fundamental(adbfsm::Str str, int base)
     {
         auto t         = T{};
-        auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), t);
+        auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), t, base);
         if (ptr != str.data() + str.size() or ec != adbfsm::Errc{}) {
             return {};
         }
         return t;
     }
 
-    adbfsm::Opt<time_t> parse_time(adbfsm::Str ymd, adbfsm::Str hmsms, adbfsm::Str offset)
+    adbfsm::Str get_basename(adbfsm::Str path)
     {
-        // using std::chrono::parse function (the milliseconds part is not able to be parsed)
-        // parseable format: "2024-11-02 20:09:18 -0700"
-        auto format = "%F %T %z";
-        auto hms    = hmsms.substr(0, hmsms.find_first_of('.'));
-        auto buffer = std::stringstream{};
-
-        // clang-format off
-        for (auto ch : ymd)    { buffer << ch; } buffer << ' ';
-        for (auto ch : hms)    { buffer << ch; } buffer << ' ';
-        for (auto ch : offset) { buffer << ch; }
-        // clang-format on
-
-        auto time = adbfsm::Timestamp{};
-        if (buffer >> std::chrono::parse(format, time)) {
-            return adbfsm::Clock::to_time_t(time);
-        };
-
-        adbfsm::log_w({ "parse_time: failed to parse time [{} {} {}]" }, ymd, hms, offset);
-        return {};
+        if (path != "/") {
+            auto found = adbfsm::sr::find(path | adbfsm::sv::reverse, '/');
+            if (found != path.rend()) {    // no '/' means already basename
+                return adbfsm::Str{ found.base(), path.end() };
+            }
+        }
+        return path;
     }
 
     /**
-     * @brief Parse the output of `ls -lla` command.
-     *
-     * @param str The output of `ls -lla` command.
-     * @param cache The cache to store the parsed stat.
-     * @param serial The serial number of the device.
-     *
-     * @return The parsed stat if successful, otherwise empty.
-     *
-     * example input:
-     *  -rw-rw----  1 root everybody 16037494 2025-02-02 03:50:34.000000000 +0700 pozy.qoi
-     *
-     * block device and character device are not supported currently:
-     *  crw-rw-rw-  1 root root        1,   5 2025-02-09 21:09:39.728000000 +0700 zero
-     *
-     * file with unknown stat field will not be parsed:
-     *  d?????????   ? ?      ?             ?                             ? metadata
-     *
-     * TODO: implement different parsing strategy for non-regular files
+     * @brief Parse the output of `stat -c '%f %h %s %u %g %X %Y %Z %n' <path>`
      */
     adbfsm::Opt<adbfsm::data::ParsedStat> parse_file_stat(adbfsm::Str str)
     {
-        auto result = adbfsm::util::split_n<8>(str, ' ');
-        if (not result) {
-            adbfsm::log_w({ "parse_file_stat: string can't be split into 8 parts [{}]" }, str);
-            return std::nullopt;
+        return adbfsm::util::split_n<8>(str, ' ').transform([](adbfsm::util::SplitResult<8>&& res) {
+            auto [mode_hex, hardlinks, size, uid, gid, atime, mtime, ctime] = res.result;
+            return adbfsm::data::ParsedStat{
+                .stat = adbfsm::data::Stat{
+                    .links = parse_fundamental<nlink_t>(hardlinks, 10).value_or(0),
+                    .size  = parse_fundamental<off_t>(size, 10).value_or(0),
+                    .mtime = parse_fundamental<time_t>(mtime, 10).value_or(0),
+                    .atime = parse_fundamental<time_t>(atime, 10).value_or(0),
+                    .ctime = parse_fundamental<time_t>(ctime, 10).value_or(0),
+                    .mode  = parse_fundamental<mode_t>(mode_hex, 16).value_or(0),
+                    .uid   = parse_fundamental<uid_t>(uid, 10).value_or(0),
+                    .gid   = parse_fundamental<uid_t>(gid, 10).value_or(0),
+                },
+                .path = get_basename(res.remainder),
+            };
+        });
+    }
+
+    // resolve relative path
+    adbfsm::String resolve_path(adbfsm::path::Path parent, adbfsm::Str path)
+    {
+        auto parents = adbfsm::Vec<adbfsm::Str>{};
+        if (path.front() != '/') {
+            parents = adbfsm::util::split(parent.fullpath(), '/');
         }
 
-        auto [to_be_stat, remainder] = *result;
+        adbfsm::util::StringSplitter{ path, '/' }.while_next([&](adbfsm::Str str) {
+            if (str == ".") {
+                return;
+            } else if (str == "..") {
+                if (not parents.empty()) {
+                    parents.pop_back();
+                }
+                return;
+            }
+            parents.push_back(str);
+        });
 
-        auto path = remainder;
-        auto link = adbfsm::Str{};
-
-        // NOTE: special case, ignore
-        if (remainder == "." or remainder == "..") {
-            return std::nullopt;
+        if (parents.empty()) {
+            return "/";
         }
 
-        if (auto arrow = remainder.find(" -> "); arrow != adbfsm::String::npos) {
-            path = remainder.substr(0, arrow);
-            link = remainder.substr(arrow + 4);
+        auto resolved = adbfsm::String{};
+        for (auto path : parents) {
+            resolved += '/';
+            resolved += path;
         }
 
-        if (to_be_stat[0].find_first_of('?') != adbfsm::String::npos) {
-            adbfsm::log_w({ "parse_file_stat: failed, file contains unparsable data [{}]" }, to_be_stat[0]);
-            return std::nullopt;
-        }
-
-        auto name_store = std::array<char, 128>{};    // getpwnam & getgrpnam need null terminated string :(
-
-        name_store.fill(0);
-        auto size = std::min(to_be_stat[2].size(), name_store.size() - 1);
-        std::copy_n(to_be_stat[2].begin(), size, name_store.data());
-        auto maybe_uid = ::getpwnam(name_store.data());
-
-        name_store.fill(0);
-        size = std::min(to_be_stat[3].size(), name_store.size() - 1);
-        std::copy_n(to_be_stat[3].begin(), size, name_store.data());
-        auto maybe_grp = ::getgrnam(name_store.data());
-
-        // TODO: cache the uid and gid
-
-        auto stat = adbfsm::data::Stat{
-            .links = parse_fundamental<nlink_t>(to_be_stat[1]).value_or(0),
-            .size  = parse_fundamental<off_t>(to_be_stat[4]).value_or(0),
-            .mtime = parse_time(to_be_stat[5], to_be_stat[6], to_be_stat[7]).value(),
-            .mode  = parse_mode(to_be_stat[0]),
-            .uid   = maybe_uid ? maybe_uid->pw_uid : 98,
-            .gid   = maybe_grp ? maybe_grp->gr_gid : 98,
-        };
-
-        if ((stat.mode & S_IFMT) == S_IFLNK and link.empty()) {
-            adbfsm::log_e({ "parse_file_stat: link is empty for [{}] when it should not be" }, path);
-        }
-
-        return adbfsm::data::ParsedStat{
-            .stat    = stat,
-            .path    = path,
-            .link_to = link,
-        };
+        return resolved;
     }
 
     // NOTE: somehow adb shell needs double escaping
@@ -382,13 +296,15 @@ namespace
 namespace adbfsm::data
 {
     using namespace std::string_view_literals;
-    using namespace std::string_literals;
 
-    // TODO: use `find -maxdepth 1 -exec stat -t {} +` instead
     Expect<Gen<ParsedStat>> Connection::statdir(path::Path path)
     {
         const auto qpath = quoted(path);
-        const auto cmd   = Array{ "adb"sv, "shell"sv, "ls"sv, "-lla"sv, Str{ qpath } };
+        const auto cmd   = Array{
+            "adb"sv, "shell"sv, "find"sv, Str{ qpath }, "-maxdepth"sv,
+            "1"sv,   "-exec"sv, "stat"sv, "-c"sv,       "'%f %h %s %u %g %X %Y %Z %n'"sv,
+            "{}"sv,  "+"sv,
+        };
 
         auto out = exec(cmd);
         if (not out.has_value()) {
@@ -397,7 +313,7 @@ namespace adbfsm::data
 
         auto generator = [](String out) -> Gen<ParsedStat> {
             auto lines  = util::StringSplitter{ out, '\n' };
-            std::ignore = lines.next();    // ignore first line: "[total ...]"
+            std::ignore = lines.next();    // ignore first line, the directory itself
             while (auto line = lines.next()) {
                 auto parsed = parse_file_stat(util::strip(*line));
                 if (not parsed.has_value()) {
@@ -407,27 +323,34 @@ namespace adbfsm::data
             }
         };
 
-        return generator(std::move(out).value());
+        return generator(std::move(*out));
     }
 
-    // TODO: use `stat` command instead
-    Expect<ParsedStat> Connection::stat(path::Path path)
+    Expect<Stat> Connection::stat(path::Path path)
     {
         const auto qpath = quoted(path);
-        const auto cmd   = Array{ "adb"sv, "shell"sv, "ls"sv, "-llad"sv, Str{ qpath } };
+        const auto cmd   = Array{
+            "adb"sv, "shell"sv, "stat"sv, "-c"sv, "'%f %h %s %u %g %X %Y %Z %n'"sv, Str{ qpath },
+        };
 
-        auto out = exec(cmd);
-        if (not out.has_value()) {
-            return Unexpect{ out.error() };
-        }
+        return exec(cmd).and_then([&](String out) {
+            return ok_or(parse_file_stat(util::strip(out)), Errc::io_error)
+                .transform([](ParsedStat parsed) { return parsed.stat; })
+                .transform_error([&](auto err) {
+                    log_e({ "Connection::stat: parsing stat failed [{}]" }, path.fullpath());
+                    return err;
+                });
+        });
+    }
 
-        auto parsed = parse_file_stat(util::strip(*out));
-        if (not parsed.has_value()) {
-            log_e({ "Connection::stat: parsing stat failed [{}]" }, path.fullpath());
-            return Unexpect{ Errc::io_error };
-        }
-
-        return std::move(parsed).value();
+    Expect<path::PathBuf> Connection::readlink(path::Path path)
+    {
+        const auto qpath = quoted(path);
+        const auto cmd   = Array{ "adb"sv, "shell"sv, "readlink"sv, Str{ qpath } };
+        return exec(cmd).transform([&](String target) {
+            auto target_path = resolve_path(path.parent_path(), util::strip(target));
+            return path::create_buf(std::move(target_path)).value();
+        });
     }
 
     Expect<void> Connection::touch(path::Path path, bool create)
@@ -600,9 +523,9 @@ namespace adbfsm::data
             auto status = DeviceStatus::Unknown;
 
             // clang-format off
-                if      (*status_str == "offline")      status = DeviceStatus::Offline;
-                else if (*status_str == "unauthorized") status = DeviceStatus::Unauthorized;
-                else if (*status_str == "device")       status = DeviceStatus::Device;
+            if      (*status_str == "offline")      status = DeviceStatus::Offline;
+            else if (*status_str == "unauthorized") status = DeviceStatus::Unauthorized;
+            else if (*status_str == "device")       status = DeviceStatus::Device;
             // clang-format on
 
             devices.emplace_back(String{ *serial_str }, status);
