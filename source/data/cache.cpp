@@ -3,22 +3,18 @@
 
 namespace adbfsm::data
 {
-    Page::Page(usize page_size)
-        : m_data{ std::make_unique<char[]>(page_size) }
+    Page::Page(PageKey key, usize page_size)
+        : m_key{ key }
+        , m_data{ std::make_unique<char[]>(page_size) }
         , m_size{ 0 }
     {
     }
 
-    Page::Page(Page&& other)
-        : Page{ std::move(other), strt::exclusive_lock{ other.m_mutex } }
+    Page::~Page()
     {
-    }
-
-    // move ctor proxy
-    Page::Page(Page&& other, strt::exclusive_lock<strt::shared_futex_micro>)
-        : m_data{ std::move(other.m_data) }
-        , m_size{ other.m_size }
-    {
+        auto lock = strt::exclusive_lock{ m_mutex };
+        m_data    = {};
+        m_size    = {};
     }
 
     usize Page::read(Span<char> out, usize offset)
@@ -92,15 +88,14 @@ namespace adbfsm::data
         auto total_read = 0uz;
 
         for (auto index : sv::iota(start, last + 1)) {
-            auto upgrade_lock = strt::upgradeable_lock{ m_mutex };
+            auto write_lock = strt::exclusive_lock{ m_mutex };
 
             auto key   = PageKey{ id, index };
-            auto entry = m_pages.find(key);
+            auto entry = m_table.find(key);
 
-            if (entry == m_pages.end()) {
-                auto write_lock = strt::upgrade_lock(std::move(upgrade_lock));
-                m_lru.emplace_front(key);
-                auto [p, _] = m_pages.emplace(key, MapEntry{ { m_page_size }, m_lru.begin() });
+            while (entry == m_table.end()) {
+                m_lru.emplace_front(key, m_page_size);
+                auto [p, _] = m_table.emplace(key, m_lru.begin());
                 entry       = p;
 
                 // PERF: since this temporary location is unchanging, making this static might be beneficial
@@ -108,7 +103,7 @@ namespace adbfsm::data
                 data.resize(m_page_size);
 
                 // lock page then write to it
-                auto res = entry->second.page.write_fn(0, [&] -> Expect<Span<const char>> {
+                auto res = entry->second->write_fn(0, [&] -> Expect<Span<const char>> {
                     write_lock.unlock();    // lock must still be held before page lock
                     return on_miss(data, static_cast<off_t>(index * m_page_size)).transform([&](usize len) {
                         return Span{ data.data(), len };
@@ -120,40 +115,34 @@ namespace adbfsm::data
                 }
 
                 write_lock.lock();
-                if (m_pages.size() > m_max_pages) {
-                    auto delta = m_pages.size() - m_max_pages;
+                if (m_table.size() > m_max_pages) {
+                    auto delta = m_table.size() - m_max_pages;
                     while (delta-- > 0) {
-                        auto last = m_lru.back();
-                        m_lru.pop_back();
-                        auto page = m_pages.extract(last);
-                        if (not page.empty() and page.mapped().page.is_dirty()) {
-                            m_orphan_pages.emplace_back(last, std::move(page.mapped().page));
+                        m_table.erase(m_lru.back().key());
+                        if (auto& page = m_lru.back(); page.is_dirty()) {
+                            m_orphaned.splice(m_orphaned.end(), m_lru, --m_lru.end());
+                        } else {
+                            m_lru.pop_back();
                         }
                     }
                 }
-            } else {
-                upgrade_lock.unlock();
+
+                entry = m_table.find(key);
             }
 
-            auto read_lock = strt::shared_lock{ m_mutex };
+            const auto& [_, page] = *entry;
+
+            if (page != m_lru.begin()) {
+                m_lru.splice(m_lru.begin(), m_lru, page);
+            }
 
             auto local_offset = 0uz;
             if (index == start) {
                 local_offset = static_cast<usize>(offset) % m_page_size;
             }
 
-            auto& page     = entry->second.page;
-            auto  out_sub  = Span{ out.data() + total_read, out.size() - total_read };
-            total_read    += page.read(out_sub, local_offset);
-
-            if (entry->second.lru_it != m_lru.begin()) {
-                read_lock.unlock();
-                auto write_lock = strt::exclusive_lock{ m_mutex };
-
-                m_lru.erase(entry->second.lru_it);
-                m_lru.push_front(entry->first);
-                entry->second.lru_it = m_lru.begin();
-            }
+            auto out_sub  = Span{ out.data() + total_read, out.size() - total_read };
+            total_read   += page->read(out_sub, local_offset);
         }
 
         return total_read;
@@ -169,8 +158,8 @@ namespace adbfsm::data
         for (auto index : sv::iota(start, last + 1)) {
             auto write_lock = strt::exclusive_lock{ m_mutex };
 
-            auto key  = PageKey{ id, index };
-            auto page = m_pages.find(key);
+            auto key   = PageKey{ id, index };
+            auto entry = m_table.find(key);
 
             auto local_offset = 0uz;
             if (index == start) {
@@ -180,31 +169,31 @@ namespace adbfsm::data
             auto write      = std::min(m_page_size - local_offset, in.size() - total_written);
             auto write_span = Span{ in.data() + total_written, write };
 
-            if (page == m_pages.end()) {
-                m_lru.emplace_front(key);
-                auto [p, _] = m_pages.emplace(key, MapEntry{ { m_page_size }, m_lru.begin() });
-                page        = p;
+            if (entry == m_table.end()) {
+                m_lru.emplace_front(key, m_page_size);
+                auto [p, _] = m_table.emplace(key, m_lru.begin());
+                entry       = p;
             }
 
-            page->second.page.write(write_span, local_offset);
-            page->second.page.set_dirty(true);
+            const auto& [_, page] = *entry;
 
-            if (page->second.lru_it != m_lru.begin()) {
-                m_lru.erase(page->second.lru_it);
-                m_lru.push_front(page->first);
-                page->second.lru_it = m_lru.begin();
+            page->write(write_span, local_offset);
+            page->set_dirty(true);
+
+            if (page != m_lru.begin()) {
+                m_lru.splice(m_lru.begin(), m_lru, page);
             }
 
             total_written += write;
 
-            if (m_pages.size() > m_max_pages) {
-                auto delta = m_pages.size() - m_max_pages;
+            if (m_table.size() > m_max_pages) {
+                auto delta = m_table.size() - m_max_pages;
                 while (delta-- > 0) {
-                    auto last = m_lru.back();
-                    m_lru.pop_back();
-                    auto page = m_pages.extract(last);
-                    if (page.mapped().page.is_dirty()) {
-                        m_orphan_pages.emplace_back(last, std::move(page.mapped().page));
+                    m_table.erase(m_lru.back().key());
+                    if (auto& page = m_lru.back(); page.is_dirty()) {
+                        m_orphaned.splice(m_orphaned.end(), m_lru, --m_lru.end());
+                    } else {
+                        m_lru.pop_back();
                     }
                 }
             }
@@ -221,21 +210,20 @@ namespace adbfsm::data
             auto read_lock = strt::shared_lock{ m_mutex };
 
             auto key   = PageKey{ id, index };
-            auto entry = m_pages.find(key);
+            auto entry = m_table.find(key);
 
-            if (entry == m_pages.end()) {
+            if (entry == m_table.end()) {
                 continue;
             }
 
-            auto& page = entry->second.page;
-            if (page.is_dirty()) {
-
+            auto& page = entry->second;
+            if (page->is_dirty()) {
                 // PERF: since this temporary location is unchanging, making this static might be beneficial
                 thread_local static auto data = Vec<char>{};
                 data.resize(m_page_size);
 
-                auto read = page.read(data, 0);
-                page.set_dirty(false);
+                auto read = page->read(data, 0);
+                page->set_dirty(false);
 
                 auto read_span = Span{ data.data(), read };
 
@@ -248,24 +236,27 @@ namespace adbfsm::data
         return {};
     }
 
-    Vec<Pair<Cache::PageKey, Page>> Cache::get_orphan_pages()
+    Cache::Lru Cache::get_orphan_pages()
     {
         auto write_lock = strt::exclusive_lock{ m_mutex };
-        return std::move(m_orphan_pages);
+        return std::move(m_orphaned);
     }
 
     bool Cache::has_orphan_pages() const
     {
         auto read_lock = strt::shared_lock{ m_mutex };
-        return not m_orphan_pages.empty();
+        return not m_orphaned.empty();
     }
 
     void Cache::invalidate()
     {
         auto lock = strt::exclusive_lock{ m_mutex };
-        m_pages.clear();
+        m_table.clear();
+
+        // ISSUE: there may be a thread that still waits in Page's mutex queue while it's destroyed.
+        // I don't know how to fix that.
         m_lru.clear();
-        m_orphan_pages.clear();
+
         log_i({ "{}: cache invalidated" }, __func__);
     }
 
@@ -273,9 +264,12 @@ namespace adbfsm::data
     {
         auto lock   = strt::exclusive_lock{ m_mutex };
         m_page_size = new_page_size;
-        m_pages.clear();
+        m_table.clear();
+
+        // ISSUE: there may be a thread that still waits in Page's mutex queue while it's destroyed.
+        // I don't know how to fix that.
         m_lru.clear();
-        m_orphan_pages.clear();
+
         log_i({ "{}: page size changed to: {}" }, __func__, new_page_size);
     }
 
@@ -283,9 +277,12 @@ namespace adbfsm::data
     {
         auto lock   = strt::exclusive_lock{ m_mutex };
         m_max_pages = new_max_pages;
-        m_pages.clear();
+        m_table.clear();
+
+        // ISSUE: there may be a thread that still waits in Page's mutex queue while it's destroyed.
+        // I don't know how to fix that.
         m_lru.clear();
-        m_orphan_pages.clear();
+
         log_i({ "{}: max pages can be stored changed to: {}" }, __func__, new_max_pages);
     }
 }

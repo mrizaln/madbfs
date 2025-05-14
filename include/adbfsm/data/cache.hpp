@@ -12,7 +12,12 @@
 
 namespace adbfsm::data
 {
-    using PageIndex = usize;
+    struct PageKey
+    {
+        Id    id;
+        usize index;
+        bool  operator==(const PageKey& other) const = default;
+    };
 
     // NOTE: page size is not stored to minimize the memory usage
     class Page
@@ -21,8 +26,8 @@ namespace adbfsm::data
         // NOTE: can't use std::move_only_function in gcc: "atomic constraint depends on itself"
         using WriteFn = std::function<Expect<Span<const char>>()>;
 
-        Page(usize page_size);
-        Page(Page&& other);
+        Page(PageKey key, usize page_size);
+        ~Page();
 
         usize read(Span<char> out, usize offset);
         usize write(Span<const char> in, usize offset);
@@ -34,12 +39,12 @@ namespace adbfsm::data
         bool is_dirty() const;
         void set_dirty(bool set);
 
-    private:
-        // move ctor proxy
-        Page(Page&& other, strt::exclusive_lock<strt::shared_futex_micro>);
+        const PageKey& key() { return m_key; }
 
+    private:
         static constexpr auto dirty_bit = 0x10000000_u32;
 
+        PageKey      m_key;
         Uniq<char[]> m_data;
         u32          m_size;    // 1 bit is used as dirty flag, so max page size should be 2**31 bytes
 
@@ -49,29 +54,13 @@ namespace adbfsm::data
     class Cache
     {
     public:
-        struct PageKey;
-        struct MapEntry;
-
-        using Lru   = std::list<PageKey>;
-        using Pages = std::unordered_map<PageKey, MapEntry>;
-        using Ord   = std::memory_order;
+        using Lru    = std::list<Page>;
+        using Lookup = std::unordered_map<PageKey, Lru::iterator>;
+        using Ord    = std::memory_order;
 
         // NOTE: can't use std::move_only_function in gcc: "atomic constraint depends on itself"
         using OnMiss  = std::function<Expect<usize>(Span<char> out, off_t offset)>;
         using OnFlush = std::function<Expect<usize>(Span<const char> in, off_t offset)>;
-
-        struct PageKey
-        {
-            Id        id;
-            PageIndex page_index;
-            bool      operator==(const PageKey& other) const = default;
-        };
-
-        struct MapEntry
-        {
-            Page          page;
-            Lru::iterator lru_it;    // since it's a list, this always valid
-        };
 
         Cache(usize page_size, usize max_pages);
 
@@ -79,8 +68,8 @@ namespace adbfsm::data
         Expect<usize> write(Id id, Span<const char> in, off_t offset);
         Expect<void>  flush(Id id, usize size, OnFlush on_flush);
 
-        Vec<Pair<PageKey, Page>> get_orphan_pages();
-        bool                     has_orphan_pages() const;
+        Cache::Lru get_orphan_pages();
+        bool       has_orphan_pages() const;
 
         void invalidate();
         void set_page_size(usize new_page_size);
@@ -90,14 +79,14 @@ namespace adbfsm::data
         usize max_pages() const { return m_max_pages; }
 
     private:
-        mutable strt::shared_futex m_mutex;
+        Lru    m_lru;    // most recently used is at the front
+        Lookup m_table;
 
-        Vec<Pair<PageKey, Page>> m_orphan_pages;    // dirty but evicted pages
-
-        Pages m_pages;
-        Lru   m_lru;    // most recently used is at the front
+        Lru m_orphaned;    // dirty but evicted pages
 
         usize m_page_size = 0;
         usize m_max_pages = 0;
+
+        mutable strt::shared_futex_micro m_mutex;
     };
 };
