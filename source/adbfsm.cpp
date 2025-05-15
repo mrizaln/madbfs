@@ -3,6 +3,7 @@
 #include "adbfsm/data/ipc.hpp"
 #include "adbfsm/log.hpp"
 #include "adbfsm/util/overload.hpp"
+#include "adbfsm/util/threadpool.hpp"
 
 #include <fcntl.h>
 #include <nlohmann/json.hpp>
@@ -140,6 +141,8 @@ namespace adbfsm
         auto page_size  = args->pagesize * 1024;
         auto max_pages  = cache_size / page_size;
 
+        util::Threadpool::init();
+
         return new Adbfsm{
             std::make_unique<data::Connection>(page_size),
             std::make_unique<data::Cache>(page_size, max_pages),
@@ -151,6 +154,11 @@ namespace adbfsm
         auto* data = static_cast<Adbfsm*>(private_data);
         assert(data != nullptr and "data should not be empty!");
         delete data;
+
+        auto ignored = util::Threadpool::terminate();
+        if (ignored != 0) {
+            log_i({ "There are {} jobs waiting in Threadpool queue. Ignoring them." }, ignored);
+        }
 
         auto serial = ::getenv("ANDROID_SERIAL");
         if (serial != nullptr) {
