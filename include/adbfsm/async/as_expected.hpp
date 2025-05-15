@@ -9,7 +9,6 @@
 
 #include <concepts>
 #include <expected>
-#include <system_error>
 #include <type_traits>
 #include <utility>
 
@@ -80,12 +79,12 @@ namespace adbfsm::async
 
     namespace detail
     {
-
         template <typename T, typename... Ts>
         concept AnyOf = (std::same_as<T, Ts> || ...);
 
         template <typename T>
-        concept Error = AnyOf<T, std::error_code, const std::error_code&, std::exception_ptr>;
+        concept Error
+            = AnyOf<T, boost::system::error_code, const boost::system::error_code&, std::exception_ptr>;
 
         // Class to adapt as_expected_t as a completion handler
         template <typename Handler>
