@@ -311,11 +311,12 @@ namespace adbfsm::tree
 
     Expect<usize> Node::read(Context context, u64 fd, Span<char> out, off_t offset)
     {
+        auto lock = strt::shared_lock{ m_mutex };
         return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<usize> {
+            auto read_lock = strt::shared_lock{ m_mutex_file };
             if (not file.is_open(fd)) {
                 return Unexpect{ Errc::bad_file_descriptor };
             }
-            auto read_lock = strt::shared_lock{ m_mutex_file };
             return context.cache.read(id(), out, offset, [&context](Span<char> out, off_t offset) {
                 return context.connection.read(context.path, out, offset);
             });
@@ -324,11 +325,12 @@ namespace adbfsm::tree
 
     Expect<usize> Node::write(Context context, u64 fd, Str in, off_t offset)
     {
+        auto lock = strt::shared_lock{ m_mutex };
         return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<usize> {
+            auto write_lock = strt::exclusive_lock{ m_mutex_file };
             if (not file.is_open(fd)) {
                 return Unexpect{ Errc::bad_file_descriptor };
             }
-            auto write_lock = strt::exclusive_lock{ m_mutex_file };
             file.set_dirty(true);
             return context.cache.write(id(), in, offset).transform([&](usize ret) {
                 m_stat.size += ret;
@@ -339,7 +341,9 @@ namespace adbfsm::tree
 
     Expect<void> Node::flush(Context context, u64 fd)
     {
+        auto lock = strt::shared_lock{ m_mutex };
         return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<void> {
+            auto write_lock = strt::exclusive_lock{ m_mutex_file };
             if (not file.is_open(fd)) {
                 return Unexpect{ Errc::bad_file_descriptor };
             }
@@ -347,8 +351,7 @@ namespace adbfsm::tree
                 return {};    // no write, do nothing
             }
             file.set_dirty(false);
-            auto write_lock = strt::exclusive_lock{ m_mutex_file };
-            auto filesize   = static_cast<usize>(stat()->get().size);
+            auto filesize = static_cast<usize>(stat()->get().size);
             return context.cache.flush(id(), filesize, [&](Span<const char> in, off_t offset) {
                 return context.connection.write(context.path, in, offset);
             });
@@ -357,7 +360,9 @@ namespace adbfsm::tree
 
     Expect<void> Node::release(Context context, u64 fd)
     {
+        auto lock = strt::shared_lock{ m_mutex };
         return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<void> {
+            auto write_lock = strt::exclusive_lock{ m_mutex_file };
             if (not file.close(fd)) {
                 return Unexpect{ Errc::bad_file_descriptor };
             }
@@ -365,8 +370,7 @@ namespace adbfsm::tree
                 return {};    // no write, do nothing
             }
             file.set_dirty(false);
-            auto write_lock = strt::exclusive_lock{ m_mutex_file };
-            auto filesize   = static_cast<usize>(stat()->get().size);
+            auto filesize = static_cast<usize>(stat()->get().size);
             return context.cache.flush(id(), filesize, [&](Span<const char> in, off_t offset) {
                 return context.connection.write(context.path, in, offset);
             });
