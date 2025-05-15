@@ -6,11 +6,10 @@ class Recipe(ConanFile):
     settings = ["os", "compiler", "build_type", "arch"]
     generators = ["CMakeToolchain", "CMakeDeps"]
     requires = [
+        "boost/1.87.0",
         "fmt/11.0.2",
         "libfuse/3.16.2",
-        "nlohmann_json/3.12.0",
         "rapidhash/1.0",
-        "reproc/14.2.5",
         "spdlog/1.15.0",
     ]
     test_requires = ["boost-ext-ut/1.1.9"]

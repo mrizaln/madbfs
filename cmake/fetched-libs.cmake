@@ -13,15 +13,3 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(shared_futex)
 # --------------------
-
-# target: Sockpp::sockpp
-# -----------------------
-set(SOCKPP_BUILD_STATIC ON)
-
-FetchContent_Declare(
-    sockpp
-    GIT_REPOSITORY https://github.com/fpagliughi/sockpp
-    GIT_TAG afdeacba9448c7a77194eed6ab8e1c0b1653c79a
-)
-FetchContent_MakeAvailable(sockpp)
-# -----------------------
