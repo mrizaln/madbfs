@@ -1,5 +1,6 @@
 #include "adbfsm/data/ipc.hpp"
 #include "adbfsm/log.hpp"
+#include "adbfsm/util/threadpool.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -134,8 +135,7 @@ namespace adbfsm::data
     void Ipc::launch(OnOp on_op)
     {
         m_running = true;
-        m_threadpool->run();
-        m_thread = std::jthread{ [this, on_op = std::move(on_op)](std::stop_token st) mutable {
+        m_thread  = std::jthread{ [this, on_op = std::move(on_op)](std::stop_token st) mutable {
             run(st, std::move(on_op));
         } };
     }
@@ -150,9 +150,10 @@ namespace adbfsm::data
     void Ipc::run(std::stop_token st, OnOp on_op)
     {
         m_running = true;
-        m_threadpool->run();
 
-        auto buffer = String(1024, '0');
+        auto  buffer     = String(1024, '0');
+        auto* threadpool = util::Threadpool::get_instance();
+        assert(threadpool != nullptr);
 
         while (not st.stop_requested()) {
             auto res = m_socket->accept();
@@ -174,7 +175,7 @@ namespace adbfsm::data
             try {
                 auto op = parse_msg(op_str.value());
                 if (not op.has_value()) {
-                    m_threadpool->enqueue_detached([sock = std::move(sock)] mutable {
+                    threadpool->enqueue_detached([sock = std::move(sock)] mutable {
                         auto json       = nlohmann::json{};
                         json["status"]  = "error";
                         json["message"] = "invalid operation";
@@ -186,7 +187,7 @@ namespace adbfsm::data
                         }
                     });
                 } else {
-                    m_threadpool->enqueue_detached([&on_op, sock = std::move(sock), op = *op] mutable {
+                    threadpool->enqueue_detached([&on_op, sock = std::move(sock), op = *op] mutable {
                         auto response      = nlohmann::json{};
                         response["status"] = "success";
                         response["value"]  = on_op(op);
@@ -199,7 +200,7 @@ namespace adbfsm::data
                     });
                 }
             } catch (const std::exception& e) {
-                m_threadpool->enqueue_detached([what = String{ e.what() }, sock = std::move(sock)] mutable {
+                threadpool->enqueue_detached([what = String{ e.what() }, sock = std::move(sock)] mutable {
                     auto json       = nlohmann::json{};
                     json["status"]  = "error";
                     json["message"] = std::move(what);
@@ -213,7 +214,5 @@ namespace adbfsm::data
                 continue;
             }
         }
-
-        m_threadpool->stop(true);
     }
 }

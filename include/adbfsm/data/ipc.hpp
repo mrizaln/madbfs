@@ -2,12 +2,13 @@
 
 #include "adbfsm/common.hpp"
 #include "adbfsm/path/path.hpp"
-#include "adbfsm/util/threadpool.hpp"
 
 #include <nlohmann/json_fwd.hpp>
 #include <sockpp/unix_acceptor.h>
 
 #include <functional>
+#include <stop_token>
+#include <thread>
 
 namespace adbfsm::data
 {
@@ -45,7 +46,6 @@ namespace adbfsm::data
     private:
         Ipc(path::PathBuf path, Uniq<sockpp::unix_acceptor> acceptor)
             : m_socket_path{ std::move(path) }
-            , m_threadpool{ std::make_unique<util::Threadpool>(std::thread::hardware_concurrency(), false) }
             , m_socket{ std::move(acceptor) }
         {
         }
@@ -53,7 +53,6 @@ namespace adbfsm::data
         void run(std::stop_token st, OnOp on_op);
 
         path::PathBuf               m_socket_path;
-        Uniq<util::Threadpool>      m_threadpool;
         Uniq<sockpp::unix_acceptor> m_socket;
         std::jthread                m_thread;
         bool                        m_running = false;    // should have been an atomic
