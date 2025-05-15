@@ -31,16 +31,21 @@ namespace adbfsm::util
             Terminated,    // stop() called without run()
         };
 
-        Threadpool(usize num_threads, bool immediately_run)
+        static void init()
         {
-            for (auto _ : sv::iota(0uz, num_threads)) {
-                m_threads.emplace_back([this] { thread_function(); });
-            }
-
-            if (immediately_run) {
-                run();
+            if (s_threadpool == nullptr) {
+                s_threadpool.reset(new Threadpool{ std::thread::hardware_concurrency(), true });
             }
         }
+
+        static usize terminate()
+        {
+            auto queued = s_threadpool->stop(true);
+            s_threadpool.reset();
+            return queued;
+        }
+
+        static Threadpool* get_instance() { return s_threadpool.get(); }
 
         ~Threadpool()
         {
@@ -114,8 +119,10 @@ namespace adbfsm::util
         {
             switch (m_status) {
             case Status::Running: {
+                auto num = 0uz;
                 m_status = Status::Stopped;
                 if (auto lock = std::unique_lock{ m_mutex }; ignore_enqueued_tasks) {
+                    num = m_tasks.size();
                     m_tasks.clear();
                 }
                 m_condition.notify_all();
@@ -126,7 +133,7 @@ namespace adbfsm::util
                     }
                 }
 
-                return m_tasks.size();
+                return num;
             }
             case Status::Stopped: {
                 m_status = Status::Terminated;
@@ -143,6 +150,19 @@ namespace adbfsm::util
         }
 
     private:
+        static Uniq<Threadpool> s_threadpool;
+
+        Threadpool(usize num_threads, bool immediately_run)
+        {
+            for (auto _ : sv::iota(0uz, num_threads)) {
+                m_threads.emplace_back([this] { thread_function(); });
+            }
+
+            if (immediately_run) {
+                run();
+            }
+        }
+
         void thread_function()
         {
             auto get_task_or_wait = [&]() -> Opt<Task> {
@@ -170,10 +190,12 @@ namespace adbfsm::util
             }
         }
 
-        std::vector<std::jthread> m_threads;
-        std::deque<Task>          m_tasks;
-        std::mutex                m_mutex;
-        std::condition_variable   m_condition;
-        std::atomic<Status>       m_status = Status::Stopped;
+        Vec<std::jthread>       m_threads;
+        std::deque<Task>        m_tasks;
+        std::mutex              m_mutex;
+        std::condition_variable m_condition;
+        std::atomic<Status>     m_status = Status::Stopped;
     };
+
+    inline Uniq<Threadpool> Threadpool::s_threadpool = nullptr;
 }
