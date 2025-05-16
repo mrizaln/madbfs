@@ -1,10 +1,10 @@
 #pragma once
 
+#include "adbfsm/async/async.hpp"
 #include "adbfsm/common.hpp"
 #include "adbfsm/data/stat.hpp"
 
 #include <functional>
-#include <shared_futex/shared_futex.hpp>
 
 #include <cassert>
 #include <list>
@@ -47,8 +47,6 @@ namespace adbfsm::data
         PageKey      m_key;
         Uniq<char[]> m_data;
         u32          m_size;    // 1 bit is used as dirty flag, so max page size should be 2**31 bytes
-
-        mutable strt::shared_futex_micro m_mutex;
     };
 
     class Cache
@@ -59,14 +57,14 @@ namespace adbfsm::data
         using Ord    = std::memory_order;
 
         // NOTE: can't use std::move_only_function in gcc: "atomic constraint depends on itself"
-        using OnMiss  = std::function<Expect<usize>(Span<char> out, off_t offset)>;
-        using OnFlush = std::function<Expect<usize>(Span<const char> in, off_t offset)>;
+        using OnMiss  = std::function<AExpect<usize>(Span<char> out, off_t offset)>;
+        using OnFlush = std::function<AExpect<usize>(Span<const char> in, off_t offset)>;
 
         Cache(usize page_size, usize max_pages);
 
-        Expect<usize> read(Id id, Span<char> out, off_t offset, OnMiss on_miss);
-        Expect<usize> write(Id id, Span<const char> in, off_t offset);
-        Expect<void>  flush(Id id, usize size, OnFlush on_flush);
+        AExpect<usize> read(Id id, Span<char> out, off_t offset, OnMiss on_miss);
+        AExpect<usize> write(Id id, Span<const char> in, off_t offset);
+        AExpect<void>  flush(Id id, usize size, OnFlush on_flush);
 
         Cache::Lru get_orphan_pages();
         bool       has_orphan_pages() const;
@@ -86,7 +84,5 @@ namespace adbfsm::data
 
         usize m_page_size = 0;
         usize m_max_pages = 0;
-
-        mutable strt::shared_futex_micro m_mutex;
     };
 };
