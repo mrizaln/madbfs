@@ -7,7 +7,6 @@
 
 #define BOOST_PROCESS_VERSION 2
 #include <boost/process.hpp>
-#include <boost/process/extend.hpp>
 
 #include <grp.h>
 #include <pwd.h>
@@ -94,13 +93,42 @@ namespace
         return Error::Unknown;
     }
 
-    adbfsm::async::Await<adbfsm::Expect<adbfsm::String>> exec_async(
+    adbfsm::Await<boost::system::error_code> drain_pipe(adbfsm::async::pipe::Read& rpipe, adbfsm::String& out)
+    {
+        out.clear();
+
+        auto tmp = std::array<char, 1024>{};
+        auto eof = false;
+
+        while (not eof) {
+            auto tmp_read = 0uz;
+            while (tmp_read < tmp.size()) {
+                auto buf = adbfsm::async::buffer(tmp.data() + tmp_read, tmp.size() - tmp_read);
+                auto res = co_await rpipe.async_read_some(buf);
+                if (not res and res == boost::asio::error::eof) {
+                    eof = true;
+                    break;
+                } else if (not res) {
+                    out.append_range(tmp | adbfsm::sv::take(tmp_read));
+                    co_return res.error();
+                }
+                tmp_read += *res;
+            }
+            out.append_range(tmp | adbfsm::sv::take(tmp_read));
+        }
+
+        co_return boost::system::error_code{};
+    }
+
+    adbfsm::Await<adbfsm::Expect<adbfsm::String>> exec_async(
         adbfsm::Str                     exe,
         adbfsm::Span<const adbfsm::Str> args,
         adbfsm::Str                     in,
         bool                            check
     )
     {
+        adbfsm::log_d({ "{}: run {} {}" }, __func__, exe, args);
+
         namespace async = adbfsm::async;
 
         auto exec = co_await async::this_coro::executor;
@@ -112,25 +140,28 @@ namespace
         auto proc = bp::process{
             exec,
             bp::environment::find_executable(exe),
-            args,
+            args | adbfsm::sv::transform([](auto s) { return boost::string_view{ s.data(), s.size() }; }),
             bp::process_stdio{ pipe_in, pipe_out, pipe_err },
         };
 
-        if (auto [ec, _] = co_await async::write_all(pipe_in, in); ec) {
+        if (auto [ec, _] = co_await async::write_exact(pipe_in, in); ec) {
             adbfsm::log_e({ "{}: failed to read to stdin: {}" }, __func__, ec.message());
-            co_return async::to_generic_err(ec);
+            co_return adbfsm::Unexpect{ async::to_generic_err(ec) };
         }
+        pipe_in.close();
 
         auto out = std::string{};
-        if (auto [ec, _] = co_await async::read_all(pipe_out, out); ec) {
+        if (auto ec = co_await drain_pipe(pipe_out, out); ec and ec != boost::asio::error::eof) {
             adbfsm::log_e({ "{}: failed to read from stdout: {}" }, __func__, ec.message());
-            co_return async::to_generic_err(ec);
+            co_return adbfsm::Unexpect{ async::to_generic_err(ec) };
         }
 
+        adbfsm::log_d({ "{}: drained stdout: {:?}" }, __func__, out);
+
         auto err = std::string{};
-        if (auto [ec, _] = co_await async::read_all(pipe_err, err); ec) {
+        if (auto ec = co_await drain_pipe(pipe_err, err); ec and ec != boost::asio::error::eof) {
             adbfsm::log_e({ "{}: failed to read from stderr: {}" }, __func__, ec.message());
-            co_return async::to_generic_err(ec);
+            co_return adbfsm::Unexpect{ async::to_generic_err(ec) };
         }
 
         auto ret = co_await proc.async_wait();
@@ -233,7 +264,7 @@ namespace adbfsm::data
 {
     using namespace std::string_view_literals;
 
-    Connection::Aresult<Gen<ParsedStat>> Connection::statdir(path::Path path)
+    AExpect<Gen<ParsedStat>> Connection::statdir(path::Path path)
     {
         const auto qpath = quoted(path);
         const auto args  = Array{
@@ -263,14 +294,14 @@ namespace adbfsm::data
         co_return generator(std::move(*out));
     }
 
-    Connection::Aresult<Stat> Connection::stat(path::Path path)
+    AExpect<Stat> Connection::stat(path::Path path)
     {
         const auto qpath = quoted(path);
         const auto cmd = Array{ "shell"sv, "stat"sv, "-c"sv, "'%f %h %s %u %g %X %Y %Z %n'"sv, Str{ qpath } };
 
         auto res = co_await exec_async("adb", cmd, "", true);
 
-        co_return res.and_then([&](Str out) {
+        co_return res.and_then([&](String out) {
             return ok_or(parse_file_stat(util::strip(out)), Errc::io_error)
                 .transform([](ParsedStat parsed) { return parsed.stat; })
                 .transform_error([&](auto err) {
@@ -280,20 +311,20 @@ namespace adbfsm::data
         });
     }
 
-    Connection::Aresult<path::PathBuf> Connection::readlink(path::Path path)
+    AExpect<path::PathBuf> Connection::readlink(path::Path path)
     {
         const auto qpath = quoted(path);
         const auto args  = Array{ "shell"sv, "readlink"sv, Str{ qpath } };
 
         auto res = co_await exec_async("adb", args, "", true);
 
-        co_return res.transform([&](Str target) {
+        co_return res.transform([&](String target) {
             auto target_path = resolve_path(path.parent_path(), util::strip(target));
             return path::create_buf(std::move(target_path)).value();
         });
     }
 
-    Connection::Aresult<void> Connection::touch(path::Path path, bool create)
+    AExpect<void> Connection::touch(path::Path path, bool create)
     {
         const auto qpath = quoted(path);
         if (create) {
@@ -305,14 +336,14 @@ namespace adbfsm::data
         }
     }
 
-    Connection::Aresult<void> Connection::mkdir(path::Path path)
+    AExpect<void> Connection::mkdir(path::Path path)
     {
         const auto qpath = quoted(path);
         const auto args  = Array{ "shell"sv, "mkdir"sv, Str{ qpath } };
         co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
     }
 
-    Connection::Aresult<void> Connection::rm(path::Path path, bool recursive)
+    AExpect<void> Connection::rm(path::Path path, bool recursive)
     {
         const auto qpath = quoted(path);
         if (not recursive) {
@@ -324,14 +355,14 @@ namespace adbfsm::data
         }
     }
 
-    Connection::Aresult<void> Connection::rmdir(path::Path path)
+    AExpect<void> Connection::rmdir(path::Path path)
     {
         const auto qpath = quoted(path);
         const auto args  = Array{ "shell"sv, "rmdir"sv, Str{ qpath } };
         co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
     }
 
-    Connection::Aresult<void> Connection::mv(path::Path from, path::Path to)
+    AExpect<void> Connection::mv(path::Path from, path::Path to)
     {
         const auto qfrom = quoted(from);
         const auto qto   = quoted(to);
@@ -339,7 +370,7 @@ namespace adbfsm::data
         co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
     }
 
-    Connection::Aresult<void> Connection::truncate(path::Path path, off_t size)
+    AExpect<void> Connection::truncate(path::Path path, off_t size)
     {
         const auto qpath = quoted(path);
         const auto sizes = fmt::format("{}", size);
@@ -347,7 +378,7 @@ namespace adbfsm::data
         co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
     }
 
-    Connection::Aresult<u64> Connection::open(path::Path /* path */, int /* flags */)
+    AExpect<u64> Connection::open(path::Path /* path */, int /* flags */)
     {
         /*
          * Since we're using a streaming approach to read/write files, there is no need to do open or
@@ -360,7 +391,7 @@ namespace adbfsm::data
         co_return m_counter.fetch_add(1, std::memory_order::relaxed) + 1;
     }
 
-    Connection::Aresult<usize> Connection::read(path::Path path, Span<char> out, off_t offset)
+    AExpect<usize> Connection::read(path::Path path, Span<char> out, off_t offset)
     {
         const auto skip  = fmt::format("skip={}", offset);
         const auto count = fmt::format("count={}", out.size());
@@ -378,12 +409,13 @@ namespace adbfsm::data
         };
 
         co_return (co_await exec_async("adb", args, "", true)).transform([&](String str) {
-            std::copy_n(str.data(), str.size(), str.data());
-            return str.size();
+            auto size = std::min(str.size(), out.size());
+            std::copy_n(str.data(), size, out.data());
+            return size;
         });
     }
 
-    Connection::Aresult<usize> Connection::write(path::Path path, Span<const char> in, off_t offset)
+    AExpect<usize> Connection::write(path::Path path, Span<const char> in, off_t offset)
     {
         const auto seek = fmt::format("seek={}", offset);
         const auto off  = fmt::format("of=\"{}\"", path.fullpath());
@@ -405,7 +437,7 @@ namespace adbfsm::data
         });
     }
 
-    Connection::Aresult<void> Connection::flush(path::Path /* path */)
+    AExpect<void> Connection::flush(path::Path /* path */)
     {
         /*
          * The streaming approach is immediate, so there is no need to flush the file. At least for the
@@ -415,7 +447,7 @@ namespace adbfsm::data
         return {};
     }
 
-    Connection::Aresult<void> Connection::release(path::Path /* path */)
+    AExpect<void> Connection::release(path::Path /* path */)
     {
         /*
          * The reason this part is a no-op is the same as the open function. We don't need to do any
@@ -425,13 +457,13 @@ namespace adbfsm::data
         return {};
     }
 
-    Connection::Aresult<void> start_connection()
+    AExpect<void> start_connection()
     {
         const auto args = Array{ "start-server"sv };
         co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
     }
 
-    Connection::Aresult<Vec<Device>> list_devices()
+    AExpect<Vec<Device>> list_devices()
     {
         const auto args = Array{ "devices"sv };
         auto       out  = co_await exec_async("adb", args, "", true);

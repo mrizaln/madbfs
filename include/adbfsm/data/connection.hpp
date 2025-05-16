@@ -23,29 +23,26 @@ namespace adbfsm::data
     class IConnection
     {
     public:
-        template <typename T>
-        using Aresult = async::Await<Expect<T>>;
-
-        virtual Aresult<Gen<ParsedStat>> statdir(path::Path path)  = 0;
-        virtual Aresult<Stat>            stat(path::Path path)     = 0;
-        virtual Aresult<path::PathBuf>   readlink(path::Path path) = 0;
+        virtual AExpect<Gen<ParsedStat>> statdir(path::Path path)  = 0;
+        virtual AExpect<Stat>            stat(path::Path path)     = 0;
+        virtual AExpect<path::PathBuf>   readlink(path::Path path) = 0;
 
         // directory operations
-        virtual Aresult<void> mkdir(path::Path path)              = 0;
-        virtual Aresult<void> rm(path::Path path, bool recursive) = 0;
-        virtual Aresult<void> rmdir(path::Path path)              = 0;
-        virtual Aresult<void> mv(path::Path from, path::Path to)  = 0;
+        virtual AExpect<void> mkdir(path::Path path)              = 0;
+        virtual AExpect<void> rm(path::Path path, bool recursive) = 0;
+        virtual AExpect<void> rmdir(path::Path path)              = 0;
+        virtual AExpect<void> mv(path::Path from, path::Path to)  = 0;
 
         // file operations
-        virtual Aresult<void>  truncate(path::Path path, off_t size)                     = 0;
-        virtual Aresult<u64>   open(path::Path path, int flags)                          = 0;
-        virtual Aresult<usize> read(path::Path path, Span<char> out, off_t offset)       = 0;
-        virtual Aresult<usize> write(path::Path path, Span<const char> in, off_t offset) = 0;
-        virtual Aresult<void>  flush(path::Path path)                                    = 0;
-        virtual Aresult<void>  release(path::Path path)                                  = 0;
+        virtual AExpect<void>  truncate(path::Path path, off_t size)                     = 0;
+        virtual AExpect<u64>   open(path::Path path, int flags)                          = 0;
+        virtual AExpect<usize> read(path::Path path, Span<char> out, off_t offset)       = 0;
+        virtual AExpect<usize> write(path::Path path, Span<const char> in, off_t offset) = 0;
+        virtual AExpect<void>  flush(path::Path path)                                    = 0;
+        virtual AExpect<void>  release(path::Path path)                                  = 0;
 
         // directory operation (adding file) or file operation (update time)
-        virtual Aresult<void> touch(path::Path path, bool create) = 0;
+        virtual AExpect<void> touch(path::Path path, bool create) = 0;
 
         virtual ~IConnection() = default;
     };
@@ -69,7 +66,7 @@ namespace adbfsm::data
          *
          * @return A generator if successful, or an error if it fails.
          */
-        Aresult<Gen<ParsedStat>> statdir(path::Path path) override;
+        AExpect<Gen<ParsedStat>> statdir(path::Path path) override;
 
         /**
          * @brief Get the stat of a file or directory.
@@ -78,21 +75,21 @@ namespace adbfsm::data
          *
          * @return The stat of the file or directory.
          */
-        Aresult<Stat> stat(path::Path path) override;
+        AExpect<Stat> stat(path::Path path) override;
 
         /**
          * @brief Get the real file pointed by a symlink.
          *
          * @param path The path to the file or directory.
          */
-        Aresult<path::PathBuf> readlink(path::Path path) override;
+        AExpect<path::PathBuf> readlink(path::Path path) override;
 
         /**
          * @brief Make a directory on the device.
          *
          * @param path Path to the directory.
          */
-        Aresult<void> mkdir(path::Path path) override;
+        AExpect<void> mkdir(path::Path path) override;
 
         /**
          * @brief Remove a file on the device.
@@ -100,14 +97,14 @@ namespace adbfsm::data
          * @param path Path to the file on the device.
          * @param bool Whether to remove recursively or not.
          */
-        Aresult<void> rm(path::Path path, bool recursive) override;
+        AExpect<void> rm(path::Path path, bool recursive) override;
 
         /**
          * @brief Remove a directory on the device.
          *
          * @param path Path to the directory on the device.
          */
-        Aresult<void> rmdir(path::Path path) override;
+        AExpect<void> rmdir(path::Path path) override;
 
         /**
          * @brief Move a file on the device.
@@ -115,7 +112,7 @@ namespace adbfsm::data
          * @param from Target file.
          * @param to Destination file.
          */
-        Aresult<void> mv(path::Path from, path::Path to) override;
+        AExpect<void> mv(path::Path from, path::Path to) override;
 
         // --------------------
 
@@ -128,7 +125,7 @@ namespace adbfsm::data
          * @param path Path to the file on the device.
          * @param size Size to truncate to.
          */
-        Aresult<void> truncate(path::Path path, off_t size) override;
+        AExpect<void> truncate(path::Path path, off_t size) override;
 
         /**
          * @brief Open a file on the device.
@@ -136,7 +133,7 @@ namespace adbfsm::data
          * @param path Path to the file on the device.
          * @param flags Flags to open the file with.
          */
-        Aresult<u64> open(path::Path path, int flags) override;
+        AExpect<u64> open(path::Path path, int flags) override;
 
         /**
          * @brief Read from a file on the device.
@@ -145,7 +142,7 @@ namespace adbfsm::data
          * @param out Buffer to read into.
          * @param offset Offset to read from.
          */
-        Aresult<usize> read(path::Path path, Span<char> out, off_t offset) override;
+        AExpect<usize> read(path::Path path, Span<char> out, off_t offset) override;
 
         /**
          * @brief Write to a file on the device.
@@ -154,21 +151,21 @@ namespace adbfsm::data
          * @param in Buffer to write from.
          * @param offset Offset to write to.
          */
-        Aresult<usize> write(path::Path path, Span<const char> in, off_t offset) override;
+        AExpect<usize> write(path::Path path, Span<const char> in, off_t offset) override;
 
         /**
          * @brief Flush a file on the device.
          *
          * @param path Path to the file on the device.
          */
-        Aresult<void> flush(path::Path path) override;
+        AExpect<void> flush(path::Path path) override;
 
         /**
          * @brief Release a file on the device.
          *
          * @param path Path to the file on the device.
          */
-        Aresult<void> release(path::Path path) override;
+        AExpect<void> release(path::Path path) override;
 
         // ---------------
 
@@ -178,7 +175,7 @@ namespace adbfsm::data
          * @param path Path to the file.
          * @param create Indicate whether to create a file if not exist.
          */
-        Aresult<void> touch(path::Path path, bool create) override;
+        AExpect<void> touch(path::Path path, bool create) override;
 
     private:
         async::Context&  m_context;
@@ -214,10 +211,10 @@ namespace adbfsm::data
     /**
      * @brief Start connection with the devices.
      */
-    Connection::Aresult<void> start_connection();
+    AExpect<void> start_connection();
 
     /**
      * @brief List connected devices.
      */
-    Connection::Aresult<Vec<Device>> list_devices();
+    AExpect<Vec<Device>> list_devices();
 }
