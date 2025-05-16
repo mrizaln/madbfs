@@ -38,6 +38,7 @@ namespace adbfsm::args
         struct Opt  { ParsedOpt opt; fuse_args args; };
         struct Exit { int status; };
 
+        ParseResult() : result{ Exit{ 0}} {}
         ParseResult(Opt opt)    : result{ std::move(opt) } {}
         ParseResult(int status) : result{ Exit{ status } } {}
 
@@ -104,32 +105,32 @@ namespace adbfsm::args
         // clang-format on
     }
 
-    inline data::DeviceStatus check_serial(Str serial)
+    inline Await<data::DeviceStatus> check_serial(Str serial)
     {
-        if (auto maybe_devices = data::list_devices(); maybe_devices.has_value()) {
+        if (auto maybe_devices = co_await data::list_devices(); maybe_devices.has_value()) {
             auto found = sr::find(*maybe_devices, serial, &data::Device::serial);
             if (found != maybe_devices->end()) {
-                return found->status;
+                co_return found->status;
             }
         }
-        return data::DeviceStatus::Unknown;
+        co_return data::DeviceStatus::Unknown;
     }
 
-    inline String get_serial()
+    inline Await<String> get_serial()
     {
-        auto maybe_devices = data::list_devices();
+        auto maybe_devices = co_await data::list_devices();
         if (not maybe_devices.has_value()) {
-            return "";
+            co_return "";
         }
         auto devices = *maybe_devices                                                                 //
                      | sv::filter([](auto&& d) { return d.status == data::DeviceStatus::Device; })    //
                      | sr::to<Vec<data::Device>>();
 
         if (devices.empty()) {
-            return {};
+            co_return "";
         } else if (devices.size() == 1) {
             fmt::println("[adbfsm] only one device found, using serial '{}'", devices[0].serial);
-            return devices[0].serial;
+            co_return devices[0].serial;
         }
 
         fmt::println("[adbfsm] multiple devices detected,");
@@ -148,7 +149,7 @@ namespace adbfsm::args
         }
         fmt::println("[adbfsm] using serial '{}'", devices[choice - 1].serial);
 
-        return devices[choice - 1].serial;
+        co_return devices[choice - 1].serial;
     }
 
     /**
@@ -160,8 +161,20 @@ namespace adbfsm::args
      * If the return value is `ParseResult::Opt`, the `fuse_args` member must be freed using
      * `fuse_opt_free_args` after use.
      */
-    inline ParseResult parse(int argc, char** argv)
+    inline Await<ParseResult> parse(int argc, char** argv)
     {
+        fmt::println("[adbfsm] checking adb availability...");
+        if (auto status = co_await data::start_connection(); not status.has_value()) {
+            const auto msg = std::make_error_code(status.error()).message();
+            fmt::println(stderr, "\nerror: failed to start adb server [{}].", msg);
+            fmt::println(stderr, "\nnote: make sure adb is installed and in PATH.");
+            fmt::println(stderr, "note: make sure phone debugging permission is enabled.");
+            fmt::println(stderr, "      phone with its screen locked might denies adb connection.");
+            fmt::println(stderr, "      you might need to unlock your device first to be able to use adb.");
+
+            co_return ParseResult{ 1 };
+        }
+
         fuse_args args = FUSE_ARGS_INIT(argc, argv);
 
         auto get_serial_env = []() -> const char* {
@@ -183,20 +196,20 @@ namespace adbfsm::args
             fmt::println(stderr, "error: failed to parse options\n");
             fmt::println(stderr, "try '{} --help' for more information", argv[0]);
             fmt::println(stderr, "try '{} --full-help' for full information", argv[0]);
-            return 1;
+            co_return ParseResult{ 1 };
         }
 
         if (adbfsm_opt.help) {
             show_help(argv[0], false);
             ::fuse_opt_free_args(&args);
-            return 0;
+            co_return ParseResult{ 0 };
         } else if (adbfsm_opt.full_help) {
             show_help(argv[0], false);
             fmt::println(stdout, "\nOptions for libfuse:");
             ::fuse_cmdline_help();
             ::fuse_lowlevel_help();
             ::fuse_opt_free_args(&args);
-            return 0;
+            co_return ParseResult{ 0 };
         }
 
         auto log_level = parse_level_str(adbfsm_opt.log_level);
@@ -204,26 +217,24 @@ namespace adbfsm::args
             fmt::println(stderr, "error: invalid log level '{}'", adbfsm_opt.log_level);
             fmt::println(stderr, "valid log levels: trace, debug, info, warn, error, critical, off");
             ::fuse_opt_free_args(&args);
-            return 1;
+            co_return ParseResult{ 1 };
         }
 
         if (adbfsm_opt.serial == nullptr) {
-            auto serial = get_serial();
+            auto serial = co_await get_serial();
             if (serial.empty()) {
                 fmt::println(stderr, "error: no device found, make sure your device is connected");
                 ::fuse_opt_free_args(&args);
-                return 1;
+                co_return ParseResult{ 1 };
             }
             adbfsm_opt.serial = ::strdup(serial.c_str());
-        } else if (auto status = check_serial(adbfsm_opt.serial); status != data::DeviceStatus::Device) {
-            fmt::println(
-                stderr, "error: serial '{} 'is not valid ({})", adbfsm_opt.serial, to_string(status)
-            );
+        } else if (auto r = co_await check_serial(adbfsm_opt.serial); r != data::DeviceStatus::Device) {
+            fmt::println(stderr, "error: serial '{} 'is not valid ({})", adbfsm_opt.serial, to_string(r));
             ::fuse_opt_free_args(&args);
-            return 1;
+            co_return ParseResult{ 1 };
         }
 
-        return ParseResult::Opt{
+        co_return ParseResult::Opt{
             .opt = {
                 .serial    = adbfsm_opt.serial,
                 .log_level = log_level.value(),
