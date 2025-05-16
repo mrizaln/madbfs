@@ -156,8 +156,6 @@ namespace
             co_return adbfsm::Unexpect{ async::to_generic_err(ec) };
         }
 
-        adbfsm::log_d({ "{}: drained stdout: {:?}" }, __func__, out);
-
         auto err = std::string{};
         if (auto ec = co_await drain_pipe(pipe_err, err); ec and ec != boost::asio::error::eof) {
             adbfsm::log_e({ "{}: failed to read from stderr: {}" }, __func__, ec.message());

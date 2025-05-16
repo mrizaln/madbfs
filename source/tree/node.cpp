@@ -1,5 +1,6 @@
 #include "adbfsm/tree/node.hpp"
 #include "adbfsm/data/connection.hpp"
+#include "adbfsm/log.hpp"
 #include "adbfsm/util/overload.hpp"
 
 #include <fcntl.h>
@@ -117,7 +118,6 @@ namespace adbfsm::tree
 
     Expect<Ref<Node>> Node::traverse(Str name) const
     {
-        auto lock = strt::shared_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -126,7 +126,6 @@ namespace adbfsm::tree
 
     Expect<void> Node::list(std::move_only_function<void(Str)>&& fn) const
     {
-        auto lock = strt::shared_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -141,7 +140,6 @@ namespace adbfsm::tree
 
     Expect<Ref<Node>> Node::build(Str name, data::Stat stat, File file)
     {
-        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -156,7 +154,6 @@ namespace adbfsm::tree
 
     Expect<Uniq<Node>> Node::extract(Str name)
     {
-        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -165,7 +162,6 @@ namespace adbfsm::tree
 
     Expect<Pair<Ref<Node>, Uniq<Node>>> Node::insert(Uniq<Node> node, bool overwrite)
     {
-        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -174,7 +170,6 @@ namespace adbfsm::tree
 
     Expect<Ref<Node>> Node::link(Str name, Node* target)
     {
-        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
@@ -204,190 +199,241 @@ namespace adbfsm::tree
         });
     }
 
-    Expect<Ref<Node>> Node::touch(Context context, Str name)
+    AExpect<Ref<Node>> Node::touch(Context context, Str name)
     {
-        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
-            return Unexpect{ err->get().error };
+            co_return Unexpect{ err->get().error };
         }
-        return as<Directory>().and_then([&](Directory& dir) -> Expect<Ref<Node>> {
-            auto overwrite = false;
-            if (auto node = dir.find(name); node.has_value()) {
-                if (not node->get().is<Error>()) {
-                    node.transform(&Node::refresh_stat).value();
-                    return context.connection.touch(context.path, false).transform([&] { return *node; });
-                }
-                overwrite = true;
+
+        auto may_dir = as<Directory>();
+        if (not may_dir) {
+            co_return Unexpect{ may_dir.error() };
+        }
+        auto& dir = may_dir->get();
+
+        auto overwrite = false;
+        if (auto node = dir.find(name); node.has_value()) {
+            if (not node->get().is<Error>()) {
+                node.transform(&Node::refresh_stat).value();
+                co_return (co_await context.connection.touch(context.path, false)).transform([&] {
+                    return *node;
+                });
             }
-            return context.connection.touch(context.path, true)
-                .and_then([&] { return context.connection.stat(context.path); })
-                .and_then([&](data::Stat stat) {
-                    auto node = std::make_unique<Node>(name, this, std::move(stat), RegularFile{});
-                    return dir.insert(std::move(node), overwrite);
-                })
-                .transform([&](auto&& pair) { return pair.first; });
-        });
+            overwrite = true;
+        }
+
+        auto may_touch = co_await context.connection.touch(context.path, true);
+        if (not may_touch) {
+            co_return Unexpect{ may_touch.error() };
+        }
+
+        co_return (co_await context.connection.stat(context.path))
+            .and_then([&](data::Stat stat) {
+                auto node = std::make_unique<Node>(name, this, std::move(stat), RegularFile{});
+                return dir.insert(std::move(node), overwrite);
+            })
+            .transform([&](auto&& pair) { return pair.first; });
     }
 
-    Expect<Ref<Node>> Node::mkdir(Context context, Str name)
+    AExpect<Ref<Node>> Node::mkdir(Context context, Str name)
     {
-        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
-            return Unexpect{ err->get().error };
+            co_return Unexpect{ err->get().error };
         }
-        return as<Directory>().and_then([&](Directory& dir) -> Expect<Ref<Node>> {
-            auto overwrite = false;
-            if (auto node = dir.find(name); node.has_value()) {
-                if (not node->get().is<Error>()) {
-                    return Unexpect{ Errc::file_exists };
-                }
-                overwrite = true;
+
+        auto may_dir = as<Directory>();
+        if (not may_dir) {
+            co_return Unexpect{ may_dir.error() };
+        }
+        auto& dir = may_dir->get();
+
+        auto overwrite = false;
+        if (auto node = dir.find(name); node.has_value()) {
+            if (not node->get().is<Error>()) {
+                co_return Unexpect{ Errc::file_exists };
             }
-            return context.connection.mkdir(context.path)
-                .and_then([&] { return context.connection.stat(context.path); })
-                .and_then([&](data::Stat stat) {
-                    auto node = std::make_unique<Node>(name, this, std::move(stat), Directory{});
-                    return dir.insert(std::move(node), overwrite);
-                })
-                .transform([&](auto&& pair) { return pair.first; });
-        });
+            overwrite = true;
+        }
+
+        auto may_mkdir = co_await context.connection.mkdir(context.path);
+        if (not may_mkdir) {
+            co_return Unexpect{ may_mkdir.error() };
+        }
+
+        co_return (co_await context.connection.stat(context.path))
+            .and_then([&](data::Stat stat) {
+                auto node = std::make_unique<Node>(name, this, std::move(stat), Directory{});
+                return dir.insert(std::move(node), overwrite);
+            })
+            .transform([&](auto&& pair) { return pair.first; });
     }
 
-    Expect<void> Node::rm(Context context, Str name, bool recursive)
+    AExpect<void> Node::rm(Context context, Str name, bool recursive)
     {
-        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
-            return Unexpect{ err->get().error };
+            co_return Unexpect{ err->get().error };
         }
-        return as<Directory>().and_then([&](Directory& dir) -> Expect<void> {
+
+        auto res = as<Directory>().and_then([&](Directory& dir) -> Expect<void> {
             return dir.find(name).and_then([&](Node& node) -> Expect<void> {
                 if (node.is<Directory>() and not recursive) {
                     return Unexpect{ Errc::is_a_directory };
                 }
                 auto success = dir.erase(name);
                 assert(success);
-                return context.connection.rm(context.path, recursive);
+                return {};
             });
         });
+
+        if (not res) {
+            co_return Unexpect{ res.error() };
+        }
+        co_return co_await context.connection.rm(context.path, recursive);
     }
 
-    Expect<void> Node::rmdir(Context context, Str name)
+    AExpect<void> Node::rmdir(Context context, Str name)
     {
-        auto lock = strt::exclusive_lock{ m_mutex };
         if (auto err = as<Error>(); err.has_value()) {
-            return Unexpect{ err->get().error };
+            co_return Unexpect{ err->get().error };
         }
-        return as<Directory>().and_then([&](Directory& dir) {
-            return dir.find(name).and_then([&](Node& node) -> Expect<void> {
-                return node.as<Directory>().and_then([&](Directory& target) {
-                    return target.children().empty()
-                             ? context.connection.rmdir(context.path).transform([&] { dir.erase(name); })
-                             : Unexpect{ Errc::directory_not_empty };
+
+        auto res = as<Directory>().and_then([&](Directory& dir) {
+            return dir.find(name).and_then([&](Node& node) {
+                return node.as<Directory>().and_then([&](Directory& target) -> Expect<Ref<Directory>> {
+                    return target.children().empty() ? Expect<Ref<Directory>>{ dir }
+                                                     : Unexpect{ Errc::directory_not_empty };
                 });
             });
         });
-    }
 
-    Expect<void> Node::truncate(Context context, off_t size)
-    {
-        auto lock = strt::shared_lock{ m_mutex };
-        return regular_file_prelude().and_then([&]([[maybe_unused]] RegularFile& file) {
-            return context.connection.truncate(context.path, size).transform([&] { m_stat.size = size; });
+        if (not res) {
+            co_return Unexpect{ res.error() };
+        }
+
+        co_return (co_await context.connection.rmdir(context.path)).transform([&] {
+            res->get().erase(name);
         });
     }
 
-    Expect<u64> Node::open(Context context, int flags)
+    AExpect<void> Node::truncate(Context context, off_t size)
     {
-        auto lock = strt::shared_lock{ m_mutex };
-        return regular_file_prelude().and_then([&](RegularFile& file) {
-            auto read_lock = strt::shared_lock{ m_mutex_file };
-            return context.connection.open(context.path, flags).transform([&](u64 fd) {
-                auto res = file.open(fd, flags);
-                assert(res);
-                return fd;
-            });
+        if (auto may_file = regular_file_prelude(); not may_file) {
+            co_return Unexpect{ may_file.error() };
+        }
+        co_return (co_await context.connection.truncate(context.path, size)).transform([&] {
+            m_stat.size = size;
         });
     }
 
-    Expect<usize> Node::read(Context context, u64 fd, Span<char> out, off_t offset)
+    AExpect<u64> Node::open(Context context, int flags)
     {
-        auto lock = strt::shared_lock{ m_mutex };
-        return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<usize> {
-            auto read_lock = strt::shared_lock{ m_mutex_file };
-            if (not file.is_open(fd)) {
-                return Unexpect{ Errc::bad_file_descriptor };
-            }
-            return context.cache.read(id(), out, offset, [&context](Span<char> out, off_t offset) {
-                return context.connection.read(context.path, out, offset);
-            });
+        auto may_file = regular_file_prelude();
+        if (not may_file) {
+            co_return Unexpect{ may_file.error() };
+        }
+        auto& file = may_file->get();
+
+        co_return (co_await context.connection.open(context.path, flags)).transform([&](u64 fd) {
+            auto res = file.open(fd, flags);
+            assert(res);
+            return fd;
         });
     }
 
-    Expect<usize> Node::write(Context context, u64 fd, Str in, off_t offset)
+    AExpect<usize> Node::read(Context context, u64 fd, Span<char> out, off_t offset)
     {
-        auto lock = strt::shared_lock{ m_mutex };
-        return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<usize> {
-            auto write_lock = strt::exclusive_lock{ m_mutex_file };
-            if (not file.is_open(fd)) {
-                return Unexpect{ Errc::bad_file_descriptor };
-            }
-            file.set_dirty(true);
-            return context.cache.write(id(), in, offset).transform([&](usize ret) {
-                m_stat.size += ret;
-                return ret;
-            });
+        auto may_file = regular_file_prelude();
+        if (not may_file) {
+            co_return Unexpect{ may_file.error() };
+        }
+        auto& file = may_file->get();
+
+        if (not file.is_open(fd)) {
+            co_return Unexpect{ Errc::bad_file_descriptor };
+        }
+
+        co_return co_await context.cache.read(id(), out, offset, [&](Span<char> out, off_t offset) {
+            auto id = this->id().inner();
+            log_d({ "read: [id={}|buf={}|off={}] cache miss, read from device..." }, id, out.size(), offset);
+            return context.connection.read(context.path, out, offset);
         });
     }
 
-    Expect<void> Node::flush(Context context, u64 fd)
+    AExpect<usize> Node::write(Context context, u64 fd, Str in, off_t offset)
     {
-        auto lock = strt::shared_lock{ m_mutex };
-        return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<void> {
-            auto write_lock = strt::exclusive_lock{ m_mutex_file };
-            if (not file.is_open(fd)) {
-                return Unexpect{ Errc::bad_file_descriptor };
-            }
-            if (not file.is_dirty()) {
-                return {};    // no write, do nothing
-            }
-            file.set_dirty(false);
-            auto filesize = static_cast<usize>(stat()->get().size);
-            return context.cache.flush(id(), filesize, [&](Span<const char> in, off_t offset) {
-                return context.connection.write(context.path, in, offset);
-            });
+        auto may_file = regular_file_prelude();
+        if (not may_file) {
+            co_return Unexpect{ may_file.error() };
+        }
+        auto& file = may_file->get();
+
+        if (not file.is_open(fd)) {
+            co_return Unexpect{ Errc::bad_file_descriptor };
+        }
+
+        file.set_dirty(true);
+        co_return (co_await context.cache.write(id(), in, offset)).transform([&](usize ret) {
+            m_stat.size += ret;
+            return ret;
         });
     }
 
-    Expect<void> Node::release(Context context, u64 fd)
+    AExpect<void> Node::flush(Context context, u64 fd)
     {
-        auto lock = strt::shared_lock{ m_mutex };
-        return regular_file_prelude().and_then([&](RegularFile& file) -> Expect<void> {
-            auto write_lock = strt::exclusive_lock{ m_mutex_file };
-            if (not file.close(fd)) {
-                return Unexpect{ Errc::bad_file_descriptor };
-            }
-            if (not file.is_dirty()) {
-                return {};    // no write, do nothing
-            }
-            file.set_dirty(false);
-            auto filesize = static_cast<usize>(stat()->get().size);
-            return context.cache.flush(id(), filesize, [&](Span<const char> in, off_t offset) {
-                return context.connection.write(context.path, in, offset);
-            });
+        auto may_file = regular_file_prelude();
+        if (not may_file) {
+            co_return Unexpect{ may_file.error() };
+        }
+        auto& file = may_file->get();
+
+        if (not file.is_open(fd)) {
+            co_return Unexpect{ Errc::bad_file_descriptor };
+        }
+        if (not file.is_dirty()) {
+            co_return Expect<void>{};    // no write, do nothing
+        }
+
+        file.set_dirty(false);
+        auto filesize = static_cast<usize>(stat()->get().size);
+        co_return co_await context.cache.flush(id(), filesize, [&](Span<const char> in, off_t offset) {
+            log_d({ "flush: [id={}|buf={}|off={}] write to device..." }, id().inner(), in.size(), offset);
+            return context.connection.write(context.path, in, offset);
         });
     }
 
-    Expect<void> Node::utimens(Context context)
+    AExpect<void> Node::release(Context context, u64 fd)
     {
-        auto lock = strt::shared_lock{ m_mutex };
-        return context.connection.touch(context.path, false)
-            .and_then([&] { return context.connection.stat(context.path); })
-            .transform([&](data::Stat stat) { m_stat = std::move(stat); });
+        auto may_file = regular_file_prelude();
+        if (not may_file) {
+            co_return Unexpect{ may_file.error() };
+        }
+        auto& file = may_file->get();
+
+        if (not file.close(fd)) {
+            co_return Unexpect{ Errc::bad_file_descriptor };
+        }
+        if (not file.is_dirty()) {
+            co_return Expect<void>{};    // no write, do nothing
+        }
+        file.set_dirty(false);
+        auto filesize = static_cast<usize>(stat()->get().size);
+        co_return co_await context.cache.flush(id(), filesize, [&](Span<const char> in, off_t offset) {
+            return context.connection.write(context.path, in, offset);
+        });
+    }
+
+    AExpect<void> Node::utimens(Context context)
+    {
+        if (auto may_touch = co_await context.connection.touch(context.path, false); not may_touch) {
+            co_return Unexpect{ may_touch.error() };
+        }
+        co_return (co_await context.connection.stat(context.path)).transform([&](data::Stat stat) {
+            m_stat = std::move(stat);
+        });
     }
 
     Expect<Ref<Node>> Node::readlink()
     {
-        auto lock    = strt::shared_lock{ m_mutex };
         auto current = this;
         while (current->is<Link>()) {
             current = &current->as<Link>()->get().target();
