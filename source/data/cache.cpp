@@ -3,10 +3,10 @@
 
 namespace adbfsm::data
 {
-    Page::Page(PageKey key, usize page_size)
+    Page::Page(PageKey key, Uniq<char[]> buf, u32 size)
         : m_key{ key }
-        , m_data{ std::make_unique<char[]>(page_size) }
-        , m_size{ 0 }
+        , m_data{ std::move(buf) }
+        , m_size{ size }
     {
     }
 
@@ -18,9 +18,6 @@ namespace adbfsm::data
 
     usize Page::read(Span<char> out, usize offset)
     {
-        // if ((m_size & ~dirty_bit) < offset) {
-        //     return 0;
-        // }
         auto size = std::min((m_size & ~dirty_bit) - offset, out.size());
         std::copy_n(m_data.get() + offset, size, out.data());
         return size;
@@ -33,19 +30,6 @@ namespace adbfsm::data
         std::copy_n(in.data(), in.size(), m_data.get() + offset);
         m_size = static_cast<u32>(size) | (m_size & dirty_bit);
         return in.size();
-    }
-
-    Expect<usize> Page::write_fn(usize offset, WriteFn fn)
-    {
-        // NOTE: kinda risky since there is no offset and data size check with the page size
-        auto in = fn();
-        if (not in.has_value()) {
-            return Unexpect{ in.error() };
-        }
-        auto size = offset + in->size();
-        std::copy_n(in->data(), in->size(), m_data.get() + offset);
-        m_size = static_cast<u32>(size) | (m_size & dirty_bit);
-        return in->size();
     }
 
     usize Page::size() const
@@ -86,32 +70,38 @@ namespace adbfsm::data
         // TODO: use parallel group
 
         for (auto index : sv::iota(start, last + 1)) {
-            auto key   = PageKey{ id, index };
-            auto entry = m_table.find(key);
+            auto key = PageKey{ id, index };
 
+            auto queued = m_queue.find(key);
+            if (queued != m_queue.end()) {
+                auto fut = queued->second;
+                co_await fut->async_wait();
+                if (auto err = fut->get(); static_cast<bool>(err)) {
+                    co_return Unexpect{ err };
+                }
+            }
+
+            auto entry = m_table.find(key);
             if (entry == m_table.end()) {
-                auto& page  = m_lru.emplace_front(key, m_page_size);
+                auto promise = saf::promise<Errc>{ co_await async::this_coro::executor };
+                auto future  = std::make_shared<saf::shared_future<Errc>>(promise.get_future().share());
+                m_queue.emplace(key, std::move(future));
+
+                auto data    = std::make_unique<char[]>(m_page_size);
+                auto span    = Span{ data.get(), m_page_size };
+                auto may_len = co_await on_miss(span, static_cast<off_t>(index * m_page_size));
+                if (not may_len) {
+                    promise.set_value(may_len.error());
+                    m_queue.erase(key);
+                    co_return Unexpect{ may_len.error() };
+                }
+
+                m_lru.emplace_front(key, std::move(data), *may_len);
                 auto [p, _] = m_table.emplace(key, m_lru.begin());
                 entry       = p;
 
-                auto data    = Vec<char>(m_page_size);
-                auto may_len = co_await on_miss(data, static_cast<off_t>(index * m_page_size));
-                if (not may_len) {
-                    co_return Unexpect{ may_len.error() };
-                }
-                page.write({ data.begin(), *may_len }, 0);
-
-                if (m_table.size() > m_max_pages) {
-                    auto delta = m_table.size() - m_max_pages;
-                    while (delta-- > 0) {
-                        m_table.erase(m_lru.back().key());
-                        if (auto& page = m_lru.back(); page.is_dirty()) {
-                            m_orphaned.splice(m_orphaned.end(), m_lru, --m_lru.end());
-                        } else {
-                            m_lru.pop_back();
-                        }
-                    }
-                }
+                promise.set_value(Errc{});
+                m_queue.erase(key);
             }
 
             const auto& [_, page] = *entry;
@@ -127,6 +117,18 @@ namespace adbfsm::data
 
             auto out_sub  = Span{ out.data() + total_read, out.size() - total_read };
             total_read   += page->read(out_sub, local_offset);
+
+            if (m_table.size() > m_max_pages) {
+                auto delta = m_table.size() - m_max_pages;
+                while (delta-- > 0) {
+                    m_table.erase(m_lru.back().key());
+                    if (auto& page = m_lru.back(); page.is_dirty()) {
+                        m_orphaned.splice(m_orphaned.end(), m_lru, --m_lru.end());
+                    } else {
+                        m_lru.pop_back();
+                    }
+                }
+            }
         }
 
         co_return total_read;
@@ -142,8 +144,25 @@ namespace adbfsm::data
         // TODO: use parallel group
 
         for (auto index : sv::iota(start, last + 1)) {
-            auto key   = PageKey{ id, index };
+            auto key = PageKey{ id, index };
+
+            auto queued = m_queue.find(key);
+            if (queued != m_queue.end()) {
+                auto fut = queued->second;
+                co_await fut->async_wait();
+                if (auto err = fut->get(); static_cast<bool>(err)) {
+                    co_return Unexpect{ err };
+                }
+            }
+
             auto entry = m_table.find(key);
+            if (entry == m_table.end()) {
+                m_lru.emplace_front(key, std::make_unique<char[]>(m_page_size), 0);
+                auto [p, _] = m_table.emplace(key, m_lru.begin());
+                entry       = p;
+            }
+
+            const auto& [_, page] = *entry;
 
             auto local_offset = 0uz;
             if (index == start) {
@@ -152,14 +171,6 @@ namespace adbfsm::data
 
             auto write      = std::min(m_page_size - local_offset, in.size() - total_written);
             auto write_span = Span{ in.data() + total_written, write };
-
-            if (entry == m_table.end()) {
-                m_lru.emplace_front(key, m_page_size);
-                auto [p, _] = m_table.emplace(key, m_lru.begin());
-                entry       = p;
-            }
-
-            const auto& [_, page] = *entry;
 
             page->write(write_span, local_offset);
             page->set_dirty(true);

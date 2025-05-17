@@ -4,9 +4,10 @@
 #include "adbfsm/common.hpp"
 #include "adbfsm/data/stat.hpp"
 
-#include <functional>
+#include <saf.hpp>
 
 #include <cassert>
+#include <functional>
 #include <list>
 #include <unordered_map>
 
@@ -26,13 +27,11 @@ namespace adbfsm::data
         // NOTE: can't use std::move_only_function in gcc: "atomic constraint depends on itself"
         using WriteFn = std::function<Expect<Span<const char>>()>;
 
-        Page(PageKey key, usize page_size);
+        Page(PageKey key, Uniq<char[]> buf, u32 size);
         ~Page();
 
         usize read(Span<char> out, usize offset);
         usize write(Span<const char> in, usize offset);
-
-        Expect<usize> write_fn(usize offset, WriteFn fn);
 
         usize size() const;
 
@@ -54,7 +53,7 @@ namespace adbfsm::data
     public:
         using Lru    = std::list<Page>;
         using Lookup = std::unordered_map<PageKey, Lru::iterator>;
-        using Ord    = std::memory_order;
+        using Queue  = std::unordered_map<PageKey, Shared<saf::shared_future<Errc>>>;
 
         // NOTE: can't use std::move_only_function in gcc: "atomic constraint depends on itself"
         using OnMiss  = std::function<AExpect<usize>(Span<char> out, off_t offset)>;
@@ -77,10 +76,10 @@ namespace adbfsm::data
         usize max_pages() const { return m_max_pages; }
 
     private:
-        Lru    m_lru;    // most recently used is at the front
-        Lookup m_table;
-
-        Lru m_orphaned;    // dirty but evicted pages
+        Lru    m_lru;         // most recently used is at the front
+        Lookup m_table;       // lookup table for fast page access
+        Queue  m_queue;       // pages that are still pulling data, reader/writer should wait using this
+        Lru    m_orphaned;    // dirty but evicted pages
 
         usize m_page_size = 0;
         usize m_max_pages = 0;
