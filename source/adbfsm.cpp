@@ -52,8 +52,8 @@ namespace
                 return 0;
             }
 
-            switch (err) {
             // filter out common errors
+            switch (err) {
             case std::errc::no_such_file_or_directory:
             case std::errc::file_exists:
             case std::errc::not_a_directory:
@@ -63,14 +63,18 @@ namespace
             case std::errc::permission_denied:
             case std::errc::read_only_file_system:
             case std::errc::filename_too_long:
-            case std::errc::invalid_argument:    //
-                return -errint;
-
-            default:
+            case std::errc::invalid_argument: {
+                if (spdlog::get_level() == spdlog::level::debug) {
+                    const auto msg = std::make_error_code(err).message();
+                    adbfsm::log_e({ "{}: {:?} returned with error code [{}]: {}" }, name, path, errint, msg);
+                }
+            } break;
+            default: {
                 const auto msg = std::make_error_code(err).message();
                 adbfsm::log_e({ "{}: {:?} returned with error code [{}]: {}" }, name, path, errint, msg);
-                return -errint;
             }
+            }
+            return -errint;
         };
     }
 }
