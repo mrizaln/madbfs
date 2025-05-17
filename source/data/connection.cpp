@@ -144,9 +144,24 @@ namespace
             bp::process_stdio{ pipe_in, pipe_out, pipe_err },
         };
 
-        if (auto [ec, _] = co_await async::write_exact(pipe_in, in); ec) {
-            adbfsm::log_e({ "{}: failed to read to stdin: {}" }, __func__, ec.message());
+        // NOTE: if I write to stdin asynchronously, for some reason the write will be corrupted. at least
+        // that is what happen on multiple dd command to the same file with disjoint offset with fixed size.
+
+        // if (auto [ec, _] = co_await async::write_exact(pipe_in, in); ec) {
+        //     adbfsm::log_e({ "{}: failed to write to stdin: {}" }, __func__, ec.message());
+        //     co_return adbfsm::Unexpect{ async::to_generic_err(ec) };
+        // }
+        // pipe_in.close();
+
+        // NOTE: [cont.] switching to writing the data at once with blocking operation fixed the issue.
+        // TODO: make the async code correct (maybe use `conv=sync` on dd)
+
+        auto ec = boost::system::error_code{};
+        if (auto n = boost::asio::write(pipe_in, async::buffer(in), ec); ec) {
+            adbfsm::log_e({ "{}: failed to write to stdin: {}" }, __func__, ec.message());
             co_return adbfsm::Unexpect{ async::to_generic_err(ec) };
+        } else if (n < in.size()) {
+            co_return adbfsm::Unexpect{ adbfsm::Errc::broken_pipe };
         }
         pipe_in.close();
 

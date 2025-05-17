@@ -102,6 +102,18 @@ namespace adbfsm::data
 
                 promise.set_value(Errc{});
                 m_queue.erase(key);
+
+                if (m_table.size() > m_max_pages) {
+                    auto delta = m_table.size() - m_max_pages;
+                    while (delta-- > 0) {
+                        m_table.erase(m_lru.back().key());
+                        if (auto& page = m_lru.back(); page.is_dirty()) {
+                            m_orphaned.splice(m_orphaned.end(), m_lru, --m_lru.end());
+                        } else {
+                            m_lru.pop_back();
+                        }
+                    }
+                }
             }
 
             const auto& [_, page] = *entry;
@@ -117,18 +129,6 @@ namespace adbfsm::data
 
             auto out_sub  = Span{ out.data() + total_read, out.size() - total_read };
             total_read   += page->read(out_sub, local_offset);
-
-            if (m_table.size() > m_max_pages) {
-                auto delta = m_table.size() - m_max_pages;
-                while (delta-- > 0) {
-                    m_table.erase(m_lru.back().key());
-                    if (auto& page = m_lru.back(); page.is_dirty()) {
-                        m_orphaned.splice(m_orphaned.end(), m_lru, --m_lru.end());
-                    } else {
-                        m_lru.pop_back();
-                    }
-                }
-            }
         }
 
         co_return total_read;
@@ -204,14 +204,24 @@ namespace adbfsm::data
         // TODO: use parallel group
 
         for (auto index : sv::iota(0uz, num_pages)) {
-            auto key   = PageKey{ id, index };
-            auto entry = m_table.find(key);
+            auto key = PageKey{ id, index };
 
+            auto queued = m_queue.find(key);
+            if (queued != m_queue.end()) {
+                auto fut = queued->second;
+                co_await fut->async_wait();
+                if (auto err = fut->get(); static_cast<bool>(err)) {
+                    co_return Unexpect{ err };
+                }
+            }
+
+            auto entry = m_table.find(key);
             if (entry == m_table.end()) {
+                log_c({ "{}: page skipped [id={}|idx={}]" }, __func__, id.inner(), index);
                 continue;
             }
 
-            auto& page = entry->second;
+            auto page = entry->second;
             if (page->is_dirty()) {
                 // PERF: since this temporary location is unchanging, making this static might be beneficial
                 thread_local static auto data = Vec<char>{};
@@ -228,6 +238,7 @@ namespace adbfsm::data
                 }
             }
         }
+
         co_return Expect<void>{};
     }
 
