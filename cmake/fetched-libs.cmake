@@ -2,14 +2,14 @@ set(FETCHCONTENT_QUIET FALSE)
 
 include(FetchContent)
 
-# target: shared_futex
+# target: saf
 # --------------------
 FetchContent_Declare(
-    shared_futex
+    saf
     SYSTEM
-    GIT_REPOSITORY https://github.com/mrizaln/shared_futex
-    GIT_TAG 0aaac10f126022312c26a1546bac06d7e81f3afc
+    GIT_REPOSITORY https://github.com/ashtum/saf
+    GIT_TAG 3643d80c9ce0eaec374416bd456637b07a90b4d4
     GIT_PROGRESS TRUE
 )
-FetchContent_MakeAvailable(shared_futex)
+FetchContent_MakeAvailable(saf)
 # --------------------

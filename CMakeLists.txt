@@ -12,13 +12,13 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+find_package(Boost REQUIRED)
 find_package(fmt REQUIRED)
 find_package(libfuse REQUIRED)
 find_package(rapidhash REQUIRED)
 find_package(spdlog REQUIRED)
-find_package(Boost REQUIRED)
 
-include(cmake/fetched-libs.cmake) # shared_futex
+include(cmake/fetched-libs.cmake) # saf
 
 add_library(adbfsm-lib STATIC)
 target_sources(
@@ -40,7 +40,7 @@ target_link_libraries(
         fmt::fmt
         libfuse::libfuse
         rapidhash::rapidhash
-        shared_futex
+        saf
         spdlog::spdlog
 )
 target_include_directories(adbfsm-lib PUBLIC include)
@@ -50,8 +50,10 @@ target_link_libraries(adbfsm PRIVATE adbfsm-lib)
 target_compile_options(adbfsm PRIVATE -Wall -Wextra -Wconversion)
 
 # # sanitizer
-# target_compile_options(adbfsm PRIVATE -fsanitize=address,leak,undefined)
-# target_link_options(adbfsm PRIVATE -fsanitize=address,leak,undefined)
+# # target_compile_options(adbfsm PRIVATE -fsanitize=address,leak,undefined)
+# # target_link_options(adbfsm PRIVATE -fsanitize=address,leak,undefined)
+# target_compile_options(adbfsm PRIVATE -fsanitize=address,undefined)
+# target_link_options(adbfsm PRIVATE -fsanitize=address,undefined)
 
 if(ADBFSM_ENABLE_TESTS)
     message(STATUS "Building tests")
