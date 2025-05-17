@@ -150,26 +150,26 @@ namespace mock
     class DummyConnection final : public IConnection
     {
     public:
-        Expect<Gen<ParsedStat>> statdir(path::Path) override { return adbfsm::Unexpect{ {} }; }
-        Expect<Stat>            stat(path::Path) override { return Stat{}; }
-        Expect<path::PathBuf>   readlink(path::Path path) override { return path.into_buf(); };
+        AExpect<Gen<ParsedStat>> statdir(path::Path) override { co_return adbfsm::Unexpect{ {} }; }
+        AExpect<Stat>            stat(path::Path) override { co_return Stat{}; }
+        AExpect<path::PathBuf>   readlink(path::Path path) override { co_return path.into_buf(); };
 
         // directory operations
-        Expect<void> mkdir(path::Path) override { return {}; }
-        Expect<void> rm(path::Path, bool) override { return {}; }
-        Expect<void> rmdir(path::Path) override { return {}; }
-        Expect<void> mv(path::Path, path::Path) override { return {}; }
+        AExpect<void> mkdir(path::Path) override { co_return Expect<void>{}; }
+        AExpect<void> rm(path::Path, bool) override { co_return Expect<void>{}; }
+        AExpect<void> rmdir(path::Path) override { co_return Expect<void>{}; }
+        AExpect<void> mv(path::Path, path::Path) override { co_return Expect<void>{}; }
 
         // file operations
-        Expect<void>  truncate(path::Path, off_t) override { return {}; }
-        Expect<u64>   open(path::Path, int) override { return {}; }
-        Expect<usize> read(path::Path, Span<char>, off_t) override { return {}; }
-        Expect<usize> write(path::Path, Span<const char>, off_t) override { return {}; }
-        Expect<void>  flush(path::Path) override { return {}; }
-        Expect<void>  release(path::Path) override { return {}; }
+        AExpect<void>  truncate(path::Path, off_t) override { co_return Expect<void>{}; }
+        AExpect<u64>   open(path::Path, int) override { co_return Expect<u64>{}; }
+        AExpect<usize> read(path::Path, Span<char>, off_t) override { co_return Expect<usize>{}; }
+        AExpect<usize> write(path::Path, Span<const char>, off_t) override { co_return Expect<usize>{}; }
+        AExpect<void>  flush(path::Path) override { co_return Expect<void>{}; }
+        AExpect<void>  release(path::Path) override { co_return Expect<void>{}; }
 
         // directory operation (adding file) or file operation (update time)
-        Expect<void> touch(path::Path, bool) override { return {}; }
+        AExpect<void> touch(path::Path, bool) override { co_return Expect<void>{}; }
     };
 }
 
@@ -192,51 +192,58 @@ int main()
         auto cache      = adbfsm::data::Cache{ 64 * 1024, 1024 };
         auto context    = Node::Context{ connection, cache, "/dummy"_path };
 
-        auto root = Node{ "/", nullptr, {}, Directory{} };
+        auto io_context = adbfsm::async::Context{};
 
-        Node& hello = root.mkdir(context, "hello").unwrap();
+        auto coro = [&] -> adbfsm::Await<void> {
+            auto root = Node{ "/", nullptr, {}, Directory{} };
 
-        _ = hello.touch(context, "world.txt").unwrap();
-        _ = hello.touch(context, "foo.txt").unwrap();
-        _ = hello.touch(context, "movie.mp4").unwrap();
+            Node& hello = (co_await root.mkdir(context, "hello")).unwrap();
 
-        Node& bar = hello.mkdir(context, "bar").unwrap();
+            _ = (co_await hello.touch(context, "world.txt")).unwrap();
+            _ = (co_await hello.touch(context, "foo.txt")).unwrap();
+            _ = (co_await hello.touch(context, "movie.mp4")).unwrap();
 
-        _ = bar.touch(context, "baz.txt").unwrap();
-        _ = bar.touch(context, "qux.txt").unwrap();
-        _ = bar.touch(context, "quux.txt").unwrap();
+            Node& bar = (co_await hello.mkdir(context, "bar")).unwrap();
 
-        Node& bye = root.mkdir(context, "bye").unwrap();
+            _ = (co_await bar.touch(context, "baz.txt")).unwrap();
+            _ = (co_await bar.touch(context, "qux.txt")).unwrap();
+            _ = (co_await bar.touch(context, "quux.txt")).unwrap();
 
-        _ = bye.touch(context, "world.txt").unwrap();
-        _ = bye.touch(context, "movie.mp4").unwrap();
-        _ = bye.touch(context, "music.mp3").unwrap();
+            Node& bye = (co_await root.mkdir(context, "bye")).unwrap();
 
-        Node& family = bye.mkdir(context, "family").unwrap();
+            _ = (co_await bye.touch(context, "world.txt")).unwrap();
+            _ = (co_await bye.touch(context, "movie.mp4")).unwrap();
+            _ = (co_await bye.touch(context, "music.mp3")).unwrap();
 
-        _ = family.touch(context, "dad.txt").unwrap();
-        _ = family.touch(context, "mom.txt").unwrap();
+            Node& family = (co_await bye.mkdir(context, "family")).unwrap();
 
-        Node& friends = bye.mkdir(context, "friends").unwrap();
+            _ = (co_await family.touch(context, "dad.txt")).unwrap();
+            _ = (co_await family.touch(context, "mom.txt")).unwrap();
 
-        _ = friends.touch(context, "bob.txt").unwrap();
+            Node& friends = (co_await bye.mkdir(context, "friends")).unwrap();
 
-        Node& school = friends.mkdir(context, "school").unwrap();
+            _ = (co_await friends.touch(context, "bob.txt")).unwrap();
 
-        _ = school.touch(context, "kal'tsit.txt").unwrap();
-        _ = school.touch(context, "closure.txt").unwrap();
+            Node& school = (co_await friends.mkdir(context, "school")).unwrap();
 
-        Node& work = friends.mkdir(context, "work").unwrap();
+            _ = (co_await school.touch(context, "kal'tsit.txt")).unwrap();
+            _ = (co_await school.touch(context, "closure.txt")).unwrap();
 
-        Node& wife = work.touch(context, "loughshinny <3.txt").unwrap();
+            Node& work = (co_await friends.mkdir(context, "work")).unwrap();
 
-        _ = work.touch(context, "eblana?.mp4").unwrap();
-        _ = school.link("hehe", &work).unwrap();
-        _ = hello.link("wife", &wife).unwrap();
-        _ = bye.touch(context, "theresa.txt").unwrap();
+            Node& wife = (co_await work.touch(context, "loughshinny <3.txt")).unwrap();
 
-        auto tree_str = fmt::format("\n{}", root);
-        expect(expected == tree_str) << diff_str(expected, tree_str);
+            _ = (co_await work.touch(context, "eblana?.mp4")).unwrap();
+            _ = school.link("hehe", &work).unwrap();
+            _ = hello.link("wife", &wife).unwrap();
+            _ = (co_await bye.touch(context, "theresa.txt")).unwrap();
+
+            auto tree_str = fmt::format("\n{}", root);
+            expect(expected == tree_str) << diff_str(expected, tree_str);
+        };
+
+        adbfsm::async::spawn(io_context, coro(), adbfsm::async::detached);
+        io_context.run_one();
 
 #undef unwrap
     };
@@ -248,61 +255,68 @@ int main()
         auto cache      = adbfsm::data::Cache{ 64 * 1024, 1024 };
         auto tree       = FileTree{ connection, cache };
 
+        auto io_context = adbfsm::async::Context{};
+
 #define unwrap(T) transform_error([](auto e) { return raise_expect_error<T>(e); }).value()
 
         using adbfsm::path::operator""_path;
 
-        tree.mkdir("/hello"_path).unwrap(Node*);
-        tree.mknod("/hello/world.txt"_path).unwrap(Node*);
-        tree.mknod("/hello/foo.txt"_path).unwrap(Node*);
-        tree.mknod("/hello/movie.mp4"_path).unwrap(Node*);
-        tree.mkdir("/hello/bar"_path).unwrap(Node*);
-        tree.mknod("/hello/bar/baz.txt"_path).unwrap(Node*);
-        tree.mknod("/hello/bar/qux.txt"_path).unwrap(Node*);
-        tree.mknod("/hello/bar/quux.txt"_path).unwrap(Node*);
-        tree.mkdir("/bye"_path).unwrap(Node*);
-        tree.mknod("/bye/world.txt"_path).unwrap(Node*);
-        tree.mknod("/bye/movie.mp4"_path).unwrap(Node*);
-        tree.mknod("/bye/music.mp3"_path).unwrap(Node*);
-        tree.mkdir("/bye/family"_path).unwrap(Node*);
-        tree.mknod("/bye/family/dad.txt"_path).unwrap(Node*);
-        tree.mknod("/bye/family/mom.txt"_path).unwrap(Node*);
-        tree.mkdir("/bye/friends"_path).unwrap(Node*);
-        tree.mknod("/bye/friends/bob.txt"_path).unwrap(Node*);
-        tree.mkdir("/bye/friends/school"_path).unwrap(Node*);
-        tree.mknod("/bye/friends/school/kal'tsit.txt"_path).unwrap(Node*);
-        tree.mknod("/bye/friends/school/closure.txt"_path).unwrap(Node*);
-        tree.mkdir("/bye/friends/work"_path).unwrap(Node*);
-        tree.mknod("/bye/friends/work/loughshinny <3.txt"_path).unwrap(Node*);
-        tree.mknod("/bye/friends/work/eblana?.mp4"_path).unwrap(Node*);
+        auto coro = [&] -> adbfsm::Await<void> {
+            (co_await tree.mkdir("/hello"_path)).unwrap(Node*);
+            (co_await tree.mknod("/hello/world.txt"_path)).unwrap(Node*);
+            (co_await tree.mknod("/hello/foo.txt"_path)).unwrap(Node*);
+            (co_await tree.mknod("/hello/movie.mp4"_path)).unwrap(Node*);
+            (co_await tree.mkdir("/hello/bar"_path)).unwrap(Node*);
+            (co_await tree.mknod("/hello/bar/baz.txt"_path)).unwrap(Node*);
+            (co_await tree.mknod("/hello/bar/qux.txt"_path)).unwrap(Node*);
+            (co_await tree.mknod("/hello/bar/quux.txt"_path)).unwrap(Node*);
+            (co_await tree.mkdir("/bye"_path)).unwrap(Node*);
+            (co_await tree.mknod("/bye/world.txt"_path)).unwrap(Node*);
+            (co_await tree.mknod("/bye/movie.mp4"_path)).unwrap(Node*);
+            (co_await tree.mknod("/bye/music.mp3"_path)).unwrap(Node*);
+            (co_await tree.mkdir("/bye/family"_path)).unwrap(Node*);
+            (co_await tree.mknod("/bye/family/dad.txt"_path)).unwrap(Node*);
+            (co_await tree.mknod("/bye/family/mom.txt"_path)).unwrap(Node*);
+            (co_await tree.mkdir("/bye/friends"_path)).unwrap(Node*);
+            (co_await tree.mknod("/bye/friends/bob.txt"_path)).unwrap(Node*);
+            (co_await tree.mkdir("/bye/friends/school"_path)).unwrap(Node*);
+            (co_await tree.mknod("/bye/friends/school/kal'tsit.txt"_path)).unwrap(Node*);
+            (co_await tree.mknod("/bye/friends/school/closure.txt"_path)).unwrap(Node*);
+            (co_await tree.mkdir("/bye/friends/work"_path)).unwrap(Node*);
+            (co_await tree.mknod("/bye/friends/work/loughshinny <3.txt"_path)).unwrap(Node*);
+            (co_await tree.mknod("/bye/friends/work/eblana?.mp4"_path)).unwrap(Node*);
 
-        tree.symlink("/bye/friends/school/hehe"_path, "/bye/friends/work"_path).unwrap(void);
-        tree.symlink("/hello/wife"_path, "/bye/friends/work/loughshinny <3.txt"_path).unwrap(void);
+            tree.symlink("/bye/friends/school/hehe"_path, "/bye/friends/work"_path).unwrap(void);
+            tree.symlink("/hello/wife"_path, "/bye/friends/work/loughshinny <3.txt"_path).unwrap(void);
 
-        tree.mknod("/bye/theresa.txt"_path).unwrap(Node*);
+            (co_await tree.mknod("/bye/theresa.txt"_path)).unwrap(Node*);
 
-        auto tree_str = fmt::format("\n{}", tree.root());
-        expect(expected == tree_str) << diff_str(expected, tree_str);
+            auto tree_str = fmt::format("\n{}", tree.root());
+            expect(expected == tree_str) << diff_str(expected, tree_str);
 
-        tree.unlink("/hello/world.txt"_path).unwrap(void);
-        tree.unlink("/bye/music.mp3"_path).unwrap(void);
-        tree.unlink("/bye/friends/bob.txt"_path).unwrap(void);
-        tree.unlink("/bye/friends/school/hehe"_path).unwrap(void);
+            (co_await tree.unlink("/hello/world.txt"_path)).unwrap(void);
+            (co_await tree.unlink("/bye/music.mp3"_path)).unwrap(void);
+            (co_await tree.unlink("/bye/friends/bob.txt"_path)).unwrap(void);
+            (co_await tree.unlink("/bye/friends/school/hehe"_path)).unwrap(void);
 
-        // there is no recursive delete
-        Node& bar      = tree.traverse("/hello/bar"_path).unwrap(Node*);
-        auto  bar_path = bar.build_path();
-        auto  paths    = std::vector<adbfsm::path::PathBuf>{};
+            // there is no recursive delete
+            Node& bar      = tree.traverse("/hello/bar"_path).unwrap(Node*);
+            auto  bar_path = bar.build_path();
+            auto  paths    = std::vector<adbfsm::path::PathBuf>{};
 
-        _ = bar.list([&](Str name) { paths.push_back(bar_path.extend_copy(name).value()); });
-        for (const auto& path : paths) {
-            tree.unlink(path.as_path()).unwrap(void);
-        }
+            _ = bar.list([&](Str name) { paths.push_back(bar_path.extend_copy(name).value()); });
+            for (const auto& path : paths) {
+                (co_await tree.unlink(path.as_path())).unwrap(void);
+            }
 
-        tree.rmdir("/hello/bar"_path).unwrap(void);
+            (co_await tree.rmdir("/hello/bar"_path)).unwrap(void);
 
-        tree_str = fmt::format("\n{}", tree.root());
-        expect(expected_rm == tree_str) << diff_str(expected_rm, tree_str);
+            tree_str = fmt::format("\n{}", tree.root());
+            expect(expected_rm == tree_str) << diff_str(expected_rm, tree_str);
+        };
+
+        adbfsm::async::spawn(io_context, coro(), adbfsm::async::detached);
+        io_context.run_one();
 
 #undef unwrap
     };
