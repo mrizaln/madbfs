@@ -13,18 +13,21 @@ namespace adbfsm
     class Adbfsm
     {
     public:
-        Adbfsm(Uniq<data::IConnection> connection, Uniq<data::Cache> cache);
+        Adbfsm(usize page_size, usize max_pages);
+        ~Adbfsm();
 
         tree::FileTree&    tree() { return m_tree; }
-        const data::Cache& cache() const { return *m_cache; }
+        async::Context&    async_ctx() { return m_async_ctx; }
+        const data::Cache& cache() const { return m_cache; }
 
     private:
-        nlohmann::json ipc_handler(data::ipc::Op op);
+        boost::json::value ipc_handler(data::ipc::Op op);
 
+        async::Context          m_async_ctx;
         Uniq<data::IConnection> m_connection;
-        Uniq<data::Cache>       m_cache;
+        data::Cache             m_cache;
         tree::FileTree          m_tree;
-        Opt<data::Ipc>          m_ipc;
+        Uniq<data::Ipc>         m_ipc;
     };
 
     void* init(fuse_conn_info*, fuse_config*);

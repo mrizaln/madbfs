@@ -6,7 +6,6 @@
 #include "adbfsm/data/stat.hpp"
 #include "adbfsm/path/path.hpp"
 
-#include <shared_futex/shared_futex.hpp>
 #include <sys/types.h>
 
 #include <algorithm>
@@ -300,7 +299,7 @@ namespace adbfsm::tree
          *
          * @return The new regular file node.
          */
-        Expect<Ref<Node>> touch(Context context, Str name);
+        AExpect<Ref<Node>> touch(Context context, Str name);
 
         /**
          * @brief Create a new child node as Directory.
@@ -310,7 +309,7 @@ namespace adbfsm::tree
          *
          * @return The new directory node.
          */
-        Expect<Ref<Node>> mkdir(Context context, Str name);
+        AExpect<Ref<Node>> mkdir(Context context, Str name);
 
         /**
          * @brief Remove a child node by its name (RegularFile or Directory).
@@ -319,7 +318,7 @@ namespace adbfsm::tree
          * @param name The name of the child node.
          * @param recursive Whether to remove recursively or not.
          */
-        Expect<void> rm(Context context, Str name, bool recursive);
+        AExpect<void> rm(Context context, Str name, bool recursive);
 
         /**
          * @brief Remove a child node by its name (Directory).
@@ -327,7 +326,7 @@ namespace adbfsm::tree
          * @param context Context needed to communicate with device and local.
          * @param name The name of the child node.
          */
-        Expect<void> rmdir(Context context, Str name);
+        AExpect<void> rmdir(Context context, Str name);
 
         // -----------------------
 
@@ -340,7 +339,7 @@ namespace adbfsm::tree
          * @param context Context needed to communicate with device and local.
          * @param size The final size to truncate to.
          */
-        Expect<void> truncate(Context context, off_t size);
+        AExpect<void> truncate(Context context, off_t size);
 
         /**
          * @brief Open file.
@@ -350,7 +349,7 @@ namespace adbfsm::tree
          *
          * @return File descriptor.
          */
-        Expect<u64> open(Context context, int flags);
+        AExpect<u64> open(Context context, int flags);
 
         /**
          * @brief Read data from file.
@@ -362,7 +361,7 @@ namespace adbfsm::tree
          *
          * @return The number of bytes read.
          */
-        Expect<usize> read(Context context, u64 fd, Span<char> out, off_t offset);
+        AExpect<usize> read(Context context, u64 fd, Span<char> out, off_t offset);
 
         /**
          * @brief Write data to file.
@@ -374,7 +373,7 @@ namespace adbfsm::tree
          *
          * @return The number of bytes written.
          */
-        Expect<usize> write(Context context, u64 fd, Str in, off_t offset);
+        AExpect<usize> write(Context context, u64 fd, Str in, off_t offset);
 
         /**
          * @brief Flush buffer of the file.
@@ -384,21 +383,21 @@ namespace adbfsm::tree
          *
          * Basically forcing writing to the file itself instead of to the buffer in memory.
          */
-        Expect<void> flush(Context context, u64 fd);
+        AExpect<void> flush(Context context, u64 fd);
 
         /**
          * @brief Release file.
          *
          * @param context Context needed to communicate with device and local.
          */
-        Expect<void> release(Context context, u64 fd);
+        AExpect<void> release(Context context, u64 fd);
 
         /**
          * @brief Update the timestamps of a file.
          *
          * @param context Context needed to communicate with device and local.
          */
-        Expect<void> utimens(Context context);
+        AExpect<void> utimens(Context context);
 
         // -------------------------
 
@@ -448,9 +447,6 @@ namespace adbfsm::tree
         String     m_name   = {};
         data::Stat m_stat   = {};
         File       m_value;
-
-        mutable strt::shared_futex_micro m_mutex;
-        mutable strt::shared_futex_micro m_mutex_file;
     };
 }
 

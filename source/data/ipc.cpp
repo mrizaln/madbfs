@@ -1,8 +1,5 @@
 #include "adbfsm/data/ipc.hpp"
 #include "adbfsm/log.hpp"
-#include "adbfsm/util/threadpool.hpp"
-
-#include <nlohmann/json.hpp>
 
 namespace adbfsm::data::ipc::names
 {
@@ -19,14 +16,15 @@ namespace adbfsm::data
     using LenInfo              = std::array<char, 4>;
     constexpr auto max_msg_len = 4 * 1024uz;    // 4 KiB
 
-    Expect<Str> receive(sockpp::unix_socket& sock, String& buffer)
+    AExpect<String> receive(Ipc::Socket& sock)
     {
         auto len_buffer = LenInfo{};
-        auto len_res    = sock.read_n(len_buffer.data(), len_buffer.size());
+        auto len_res    = co_await sock.async_read_some(async::buffer(len_buffer));
         if (not len_res) {
-            return Unexpect{ static_cast<Errc>(len_res.error().value()) };
+            log_w({ "{}: failed to read from peer: {}" }, __func__, len_res.error().message());
+            co_return Unexpect{ async::to_generic_err(len_res.error()) };
         } else if (len_res.value() != len_buffer.size()) {
-            return Unexpect{ Errc::invalid_argument };
+            co_return Unexpect{ Errc::invalid_argument };
         }
 
         auto len = ::ntohl(std::bit_cast<u32>(len_buffer));
@@ -34,58 +32,62 @@ namespace adbfsm::data
             Unexpect{ Errc::message_size };
         }
 
-        if (buffer.size() < len) {
-            buffer.resize(std::bit_ceil(len), '\0');
+        auto buffer      = String(len, '\0');
+        auto [ec, count] = co_await async::read_exact(sock, buffer);
+        if (ec) {
+            log_w({ "{}: failed to read from peer: {}" }, __func__, ec.message());
+            co_return Unexpect{ async::to_generic_err(ec) };
+        } else if (count != len) {
+            co_return Unexpect{ Errc::connection_reset };
         }
 
-        auto msg = sock.read_n(buffer.data(), len);
-        if (not msg) {
-            return Unexpect{ static_cast<Errc>(msg.error().value()) };
-        } else if (msg.value() != len) {
-            return Unexpect{ Errc::connection_reset };
-        }
-
-        return Str{ buffer.data(), len };
+        co_return Str{ buffer.data(), len };
     }
 
-    Expect<void> send(sockpp::unix_socket& sock, Str msg)
+    AExpect<void> send(Ipc::Socket& sock, Str msg)
     {
-        auto len = std::bit_cast<LenInfo>(::htonl(static_cast<u32>(msg.size())));
-        if (auto res = sock.write_n(len.data(), len.size()); not res) {
-            return Unexpect{ static_cast<Errc>(res.error().value()) };
+        auto len     = std::bit_cast<LenInfo>(::htonl(static_cast<u32>(msg.size())));
+        auto len_str = Str{ len.data(), len.size() };
+        if (auto [ec, _] = co_await async::write_exact(sock, len_str); ec) {
+            log_w({ "{}: failed to write to peer: {}" }, __func__, ec.message());
+            co_return Unexpect{ async::to_generic_err(ec) };
         }
 
-        auto res = sock.write_n(msg.data(), msg.size());
-        if (not res) {
-            return Unexpect{ static_cast<Errc>(res.error().value()) };
-        } else if (res.value() != msg.size()) {
-            return Unexpect{ Errc::connection_reset };
+        auto [ec, count] = co_await async::write_exact(sock, msg);
+        if (ec) {
+            log_w({ "{}: failed to write to peer: {}" }, __func__, ec.message());
+            co_return Unexpect{ async::to_generic_err(ec) };
+        } else if (count != msg.size()) {
+            co_return Unexpect{ Errc::connection_reset };
         }
 
-        return {};
+        co_return Expect<void>{};
     }
 
-    Opt<ipc::Op> parse_msg(Str msg) noexcept(false)
+    std::expected<ipc::Op, std::string> parse_msg(Str msg) noexcept(false)
     {
-        auto json = nlohmann::json::parse(msg);
+        try {
+            const auto json = boost::json::parse(msg);
+            const auto op   = json.at("op").as_string();
 
-        const auto op = json.at("op").get<String>();
+            if (op == ipc::names::help) {
+                return ipc::Op{ ipc::Help{} };
+            } else if (op == ipc::names::invalidate_cache) {
+                return ipc::Op{ ipc::InvalidateCache{} };
+            } else if (op == ipc::names::set_page_size) {
+                return ipc::Op{ ipc::SetPageSize{ .kib = json.at("value").at("kib").as_uint64() } };
+            } else if (op == ipc::names::get_page_size) {
+                return ipc::Op{ ipc::GetPageSize{} };
+            } else if (op == ipc::names::set_cache_size) {
+                return ipc::Op{ ipc::SetCacheSize{ .mib = json.at("value").at("mib").as_uint64() } };
+            } else if (op == ipc::names::get_cache_size) {
+                return ipc::Op{ ipc::GetCacheSize{} };
+            }
 
-        if (op == ipc::names::help) {
-            return ipc::Op{ ipc::Help{} };
-        } else if (op == ipc::names::invalidate_cache) {
-            return ipc::Op{ ipc::InvalidateCache{} };
-        } else if (op == ipc::names::set_page_size) {
-            return ipc::Op{ ipc::SetPageSize{ .kib = json.at("value").at("kib") } };
-        } else if (op == ipc::names::get_page_size) {
-            return ipc::Op{ ipc::GetPageSize{} };
-        } else if (op == ipc::names::set_cache_size) {
-            return ipc::Op{ ipc::SetCacheSize{ .mib = json.at("value").at("mib") } };
-        } else if (op == ipc::names::get_cache_size) {
-            return ipc::Op{ ipc::GetCacheSize{} };
+            return std::unexpected{ fmt::format("'{}' is not a valid operation, try 'help'", op) };
+        } catch (const std::exception& e) {
+            return std::unexpected{ e.what() };
         }
-
-        return std::nullopt;
     }
 }
 
@@ -93,7 +95,7 @@ namespace adbfsm::data
 {
     Ipc::~Ipc()
     {
-        if (m_socket) {
+        if (m_running) {
             stop();
             auto sock = m_socket_path.as_path().fullpath();    // underlying is an std::string
             if (::unlink(sock.data()) < 0) {
@@ -102,7 +104,7 @@ namespace adbfsm::data
         }
     }
 
-    Expect<Ipc> Ipc::create()
+    Expect<Uniq<Ipc>> Ipc::create(async::Context& context) noexcept(false)
     {
         auto socket_path = [] -> String {
             const auto* res = std::getenv("XDG_RUNTIME_DIR");
@@ -119,99 +121,82 @@ namespace adbfsm::data
         socket_path += serial;
         socket_path += ".sock";
 
-        auto acc = std::make_unique<sockpp::unix_acceptor>();
-        if (auto res = acc->open(sockpp::unix_address{ socket_path }); not res) {
-            return Unexpect{ static_cast<Errc>(res.error().value()) };
-        }
-
         auto path = path::create_buf(std::move(socket_path));
         if (not path.has_value()) {
             return Unexpect{ Errc::bad_address };
         }
 
-        return Ipc{ std::move(*path), std::move(acc) };
+        auto ep = async::unix_socket::Endpoint{
+            path->as_path().fullpath(),
+        };
+
+        try {
+            auto acc = Acceptor{ context, ep };    // may throw
+            return Uniq<Ipc>{ new Ipc{ std::move(*path), std::move(acc) } };
+        } catch (const boost::system::system_error& e) {
+            log_e({ "{}: failed to construct acceptor: {}" }, __func__, e.what());
+            return Unexpect{ async::to_generic_err(e.code()) };
+        }
     }
 
-    void Ipc::launch(OnOp on_op)
+    Await<void> Ipc::launch(OnOp on_op)
     {
+        log_d({ "{}: ipc launched!" }, __func__);
         m_running = true;
-        m_thread  = std::jthread{ [this, on_op = std::move(on_op)](std::stop_token st) mutable {
-            run(st, std::move(on_op));
-        } };
+        m_on_op   = std::move(on_op);
+        co_await run();
     }
 
     void Ipc::stop()
     {
-        if (m_running) {
-            m_socket->shutdown();
+        m_running = false;
+        m_socket.cancel();
+        m_socket.close();
+    }
+
+    Await<void> Ipc::run()
+    {
+        while (m_running) {
+            auto res = co_await m_socket.async_accept();
+            if (not res) {
+                log_e({ "{}: socket accept failed: {}" }, __func__, res.error().message());
+                continue;
+            }
+
+            log_i({ "{}: new ipc connection from peer" }, __func__);
+            co_await handle_peer(std::move(res).value());
         }
     }
 
-    void Ipc::run(std::stop_token st, OnOp on_op)
+    Await<void> Ipc::handle_peer(Socket sock)
     {
-        m_running = true;
+        auto op_str = co_await receive(sock);
+        if (not op_str) {
+            co_return;
+        }
 
-        auto  buffer     = String(1024, '0');
-        auto* threadpool = util::Threadpool::get_instance();
-        assert(threadpool != nullptr);
+        log_d({ "{}: op sent by peer: {:?}" }, __func__, *op_str);
+        auto op = parse_msg(op_str.value());
 
-        while (not st.stop_requested()) {
-            auto res = m_socket->accept();
-            if (not res) {
-                log_e({ "{}: socket accept failed: {}" }, __func__, res.error_message());
-                continue;
+        if (op.has_value()) {
+            auto response      = boost::json::object{};
+            response["status"] = "success";
+            response["value"]  = m_on_op(*op);
+
+            auto msg = boost::json::serialize(response);
+            if (auto res = co_await send(sock, msg); not res) {
+                const auto msg = std::make_error_code(res.error()).message();
+                log_w({ "{}: failed to send message: {}" }, __func__, msg);
             }
+        } else {
+            auto json       = boost::json::object{};
+            json["status"]  = "error";
+            json["message"] = std::move(op).error();
 
-            auto sock = res.release();
-            log_i({ "{}: new ipc connection from peer" }, __func__);
-
-            auto op_str = receive(sock, buffer);
-            if (not op_str) {
-                const auto msg = std::make_error_code(op_str.error()).message();
-                log_w({ "{}: failed to receve message from peer: {}" }, __func__, msg);
-                continue;
-            }
-
-            try {
-                auto op = parse_msg(op_str.value());
-                if (not op.has_value()) {
-                    threadpool->enqueue_detached([sock = std::move(sock)] mutable {
-                        auto json       = nlohmann::json{};
-                        json["status"]  = "error";
-                        json["message"] = "invalid operation";
-
-                        auto msg = nlohmann::to_string(json);
-                        if (auto res = send(sock, msg); not res) {
-                            const auto msg = std::make_error_code(res.error()).message();
-                            log_w({ "run | threadpool: failed to send message: {}" }, msg);
-                        }
-                    });
-                } else {
-                    threadpool->enqueue_detached([&on_op, sock = std::move(sock), op = *op] mutable {
-                        auto response      = nlohmann::json{};
-                        response["status"] = "success";
-                        response["value"]  = on_op(op);
-
-                        auto msg = nlohmann::to_string(response);
-                        if (auto res = send(sock, msg); not res) {
-                            const auto msg = std::make_error_code(res.error()).message();
-                            log_w({ "run | threadpool: failed to send message: {}" }, msg);
-                        }
-                    });
-                }
-            } catch (const std::exception& e) {
-                threadpool->enqueue_detached([what = String{ e.what() }, sock = std::move(sock)] mutable {
-                    auto json       = nlohmann::json{};
-                    json["status"]  = "error";
-                    json["message"] = std::move(what);
-
-                    auto msg = nlohmann::to_string(json);
-                    if (auto res = send(sock, msg); not res) {
-                        const auto msg = std::make_error_code(res.error()).message();
-                        log_w({ "run | threadpool: failed to send message: {}" }, msg);
-                    }
-                });
-                continue;
+            auto msg = boost::json::serialize(json);
+            if (auto res = co_await send(sock, msg); not res) {
+                const auto msg = std::make_error_code(res.error()).message();
+                log_w({ "{}: failed to send message: {}" }, __func__, msg);
             }
         }
     }

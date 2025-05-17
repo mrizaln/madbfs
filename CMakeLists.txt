@@ -12,14 +12,13 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+find_package(Boost REQUIRED)
 find_package(fmt REQUIRED)
 find_package(libfuse REQUIRED)
-find_package(nlohmann_json REQUIRED)
 find_package(rapidhash REQUIRED)
-find_package(reproc++ REQUIRED)
 find_package(spdlog REQUIRED)
 
-include(cmake/fetched-libs.cmake)
+include(cmake/fetched-libs.cmake) # saf
 
 add_library(adbfsm-lib STATIC)
 target_sources(
@@ -37,13 +36,11 @@ target_sources(
 target_link_libraries(
     adbfsm-lib
     PUBLIC
-        Sockpp::sockpp
+        boost::boost
         fmt::fmt
         libfuse::libfuse
-        nlohmann_json::nlohmann_json
         rapidhash::rapidhash
-        reproc::reproc
-        shared_futex
+        saf
         spdlog::spdlog
 )
 target_include_directories(adbfsm-lib PUBLIC include)
@@ -53,8 +50,10 @@ target_link_libraries(adbfsm PRIVATE adbfsm-lib)
 target_compile_options(adbfsm PRIVATE -Wall -Wextra -Wconversion)
 
 # # sanitizer
-# target_compile_options(adbfsm PRIVATE -fsanitize=address,leak,undefined)
-# target_link_options(adbfsm PRIVATE -fsanitize=address,leak,undefined)
+# # target_compile_options(adbfsm PRIVATE -fsanitize=address,leak,undefined)
+# # target_link_options(adbfsm PRIVATE -fsanitize=address,leak,undefined)
+# target_compile_options(adbfsm PRIVATE -fsanitize=address,undefined)
+# target_link_options(adbfsm PRIVATE -fsanitize=address,undefined)
 
 if(ADBFSM_ENABLE_TESTS)
     message(STATUS "Building tests")

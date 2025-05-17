@@ -35,24 +35,24 @@ namespace adbfsm::tree
          */
         Expect<Ref<Node>> traverse(path::Path path);
 
-        Expect<void>                  readdir(path::Path path, Filler filler);
-        Expect<Ref<const data::Stat>> getattr(path::Path path);
+        AExpect<void>                  readdir(path::Path path, Filler filler);
+        AExpect<Ref<const data::Stat>> getattr(path::Path path);
 
-        Expect<Ref<Node>> readlink(path::Path path);
-        Expect<Ref<Node>> mknod(path::Path path);
-        Expect<Ref<Node>> mkdir(path::Path path);
-        Expect<void>      unlink(path::Path path);
-        Expect<void>      rmdir(path::Path path);
-        Expect<void>      rename(path::Path from, path::Path to);
+        AExpect<Ref<Node>> readlink(path::Path path);
+        AExpect<Ref<Node>> mknod(path::Path path);
+        AExpect<Ref<Node>> mkdir(path::Path path);
+        AExpect<void>      unlink(path::Path path);
+        AExpect<void>      rmdir(path::Path path);
+        AExpect<void>      rename(path::Path from, path::Path to);
 
-        Expect<void>  truncate(path::Path path, off_t size);
-        Expect<u64>   open(path::Path path, int flags);
-        Expect<usize> read(path::Path path, u64 fd, Span<char> out, off_t offset);
-        Expect<usize> write(path::Path path, u64 fd, Str in, off_t offset);
-        Expect<void>  flush(path::Path path, u64 fd);
-        Expect<void>  release(path::Path path, u64 fd);
+        AExpect<void>  truncate(path::Path path, off_t size);
+        AExpect<u64>   open(path::Path path, int flags);
+        AExpect<usize> read(path::Path path, u64 fd, Span<char> out, off_t offset);
+        AExpect<usize> write(path::Path path, u64 fd, Str in, off_t offset);
+        AExpect<void>  flush(path::Path path, u64 fd);
+        AExpect<void>  release(path::Path path, u64 fd);
 
-        Expect<void> utimens(path::Path path);
+        AExpect<void> utimens(path::Path path);
 
         // this function only used to link already existing files, user can't use it
         Expect<void> symlink(path::Path path, path::Path target);
@@ -65,7 +65,7 @@ namespace adbfsm::tree
          *
          * @param path Path to the node.
          */
-        Expect<Ref<Node>> traverse_or_build(path::Path path);
+        AExpect<Ref<Node>> traverse_or_build(path::Path path);
 
         Node               m_root;
         data::IConnection& m_connection;

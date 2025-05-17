@@ -6,19 +6,42 @@
 #include "adbfsm/util/threadpool.hpp"
 
 #include <fcntl.h>
-#include <nlohmann/json.hpp>
 
 #include <cassert>
 #include <cstring>
 
 namespace
 {
-
     adbfsm::Adbfsm& get_data()
     {
         auto ctx = ::fuse_get_context()->private_data;
         assert(ctx != nullptr);
         return *static_cast<adbfsm::Adbfsm*>(ctx);
+    }
+
+    template <typename Ret, typename... Args>
+    auto tree_blocking(Ret (adbfsm::tree::FileTree::*fn)(Args...), std::type_identity_t<Args>... args)
+    {
+        // NOTE: for some reason con't use `use_future` as completion token, so I just implement it manually
+
+        auto& data = get_data();
+        auto& ctx  = data.async_ctx();
+        auto& tree = data.tree();
+
+        auto promise = std::promise<typename Ret::value_type>{};
+        auto fut     = promise.get_future();
+
+        adbfsm::async::spawn(
+            ctx,
+            [promise = std::move(promise), fn, &tree, ... args = std::forward<Args>(args)] mutable
+                -> adbfsm::Await<void> {
+                auto coro = (tree.*fn)(std::forward<Args>(args)...);
+                promise.set_value(co_await std::move(coro));
+            },
+            adbfsm::async::detached
+        );
+
+        return fut.get();
     }
 
     auto fuse_err(adbfsm::Str name, const char* path)
@@ -29,8 +52,8 @@ namespace
                 return 0;
             }
 
-            switch (err) {
             // filter out common errors
+            switch (err) {
             case std::errc::no_such_file_or_directory:
             case std::errc::file_exists:
             case std::errc::not_a_directory:
@@ -40,40 +63,57 @@ namespace
             case std::errc::permission_denied:
             case std::errc::read_only_file_system:
             case std::errc::filename_too_long:
-            case std::errc::invalid_argument:    //
-                return -errint;
-
-            default:
+            case std::errc::invalid_argument: {
+                if (spdlog::get_level() == spdlog::level::debug) {
+                    const auto msg = std::make_error_code(err).message();
+                    adbfsm::log_e({ "{}: {:?} returned with error code [{}]: {}" }, name, path, errint, msg);
+                }
+            } break;
+            default: {
                 const auto msg = std::make_error_code(err).message();
                 adbfsm::log_e({ "{}: {:?} returned with error code [{}]: {}" }, name, path, errint, msg);
-                return -errint;
             }
+            }
+            return -errint;
         };
     }
 }
 
 namespace adbfsm
 {
-    Adbfsm::Adbfsm(Uniq<data::IConnection> connection, Uniq<data::Cache> cache)
-        : m_connection{ std::move(connection) }
-        , m_cache{ std::move(cache) }
-        , m_tree{ *m_connection, *m_cache }
+    Adbfsm::Adbfsm(usize page_size, usize max_pages)
+        : m_connection{ std::make_unique<data::Connection>(m_async_ctx, page_size) }
+        , m_cache{ page_size, max_pages }
+        , m_tree{ *m_connection, m_cache }
     {
-        auto ipc = data::Ipc::create();
+
+        log_d({ "{}: ctor of Adbfsm" }, __func__);
+
+        auto ipc = data::Ipc::create(m_async_ctx);
         if (not ipc.has_value()) {
             const auto msg = std::make_error_code(ipc.error()).message();
             log_e({ "Adbfsm: failed to initialize ipc: {}" }, msg);
             return;
         }
 
-        const auto path = ipc->path();
+        const auto path = (*ipc)->path();
         log_i({ "Adbfsm: succesfully created ipc: {}" }, path.fullpath());
         m_ipc = std::move(*ipc);
 
-        m_ipc->launch([this](data::ipc::Op op) { return ipc_handler(op); });
+        auto coro = m_ipc->launch([this](data::ipc::Op op) { return ipc_handler(op); });
+        async::spawn(m_async_ctx, std::move(coro), [](const std::exception_ptr& exceptionPtr) {
+            if (exceptionPtr) {
+                std::rethrow_exception(exceptionPtr);
+            }
+        });
     }
 
-    nlohmann::json Adbfsm::ipc_handler(data::ipc::Op op)
+    Adbfsm::~Adbfsm()
+    {
+        m_async_ctx.stop();
+    }
+
+    boost::json::value Adbfsm::ipc_handler(data::ipc::Op op)
     {
         namespace ipc = data::ipc;
 
@@ -83,50 +123,50 @@ namespace adbfsm
 
         auto overload = util::Overload{
             [&](ipc::Help) {
-                return nlohmann::json("not implemented yet :P");    // TODO: implement
+                return boost::json::value("not implemented yet :P");    // TODO: implement
             },
             [&](ipc::InvalidateCache) {
-                m_cache->invalidate();
-                return nlohmann::json{};
+                m_cache.invalidate();
+                return boost::json::value{};
             },
             [&](ipc::SetPageSize size) {
-                auto old_size = m_cache->page_size();
+                auto old_size = m_cache.page_size();
                 auto new_size = std::bit_ceil(size.kib * 1024);
                 new_size      = std::clamp(new_size, lowest_page_size, highest_page_size);
-                m_cache->set_page_size(new_size);
+                m_cache.set_page_size(new_size);
 
-                auto old_max = m_cache->max_pages();
+                auto old_max = m_cache.max_pages();
                 auto new_max = std::bit_ceil(old_max * old_size / new_size);
                 new_max      = std::max(new_max, lowest_max_pages);
-                m_cache->set_max_pages(new_max);
+                m_cache.set_max_pages(new_max);
 
-                auto json              = nlohmann::json{};
+                auto json              = boost::json::object{};
                 json["old_page_size"]  = old_size / 1024;
                 json["old_cache_size"] = old_max * old_size / 1024 / 1024;
                 json["new_page_size"]  = new_size / 1024;
                 json["new_cache_size"] = new_max * new_size / 1024 / 1024;
-                return json;
+                return boost::json::value{ json };
             },
             [&](ipc::GetPageSize) {
-                auto size = m_cache->page_size();
-                return nlohmann::json(size);
+                auto size = m_cache.page_size();
+                return boost::json::value(size);
             },
             [&](ipc::SetCacheSize size) {
-                auto page    = m_cache->page_size();
-                auto old_max = m_cache->max_pages();
+                auto page    = m_cache.page_size();
+                auto old_max = m_cache.max_pages();
                 auto new_max = std::bit_ceil(size.mib * 1024 * 1024 / page);
                 new_max      = std::max(new_max, lowest_max_pages);
-                m_cache->set_max_pages(new_max);
+                m_cache.set_max_pages(new_max);
 
-                auto json              = nlohmann::json{};
+                auto json              = boost::json::object{};
                 json["old_cache_size"] = old_max * page / 1024 / 1024;
                 json["new_cache_size"] = new_max * page / 1024 / 1024;
-                return json;
+                return boost::json::value{ json };
             },
             [&](ipc::GetCacheSize) {
-                auto page      = m_cache->page_size();
-                auto num_pages = m_cache->max_pages();
-                return nlohmann::json(page * num_pages / 1024 / 1024);
+                auto page      = m_cache.page_size();
+                auto num_pages = m_cache.max_pages();
+                return boost::json::value(page * num_pages / 1024 / 1024);
             },
         };
         return std::visit(overload, op);
@@ -143,10 +183,16 @@ namespace adbfsm
 
         util::Threadpool::init();
 
-        return new Adbfsm{
-            std::make_unique<data::Connection>(page_size),
-            std::make_unique<data::Cache>(page_size, max_pages),
-        };
+        auto* adbfsm     = new Adbfsm{ page_size, max_pages };
+        auto* threadpool = util::Threadpool::get_instance();
+
+        threadpool->enqueue_detached([ctx = &adbfsm->async_ctx()] {
+            log_d({ "adbfsm: io_context running..." });
+            auto num_handlers = ctx->run();
+            log_d({ "adbfsm: io_context stopped with {} handlers executed" }, num_handlers);
+        });
+
+        return adbfsm;
     }
 
     void destroy(void* private_data)
@@ -157,7 +203,7 @@ namespace adbfsm
 
         auto ignored = util::Threadpool::terminate();
         if (ignored != 0) {
-            log_i({ "There are {} jobs waiting in Threadpool queue. Ignoring them." }, ignored);
+            log_w({ "There are {} jobs waiting in Threadpool queue. Ignoring them." }, ignored);
         }
 
         auto serial = ::getenv("ANDROID_SERIAL");
@@ -173,7 +219,7 @@ namespace adbfsm
         log_i({ "{}: {:?}" }, __func__, path);
 
         auto maybe_stat = ok_or(path::create(path), Errc::operation_not_supported).and_then([](auto p) {
-            return get_data().tree().getattr(p);
+            return tree_blocking(&tree::FileTree::getattr, p);
         });
         if (not maybe_stat.has_value()) {
             return fuse_err(__func__, path)(maybe_stat.error());
@@ -216,7 +262,7 @@ namespace adbfsm
         log_i({ "{}: {:?}" }, __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](path::Path p) { return get_data().tree().readlink(p); })
+            .and_then([](path::Path p) { return tree_blocking(&tree::FileTree::readlink, p); })
             .and_then([&](tree::Node& node) -> Expect<void> {
                 auto target_buf = node.build_path();    // this will emits absolute path, which we don't want
                 auto target     = target_buf.as_path();
@@ -237,7 +283,7 @@ namespace adbfsm
         log_i({ "{}: {:?}" }, __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](path::Path p) { return get_data().tree().mknod(p); })
+            .and_then([](path::Path p) { return tree_blocking(&tree::FileTree::mknod, p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -247,7 +293,7 @@ namespace adbfsm
         log_i({ "{}: {:?}" }, __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](path::Path p) { return get_data().tree().mkdir(p); })
+            .and_then([](path::Path p) { return tree_blocking(&tree::FileTree::mkdir, p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -257,7 +303,7 @@ namespace adbfsm
         log_i({ "{}: {:?}" }, __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](auto p) { return get_data().tree().unlink(p); })
+            .and_then([](path::Path p) { return tree_blocking(&tree::FileTree::unlink, p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -267,7 +313,7 @@ namespace adbfsm
         log_i({ "{}: {:?}" }, __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](auto p) { return get_data().tree().rmdir(p); })
+            .and_then([](path::Path p) { return tree_blocking(&tree::FileTree::rmdir, p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -287,9 +333,7 @@ namespace adbfsm
             return fuse_err(__func__, to)(Errc::operation_not_supported);
         }
 
-        return get_data()
-            .tree()
-            .rename(*from_path, *to_path)
+        return tree_blocking(&tree::FileTree::rename, *from_path, *to_path)
             .transform_error(fuse_err(__func__, from))
             .error_or(0);
     }
@@ -299,7 +343,7 @@ namespace adbfsm
         log_i({ "{}: [size={}] {:?}" }, __func__, size, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](auto p) { return get_data().tree().truncate(p, size); })
+            .and_then([&](path::Path p) { return tree_blocking(&tree::FileTree::truncate, p, size); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -309,7 +353,7 @@ namespace adbfsm
         log_i({ "{}: {:?}" }, __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](auto p) { return get_data().tree().open(p, fi->flags); })
+            .and_then([&](path::Path p) { return tree_blocking(&tree::FileTree::open, p, fi->flags); })
             .transform([&](auto fd) { fi->fh = fd; })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
@@ -319,8 +363,8 @@ namespace adbfsm
     {
         log_i({ "{}: [offset={}|size={}] {:?}" }, __func__, offset, size, path);
 
-        auto res = ok_or(path::create(path), Errc::operation_not_supported).and_then([&](auto p) {
-            return get_data().tree().read(p, fi->fh, { buf, size }, offset);
+        auto res = ok_or(path::create(path), Errc::operation_not_supported).and_then([&](path::Path p) {
+            return tree_blocking(&tree::FileTree::read, p, fi->fh, { buf, size }, offset);
         });
         return res.has_value() ? static_cast<i32>(res.value()) : fuse_err(__func__, path)(res.error());
     }
@@ -330,7 +374,7 @@ namespace adbfsm
         log_i({ "{}: [offset={}|size={}] {:?}" }, __func__, offset, size, path);
 
         auto res = ok_or(path::create(path), Errc::operation_not_supported).and_then([&](auto p) {
-            return get_data().tree().write(p, fi->fh, { buf, size }, offset);
+            return tree_blocking(&tree::FileTree::write, p, fi->fh, { buf, size }, offset);
         });
         return res.has_value() ? static_cast<i32>(res.value()) : fuse_err(__func__, path)(res.error());
     }
@@ -340,7 +384,7 @@ namespace adbfsm
         log_i({ "{}: {:?}" }, __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](auto p) { return get_data().tree().flush(p, fi->fh); })
+            .and_then([&](path::Path p) { return tree_blocking(&tree::FileTree::flush, p, fi->fh); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -350,7 +394,7 @@ namespace adbfsm
         log_i({ "{}: {:?}" }, __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](auto p) { return get_data().tree().release(p, fi->fh); })
+            .and_then([&](path::Path p) { return tree_blocking(&tree::FileTree::release, p, fi->fh); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -369,7 +413,7 @@ namespace adbfsm
         const auto fill = [&](const char* name) { filler(buf, name, nullptr, 0, FUSE_FILL_DIR_PLUS); };
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](auto p) { return get_data().tree().readdir(p, fill); })
+            .and_then([&](path::Path p) { return tree_blocking(&tree::FileTree::readdir, p, fill); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -388,7 +432,7 @@ namespace adbfsm
         log_i({ "{}: {:?}" }, __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](auto p) { return get_data().tree().utimens(p); })
+            .and_then([&](path::Path p) { return tree_blocking(&tree::FileTree::utimens, p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }

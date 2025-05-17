@@ -1,14 +1,12 @@
 #pragma once
 
+#include "adbfsm/async/async.hpp"
 #include "adbfsm/common.hpp"
 #include "adbfsm/path/path.hpp"
 
-#include <nlohmann/json_fwd.hpp>
-#include <sockpp/unix_acceptor.h>
+#include <boost/json.hpp>
 
 #include <functional>
-#include <stop_token>
-#include <thread>
 
 namespace adbfsm::data
 {
@@ -29,8 +27,12 @@ namespace adbfsm::data
     class Ipc
     {
     public:
-        using OnOp = std::move_only_function<nlohmann::json(ipc::Op op)>;
-        static Expect<Ipc> create();
+        using Acceptor = async::unix_socket::Acceptor;
+        using Socket   = async::unix_socket::Socket;
+        using OnOp     = std::move_only_function<boost::json::value(ipc::Op op)>;
+
+        // Uniq to make it std::movable
+        static Expect<Uniq<Ipc>> create(async::Context& context);
 
         Ipc() = delete;
         ~Ipc();
@@ -38,23 +40,24 @@ namespace adbfsm::data
         Ipc(Ipc&&)            = default;
         Ipc& operator=(Ipc&&) = default;
 
-        void launch(OnOp on_op);
-        void stop();
+        Await<void> launch(OnOp on_op);
+        void        stop();
 
         path::Path path() const { return m_socket_path.as_path(); }
 
     private:
-        Ipc(path::PathBuf path, Uniq<sockpp::unix_acceptor> acceptor)
+        Ipc(path::PathBuf path, Acceptor acceptor)
             : m_socket_path{ std::move(path) }
             , m_socket{ std::move(acceptor) }
         {
         }
 
-        void run(std::stop_token st, OnOp on_op);
+        Await<void> run();
+        Await<void> handle_peer(Socket sock);
 
-        path::PathBuf               m_socket_path;
-        Uniq<sockpp::unix_acceptor> m_socket;
-        std::jthread                m_thread;
-        bool                        m_running = false;    // should have been an atomic
+        path::PathBuf m_socket_path;
+        Acceptor      m_socket;
+        OnOp          m_on_op;
+        bool          m_running = false;    // should have been an atomic
     };
 }

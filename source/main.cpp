@@ -55,27 +55,22 @@ void unexpected_program_end(const char* msg, bool is_sigsegv)
 
 int main(int argc, char** argv)
 {
-    fmt::println("[adbfsm] checking adb availability...");
-    if (auto status = adbfsm::data::start_connection(); not status.has_value()) {
-        const auto msg = std::make_error_code(status.error()).message();
-        fmt::println(stderr, "\nerror: failed to start adb server [{}].", msg);
-        fmt::println(stderr, "\nnote: make sure adb is installed and in PATH.");
-        fmt::println(stderr, "note: make sure phone debugging permission is enabled.");
-        fmt::println(stderr, "      phone with its screen locked might denies adb connection.");
-        fmt::println(stderr, "      you might need to unlock your device first to be able to use adb.");
-        return 1;
-    }
-
     std::signal(SIGSEGV, [](int) { unexpected_program_end("SIGSEGV", true); });
     std::set_terminate([] { unexpected_program_end("std::terminate", false); });
 
-    auto maybe_opt = adbfsm::args::parse(argc, argv);
+    adbfsm::log::init(spdlog::level::debug, "-");
+
+    auto ctx = adbfsm::async::Context{};
+    auto fut = adbfsm::async::spawn(ctx, adbfsm::args::parse(argc, argv), adbfsm::async::use_future);
+    ctx.run();
+
+    auto maybe_opt = fut.get();
     if (maybe_opt.is_exit()) {
         return std::move(maybe_opt).exit().status;
     }
     auto [opt, args] = std::move(maybe_opt).opt();
 
-    adbfsm::log::init(opt.log_level, opt.log_file);
+    // adbfsm::log::init(opt.log_level, opt.log_file);
     adbfsm::log_i(
         { "mount device '{}' with cache size {}MiB and page size {}kiB" },
         opt.serial,
