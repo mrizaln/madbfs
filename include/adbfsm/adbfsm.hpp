@@ -1,8 +1,8 @@
 #pragma once
 
-#include "adbfsm/data/connection.hpp"
-#include "adbfsm/data/ipc.hpp"
-#include "adbfsm/tree/file_tree.hpp"
+#include "madbfs/data/connection.hpp"
+#include "madbfs/data/ipc.hpp"
+#include "madbfs/tree/file_tree.hpp"
 
 #define FUSE_USE_VERSION 31
 #include <fcntl.h>
@@ -10,21 +10,21 @@
 
 #include <thread>
 
-namespace adbfsm
+namespace madbfs
 {
     /**
-     * @class Adbfsm
+     * @class Madbfs
      *
      * @brief Main class of the filesystem.
      *
      * Everything is controlled from here. An instantiation of this class will live as long as the fs mounted.
      * The instance will be available as fuse_context's private data.
      */
-    class Adbfsm
+    class Madbfs
     {
     public:
-        Adbfsm(usize page_size, usize max_pages);
-        ~Adbfsm();
+        Madbfs(usize page_size, usize max_pages);
+        ~Madbfs();
 
         tree::FileTree&    tree() { return m_tree; }
         async::Context&    async_ctx() { return m_async_ctx; }
@@ -64,39 +64,39 @@ namespace adbfsm
     i32 utimens(const char*, const timespec tv[2], fuse_file_info*);
 
     static constexpr auto operations = fuse_operations{
-        .getattr         = adbfsm::getattr,
-        .readlink        = adbfsm::readlink,
-        .mknod           = adbfsm::mknod,
-        .mkdir           = adbfsm::mkdir,
-        .unlink          = adbfsm::unlink,
-        .rmdir           = adbfsm::rmdir,
+        .getattr         = madbfs::getattr,
+        .readlink        = madbfs::readlink,
+        .mknod           = madbfs::mknod,
+        .mkdir           = madbfs::mkdir,
+        .unlink          = madbfs::unlink,
+        .rmdir           = madbfs::rmdir,
         .symlink         = nullptr,
-        .rename          = adbfsm::rename,
+        .rename          = madbfs::rename,
         .link            = nullptr,
         .chmod           = nullptr,
         .chown           = nullptr,
-        .truncate        = adbfsm::truncate,
-        .open            = adbfsm::open,
-        .read            = adbfsm::read,
-        .write           = adbfsm::write,
+        .truncate        = madbfs::truncate,
+        .open            = madbfs::open,
+        .read            = madbfs::read,
+        .write           = madbfs::write,
         .statfs          = nullptr,
-        .flush           = adbfsm::flush,
-        .release         = adbfsm::release,
+        .flush           = madbfs::flush,
+        .release         = madbfs::release,
         .fsync           = nullptr,
         .setxattr        = nullptr,
         .getxattr        = nullptr,
         .listxattr       = nullptr,
         .removexattr     = nullptr,
         .opendir         = nullptr,
-        .readdir         = adbfsm::readdir,
+        .readdir         = madbfs::readdir,
         .releasedir      = nullptr,
         .fsyncdir        = nullptr,
-        .init            = adbfsm::init,
-        .destroy         = adbfsm::destroy,
-        .access          = adbfsm::access,
+        .init            = madbfs::init,
+        .destroy         = madbfs::destroy,
+        .access          = madbfs::access,
         .create          = nullptr,
         .lock            = nullptr,
-        .utimens         = adbfsm::utimens,
+        .utimens         = madbfs::utimens,
         .bmap            = nullptr,
         .ioctl           = nullptr,
         .poll            = nullptr,

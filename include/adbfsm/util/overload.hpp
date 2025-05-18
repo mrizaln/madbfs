@@ -1,6 +1,6 @@
 #pragma once
 
-namespace adbfsm::util
+namespace madbfs::util
 {
     template <typename... Fs>
     struct Overload : Fs...

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "adbfsm/async/async.hpp"
-#include "adbfsm/common.hpp"
-#include "adbfsm/data/stat.hpp"
+#include "madbfs/async/async.hpp"
+#include "madbfs/common.hpp"
+#include "madbfs/data/stat.hpp"
 
 #include <saf.hpp>
 
@@ -11,7 +11,7 @@
 #include <list>
 #include <unordered_map>
 
-namespace adbfsm::data
+namespace madbfs::data
 {
     struct PageKey
     {

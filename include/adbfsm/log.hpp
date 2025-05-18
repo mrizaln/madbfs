@@ -1,6 +1,6 @@
 #pragma once
 
-#include "adbfsm/common.hpp"
+#include "madbfs/common.hpp"
 
 #include <spdlog/fmt/ranges.h>    // to enable ranges formatting
 #include <spdlog/fmt/std.h>
@@ -10,7 +10,7 @@
 
 #include <source_location>
 
-namespace adbfsm::log
+namespace madbfs::log
 {
     // inspired by this issue on spdlog: https://github.com/gabime/spdlog/issues/1959
     template <typename... Args>
@@ -72,8 +72,8 @@ namespace adbfsm::log
      * This functions must be called in the form of
      *
      * ```
-     * adbfsm::log::log(spdlog::level::info, { "this is a test log: {} + {} = {}" }, 1, 2, 3);
-       adbfsm::log::log(spdlog::level::info, { "akdjhaksdfjh" });
+     * madbfs::log::log(spdlog::level::info, { "this is a test log: {} + {} = {}" }, 1, 2, 3);
+       madbfs::log::log(spdlog::level::info, { "akdjhaksdfjh" });
      * ```
      *
      * Notice the curly braces around the format string. If you don't use them, the compiler will complain.
@@ -85,21 +85,21 @@ namespace adbfsm::log
     }
 }
 
-namespace adbfsm
+namespace madbfs
 {
-#define ADBFSM_LOG_LOG_ENTRY(Name, Level)                                                                    \
+#define MADBFS_LOG_LOG_ENTRY(Name, Level)                                                                    \
     template <typename... Args>                                                                              \
     inline void Name(log::FmtWithLoc<Args...> fmt, Args&&... args)                                           \
     {                                                                                                        \
         log::log(spdlog::level::Level, std::move(fmt), std::forward<Args>(args)...);                         \
     }
 
-    ADBFSM_LOG_LOG_ENTRY(log_t, trace)
-    ADBFSM_LOG_LOG_ENTRY(log_d, debug)
-    ADBFSM_LOG_LOG_ENTRY(log_i, info)
-    ADBFSM_LOG_LOG_ENTRY(log_w, warn)
-    ADBFSM_LOG_LOG_ENTRY(log_e, err)
-    ADBFSM_LOG_LOG_ENTRY(log_c, critical)
+    MADBFS_LOG_LOG_ENTRY(log_t, trace)
+    MADBFS_LOG_LOG_ENTRY(log_d, debug)
+    MADBFS_LOG_LOG_ENTRY(log_i, info)
+    MADBFS_LOG_LOG_ENTRY(log_w, warn)
+    MADBFS_LOG_LOG_ENTRY(log_e, err)
+    MADBFS_LOG_LOG_ENTRY(log_c, critical)
 
-#undef ADBFSM_LOG_LOG_ENTRY
+#undef MADBFS_LOG_LOG_ENTRY
 }

@@ -1,11 +1,11 @@
 #pragma once
 
-#include "adbfsm/common.hpp"
+#include "madbfs/common.hpp"
 
 #include <algorithm>
 #include <variant>
 
-namespace adbfsm::util
+namespace madbfs::util
 {
     struct SplitDelim
     {

@@ -5,7 +5,7 @@ function(create_test_exe name)
     add_executable(${name} ${CMAKE_CURRENT_SOURCE_DIR}/${name}.cpp)
     target_link_libraries(
         ${name}
-        PRIVATE adbfsm-lib Boost::ut fetch::dtl-modern
+        PRIVATE madbfs-lib Boost::ut fetch::dtl-modern
     )
     target_compile_options(${name} PRIVATE -Wall -Wextra -Wconversion)
 

@@ -1,9 +1,9 @@
-#include "adbfsm/async/async.hpp"
-#include "adbfsm/log.hpp"
-#include "adbfsm/util/split.hpp"
+#include "madbfs/async/async.hpp"
+#include "madbfs/log.hpp"
+#include "madbfs/util/split.hpp"
 
-#include "adbfsm/data/connection.hpp"
-#include "adbfsm/path/path.hpp"
+#include "madbfs/data/connection.hpp"
+#include "madbfs/path/path.hpp"
 
 #define BOOST_PROCESS_VERSION 2
 #include <boost/process.hpp>
@@ -17,13 +17,13 @@ namespace bp = boost::process::v2;
 
 namespace
 {
-    static constexpr adbfsm::Str no_device           = "adb: no devices/emulators found";
-    static constexpr adbfsm::Str device_offline      = "adb: device offline";
-    static constexpr adbfsm::Str permission_denied   = " Permission denied";
-    static constexpr adbfsm::Str no_such_file_or_dir = " No such file or directory";
-    static constexpr adbfsm::Str not_a_directory     = " Not a directory";
-    static constexpr adbfsm::Str inaccessible        = " inaccessible or not found";
-    static constexpr adbfsm::Str read_only           = " Read-only file system";
+    static constexpr madbfs::Str no_device           = "adb: no devices/emulators found";
+    static constexpr madbfs::Str device_offline      = "adb: device offline";
+    static constexpr madbfs::Str permission_denied   = " Permission denied";
+    static constexpr madbfs::Str no_such_file_or_dir = " No such file or directory";
+    static constexpr madbfs::Str not_a_directory     = " Not a directory";
+    static constexpr madbfs::Str inaccessible        = " inaccessible or not found";
+    static constexpr madbfs::Str read_only           = " Read-only file system";
 
     enum class Error
     {
@@ -37,7 +37,7 @@ namespace
         TryAgain,
     };
 
-    adbfsm::Str get_no_dev_serial()
+    madbfs::Str get_no_dev_serial()
     {
         if (auto* serial = std::getenv("ANDROID_SERIAL"); serial != nullptr) {
             static auto no_dev_serial = fmt::format("adb: device '{}' not found", serial);
@@ -46,24 +46,24 @@ namespace
         return {};
     }
 
-    adbfsm::Errc to_errc(Error err)
+    madbfs::Errc to_errc(Error err)
     {
         switch (err) {
-        case Error::Unknown: return adbfsm::Errc::io_error;
-        case Error::NoDev: return adbfsm::Errc::no_such_device;
-        case Error::PermDenied: return adbfsm::Errc::permission_denied;
-        case Error::NoSuchFileOrDir: return adbfsm::Errc::no_such_file_or_directory;
-        case Error::NotADir: return adbfsm::Errc::not_a_directory;
-        case Error::Inaccessible: return adbfsm::Errc::operation_not_supported;    // program not accessible
-        case Error::ReadOnly: return adbfsm::Errc::read_only_file_system;
-        case Error::TryAgain: return adbfsm::Errc::resource_unavailable_try_again;
+        case Error::Unknown: return madbfs::Errc::io_error;
+        case Error::NoDev: return madbfs::Errc::no_such_device;
+        case Error::PermDenied: return madbfs::Errc::permission_denied;
+        case Error::NoSuchFileOrDir: return madbfs::Errc::no_such_file_or_directory;
+        case Error::NotADir: return madbfs::Errc::not_a_directory;
+        case Error::Inaccessible: return madbfs::Errc::operation_not_supported;    // program not accessible
+        case Error::ReadOnly: return madbfs::Errc::read_only_file_system;
+        case Error::TryAgain: return madbfs::Errc::resource_unavailable_try_again;
         default: std::terminate();
         }
     }
 
-    Error parse_stderr(adbfsm::Str str)
+    Error parse_stderr(madbfs::Str str)
     {
-        auto splitter = adbfsm::util::StringSplitter{ str, '\n' };
+        auto splitter = madbfs::util::StringSplitter{ str, '\n' };
         while (auto line = splitter.next()) {
             if (*line == no_device or *line == device_offline) {
                 return Error::NoDev;
@@ -71,14 +71,14 @@ namespace
                 return Error::TryAgain;
             }
 
-            auto rev       = adbfsm::String{ line->rbegin(), line->rend() };
-            auto rev_strip = adbfsm::util::strip(rev);
-            auto err       = adbfsm::util::StringSplitter{ rev_strip, ':' }.next();
+            auto rev       = madbfs::String{ line->rbegin(), line->rend() };
+            auto rev_strip = madbfs::util::strip(rev);
+            auto err       = madbfs::util::StringSplitter{ rev_strip, ':' }.next();
             if (not err) {
                 continue;
             }
 
-            auto eq = [&](auto rhs) { return adbfsm::sr::equal(*err, rhs | adbfsm::sv::reverse); };
+            auto eq = [&](auto rhs) { return madbfs::sr::equal(*err, rhs | madbfs::sv::reverse); };
 
             // clang-format off
             if      (eq(permission_denied))   return Error::PermDenied;
@@ -93,7 +93,7 @@ namespace
         return Error::Unknown;
     }
 
-    adbfsm::Await<boost::system::error_code> drain_pipe(adbfsm::async::pipe::Read& rpipe, adbfsm::String& out)
+    madbfs::Await<boost::system::error_code> drain_pipe(madbfs::async::pipe::Read& rpipe, madbfs::String& out)
     {
         out.clear();
 
@@ -103,33 +103,33 @@ namespace
         while (not eof) {
             auto tmp_read = 0uz;
             while (tmp_read < tmp.size()) {
-                auto buf = adbfsm::async::buffer(tmp.data() + tmp_read, tmp.size() - tmp_read);
+                auto buf = madbfs::async::buffer(tmp.data() + tmp_read, tmp.size() - tmp_read);
                 auto res = co_await rpipe.async_read_some(buf);
                 if (not res and res == boost::asio::error::eof) {
                     eof = true;
                     break;
                 } else if (not res) {
-                    out.append_range(tmp | adbfsm::sv::take(tmp_read));
+                    out.append_range(tmp | madbfs::sv::take(tmp_read));
                     co_return res.error();
                 }
                 tmp_read += *res;
             }
-            out.append_range(tmp | adbfsm::sv::take(tmp_read));
+            out.append_range(tmp | madbfs::sv::take(tmp_read));
         }
 
         co_return boost::system::error_code{};
     }
 
-    adbfsm::Await<adbfsm::Expect<adbfsm::String>> exec_async(
-        adbfsm::Str                     exe,
-        adbfsm::Span<const adbfsm::Str> args,
-        adbfsm::Str                     in,
+    madbfs::Await<madbfs::Expect<madbfs::String>> exec_async(
+        madbfs::Str                     exe,
+        madbfs::Span<const madbfs::Str> args,
+        madbfs::Str                     in,
         bool                            check
     )
     {
-        adbfsm::log_d({ "{}: run {} {}" }, __func__, exe, args);
+        madbfs::log_d({ "{}: run {} {}" }, __func__, exe, args);
 
-        namespace async = adbfsm::async;
+        namespace async = madbfs::async;
 
         auto exec = co_await async::this_coro::executor;
 
@@ -140,7 +140,7 @@ namespace
         auto proc = bp::process{
             exec,
             bp::environment::find_executable(exe),
-            args | adbfsm::sv::transform([](auto s) { return boost::string_view{ s.data(), s.size() }; }),
+            args | madbfs::sv::transform([](auto s) { return boost::string_view{ s.data(), s.size() }; }),
             bp::process_stdio{ pipe_in, pipe_out, pipe_err },
         };
 
@@ -148,8 +148,8 @@ namespace
         // that is what happen on multiple dd command to the same file with disjoint offset with fixed size.
 
         // if (auto [ec, _] = co_await async::write_exact(pipe_in, in); ec) {
-        //     adbfsm::log_e({ "{}: failed to write to stdin: {}" }, __func__, ec.message());
-        //     co_return adbfsm::Unexpect{ async::to_generic_err(ec) };
+        //     madbfs::log_e({ "{}: failed to write to stdin: {}" }, __func__, ec.message());
+        //     co_return madbfs::Unexpect{ async::to_generic_err(ec) };
         // }
         // pipe_in.close();
 
@@ -158,30 +158,30 @@ namespace
 
         auto ec = boost::system::error_code{};
         if (auto n = boost::asio::write(pipe_in, async::buffer(in), ec); ec) {
-            adbfsm::log_e({ "{}: failed to write to stdin: {}" }, __func__, ec.message());
-            co_return adbfsm::Unexpect{ async::to_generic_err(ec) };
+            madbfs::log_e({ "{}: failed to write to stdin: {}" }, __func__, ec.message());
+            co_return madbfs::Unexpect{ async::to_generic_err(ec) };
         } else if (n < in.size()) {
-            co_return adbfsm::Unexpect{ adbfsm::Errc::broken_pipe };
+            co_return madbfs::Unexpect{ madbfs::Errc::broken_pipe };
         }
         pipe_in.close();
 
         auto out = std::string{};
         if (auto ec = co_await drain_pipe(pipe_out, out); ec and ec != boost::asio::error::eof) {
-            adbfsm::log_e({ "{}: failed to read from stdout: {}" }, __func__, ec.message());
-            co_return adbfsm::Unexpect{ async::to_generic_err(ec) };
+            madbfs::log_e({ "{}: failed to read from stdout: {}" }, __func__, ec.message());
+            co_return madbfs::Unexpect{ async::to_generic_err(ec) };
         }
 
         auto err = std::string{};
         if (auto ec = co_await drain_pipe(pipe_err, err); ec and ec != boost::asio::error::eof) {
-            adbfsm::log_e({ "{}: failed to read from stderr: {}" }, __func__, ec.message());
-            co_return adbfsm::Unexpect{ async::to_generic_err(ec) };
+            madbfs::log_e({ "{}: failed to read from stderr: {}" }, __func__, ec.message());
+            co_return madbfs::Unexpect{ async::to_generic_err(ec) };
         }
 
         auto ret = co_await proc.async_wait();
         if (check and ret != 0) {
-            auto errmsg = not err.empty() ? adbfsm::util::strip(err) : adbfsm::util::strip(out);
-            adbfsm::log_w({ "non-zero command status ({}) {} {}: err: [{}]" }, ret, exe, args, errmsg);
-            co_return adbfsm::Unexpect{ to_errc(parse_stderr(errmsg)) };
+            auto errmsg = not err.empty() ? madbfs::util::strip(err) : madbfs::util::strip(out);
+            madbfs::log_w({ "non-zero command status ({}) {} {}: err: [{}]" }, ret, exe, args, errmsg);
+            co_return madbfs::Unexpect{ to_errc(parse_stderr(errmsg)) };
         }
 
         co_return std::move(out);
@@ -189,22 +189,22 @@ namespace
 
     template <typename T>
         requires std::is_fundamental_v<T>
-    constexpr adbfsm::Opt<T> parse_fundamental(adbfsm::Str str, int base)
+    constexpr madbfs::Opt<T> parse_fundamental(madbfs::Str str, int base)
     {
         auto t         = T{};
         auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), t, base);
-        if (ptr != str.data() + str.size() or ec != adbfsm::Errc{}) {
+        if (ptr != str.data() + str.size() or ec != madbfs::Errc{}) {
             return {};
         }
         return t;
     }
 
-    adbfsm::Str get_basename(adbfsm::Str path)
+    madbfs::Str get_basename(madbfs::Str path)
     {
         if (path != "/") {
-            auto found = adbfsm::sr::find(path | adbfsm::sv::reverse, '/');
+            auto found = madbfs::sr::find(path | madbfs::sv::reverse, '/');
             if (found != path.rend()) {    // no '/' means already basename
-                return adbfsm::Str{ found.base(), path.end() };
+                return madbfs::Str{ found.base(), path.end() };
             }
         }
         return path;
@@ -213,12 +213,12 @@ namespace
     /**
      * @brief Parse the output of `stat -c '%f %h %s %u %g %X %Y %Z %n' <path>`
      */
-    adbfsm::Opt<adbfsm::data::ParsedStat> parse_file_stat(adbfsm::Str str)
+    madbfs::Opt<madbfs::data::ParsedStat> parse_file_stat(madbfs::Str str)
     {
-        return adbfsm::util::split_n<8>(str, ' ').transform([](adbfsm::util::SplitResult<8>&& res) {
+        return madbfs::util::split_n<8>(str, ' ').transform([](madbfs::util::SplitResult<8>&& res) {
             auto [mode_hex, hardlinks, size, uid, gid, atime, mtime, ctime] = res.result;
-            return adbfsm::data::ParsedStat{
-                .stat = adbfsm::data::Stat{
+            return madbfs::data::ParsedStat{
+                .stat = madbfs::data::Stat{
                     .links = parse_fundamental<nlink_t>(hardlinks, 10).value_or(0),
                     .size  = parse_fundamental<off_t>(size, 10).value_or(0),
                     .mtime = parse_fundamental<time_t>(mtime, 10).value_or(0),
@@ -234,14 +234,14 @@ namespace
     }
 
     // resolve relative path
-    adbfsm::String resolve_path(adbfsm::path::Path parent, adbfsm::Str path)
+    madbfs::String resolve_path(madbfs::path::Path parent, madbfs::Str path)
     {
-        auto parents = adbfsm::Vec<adbfsm::Str>{};
+        auto parents = madbfs::Vec<madbfs::Str>{};
         if (path.front() != '/') {
-            parents = adbfsm::util::split(parent.fullpath(), '/');
+            parents = madbfs::util::split(parent.fullpath(), '/');
         }
 
-        adbfsm::util::StringSplitter{ path, '/' }.while_next([&](adbfsm::Str str) {
+        madbfs::util::StringSplitter{ path, '/' }.while_next([&](madbfs::Str str) {
             if (str == ".") {
                 return;
             } else if (str == "..") {
@@ -257,7 +257,7 @@ namespace
             return "/";
         }
 
-        auto resolved = adbfsm::String{};
+        auto resolved = madbfs::String{};
         for (auto path : parents) {
             resolved += '/';
             resolved += path;
@@ -267,13 +267,13 @@ namespace
     }
 
     // NOTE: somehow adb shell needs double escaping
-    adbfsm::String quoted(adbfsm::path::Path path)
+    madbfs::String quoted(madbfs::path::Path path)
     {
         return fmt::format("\"{}\"", path.fullpath());
     }
 }
 
-namespace adbfsm::data
+namespace madbfs::data
 {
     using namespace std::string_view_literals;
 
@@ -469,7 +469,7 @@ namespace adbfsm::data
     }
 }
 
-namespace adbfsm::data
+namespace madbfs::data
 {
     AExpect<void> start_connection()
     {

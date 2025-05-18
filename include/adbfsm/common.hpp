@@ -14,7 +14,7 @@
 #include <variant>
 #include <vector>
 
-namespace adbfsm
+namespace madbfs
 {
     inline namespace aliases
     {

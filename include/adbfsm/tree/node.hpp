@@ -1,10 +1,10 @@
 #pragma once
 
-#include "adbfsm/common.hpp"
-#include "adbfsm/data/cache.hpp"
-#include "adbfsm/data/connection.hpp"
-#include "adbfsm/data/stat.hpp"
-#include "adbfsm/path/path.hpp"
+#include "madbfs/common.hpp"
+#include "madbfs/data/cache.hpp"
+#include "madbfs/data/connection.hpp"
+#include "madbfs/data/stat.hpp"
+#include "madbfs/path/path.hpp"
 
 #include <sys/types.h>
 
@@ -13,7 +13,7 @@
 #include <cassert>
 #include <functional>
 
-namespace adbfsm::tree
+namespace madbfs::tree
 {
     class Node;
     class RegularFile;
@@ -466,7 +466,7 @@ namespace adbfsm::tree
 // template implementation
 // -----------------------
 
-namespace adbfsm::tree
+namespace madbfs::tree
 {
     template <typename T>
     bool Node::is() const

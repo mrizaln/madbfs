@@ -1,8 +1,8 @@
-#include "adbfsm/adbfsm.hpp"
-#include "adbfsm/args.hpp"
-#include "adbfsm/data/ipc.hpp"
-#include "adbfsm/log.hpp"
-#include "adbfsm/util/overload.hpp"
+#include "madbfs/madbfs.hpp"
+#include "madbfs/args.hpp"
+#include "madbfs/data/ipc.hpp"
+#include "madbfs/log.hpp"
+#include "madbfs/util/overload.hpp"
 
 #include <fcntl.h>
 
@@ -14,15 +14,15 @@ namespace
     /**
      * @brief Get application instance.
      */
-    adbfsm::Adbfsm& get_data()
+    madbfs::Madbfs& get_data()
     {
         auto ctx = ::fuse_get_context()->private_data;
         assert(ctx != nullptr);
-        return *static_cast<adbfsm::Adbfsm*>(ctx);
+        return *static_cast<madbfs::Madbfs*>(ctx);
     }
 
     /**
-     * @brief Interface sync code of FUSE with async code of adbfsm on the tree access using future.
+     * @brief Interface sync code of FUSE with async code of madbfs on the tree access using future.
      *
      * @param fn The member function of `FileTree`.
      * @param args Arguments to be passed into the member function.
@@ -30,7 +30,7 @@ namespace
      * @return The return value of the member function.
      */
     template <typename Ret, typename... Args>
-    auto tree_blocking(Ret (adbfsm::tree::FileTree::*fn)(Args...), std::type_identity_t<Args>... args)
+    auto tree_blocking(Ret (madbfs::tree::FileTree::*fn)(Args...), std::type_identity_t<Args>... args)
     {
         // NOTE: for some reason can't use `use_future` as completion token, so I just implement it manually
 
@@ -41,20 +41,20 @@ namespace
         auto promise = std::promise<typename Ret::value_type>{};
         auto fut     = promise.get_future();
 
-        adbfsm::async::spawn(
+        madbfs::async::spawn(
             ctx,
             [promise = std::move(promise), fn, &tree, ... args = std::forward<Args>(args)] mutable
-                -> adbfsm::Await<void> {
+                -> madbfs::Await<void> {
                 auto coro = (tree.*fn)(std::forward<Args>(args)...);
                 promise.set_value(co_await std::move(coro));
             },
-            adbfsm::async::detached
+            madbfs::async::detached
         );
 
         return fut.get();
     }
 
-    auto fuse_err(adbfsm::Str name, const char* path)
+    auto fuse_err(madbfs::Str name, const char* path)
     {
         return [=](std::errc err) {
             const auto errint = static_cast<int>(err);
@@ -76,12 +76,12 @@ namespace
             case std::errc::invalid_argument: {
                 if (spdlog::get_level() == spdlog::level::debug) {
                     const auto msg = std::make_error_code(err).message();
-                    adbfsm::log_e({ "{}: {:?} returned with error code [{}]: {}" }, name, path, errint, msg);
+                    madbfs::log_e({ "{}: {:?} returned with error code [{}]: {}" }, name, path, errint, msg);
                 }
             } break;
             default: {
                 const auto msg = std::make_error_code(err).message();
-                adbfsm::log_e({ "{}: {:?} returned with error code [{}]: {}" }, name, path, errint, msg);
+                madbfs::log_e({ "{}: {:?} returned with error code [{}]: {}" }, name, path, errint, msg);
             }
             }
             return -errint;
@@ -89,45 +89,45 @@ namespace
     }
 }
 
-namespace adbfsm
+namespace madbfs
 {
-    Adbfsm::Adbfsm(usize page_size, usize max_pages)
+    Madbfs::Madbfs(usize page_size, usize max_pages)
         : m_work_guard{ m_async_ctx.get_executor() }
         , m_connection{ std::make_unique<data::Connection>() }
         , m_cache{ page_size, max_pages }
         , m_tree{ *m_connection, m_cache }
     {
-        log_d({ "{}: ctor of Adbfsm" }, __func__);
+        log_d({ "{}: ctor of Madbfs" }, __func__);
 
         m_work_thread = std::jthread{ [this] {
-            log_i({ "Adbfsm: io_context running..." });
+            log_i({ "Madbfs: io_context running..." });
             auto num_handlers = m_async_ctx.run();
-            log_i({ "Adbfsm: io_context stopped with {} handlers executed" }, num_handlers);
+            log_i({ "Madbfs: io_context stopped with {} handlers executed" }, num_handlers);
         } };
 
         auto ipc = data::Ipc::create(m_async_ctx);
         if (not ipc.has_value()) {
             const auto msg = std::make_error_code(ipc.error()).message();
-            log_e({ "Adbfsm: failed to initialize ipc: {}" }, msg);
+            log_e({ "Madbfs: failed to initialize ipc: {}" }, msg);
             return;
         }
 
         const auto path = (*ipc)->path();
-        log_i({ "Adbfsm: succesfully created ipc: {}" }, path.fullpath());
+        log_i({ "Madbfs: succesfully created ipc: {}" }, path.fullpath());
         m_ipc = std::move(*ipc);
 
         auto coro = m_ipc->launch([this](data::ipc::Op op) { return ipc_handler(op); });
         async::spawn(m_async_ctx, std::move(coro), async::detached);
     }
 
-    Adbfsm::~Adbfsm()
+    Madbfs::~Madbfs()
     {
         m_work_guard.reset();
         m_async_ctx.stop();
         m_work_thread.join();
     }
 
-    boost::json::value Adbfsm::ipc_handler(data::ipc::Op op)
+    boost::json::value Madbfs::ipc_handler(data::ipc::Op op)
     {
         namespace ipc = data::ipc;
 
@@ -200,20 +200,20 @@ namespace adbfsm
         auto page_size  = args->pagesize * 1024;
         auto max_pages  = cache_size / page_size;
 
-        return new Adbfsm{ page_size, max_pages };
+        return new Madbfs{ page_size, max_pages };
     }
 
     void destroy(void* private_data)
     {
-        auto* data = static_cast<Adbfsm*>(private_data);
+        auto* data = static_cast<Madbfs*>(private_data);
         assert(data != nullptr and "data should not be empty!");
         delete data;
 
         auto serial = ::getenv("ANDROID_SERIAL");
         if (serial != nullptr) {
-            log_i({ "adbfsm for device {} succesfully terminated" }, serial);
+            log_i({ "madbfs for device {} succesfully terminated" }, serial);
         } else [[unlikely]] {
-            log_i({ "adbfsm succesfully terminated" });
+            log_i({ "madbfs succesfully terminated" });
         }
     }
 

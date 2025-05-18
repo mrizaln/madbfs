@@ -1,7 +1,7 @@
-#include "adbfsm/data/ipc.hpp"
-#include "adbfsm/log.hpp"
+#include "madbfs/data/ipc.hpp"
+#include "madbfs/log.hpp"
 
-namespace adbfsm::data::ipc::names
+namespace madbfs::data::ipc::names
 {
     constexpr auto help             = "help";
     constexpr auto invalidate_cache = "invalidate_cache";
@@ -11,7 +11,7 @@ namespace adbfsm::data::ipc::names
     constexpr auto get_cache_size   = "get_cache_size";
 }
 
-namespace adbfsm::data
+namespace madbfs::data
 {
     using LenInfo              = std::array<char, 4>;
     constexpr auto max_msg_len = 4 * 1024uz;    // 4 KiB
@@ -95,7 +95,7 @@ namespace adbfsm::data
     }
 }
 
-namespace adbfsm::data
+namespace madbfs::data
 {
     Ipc::~Ipc()
     {
@@ -121,7 +121,7 @@ namespace adbfsm::data
         }
 
         socket_path += '/';
-        socket_path += "adbfsm@";
+        socket_path += "madbfs@";
         socket_path += serial;
         socket_path += ".sock";
 

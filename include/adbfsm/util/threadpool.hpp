@@ -9,12 +9,12 @@
 #    error "This library requires std::move_only_function implementation"
 #endif
 
-#include "adbfsm/common.hpp"
+#include "madbfs/common.hpp"
 
 #include <functional>
 #include <future>
 
-namespace adbfsm::util
+namespace madbfs::util
 {
     class Threadpool
     {

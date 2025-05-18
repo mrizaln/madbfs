@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
-project(adbfsm VERSION 0.1.0)
+project(madbfs VERSION 0.1.0)
 
 # use unity build. turn off if you don't want to
 set(CMAKE_UNITY_BUILD OFF)
 
-set(ADBFSM_ENABLE_TESTS ON CACHE BOOL "Enable tests")
+set(MADBFS_ENABLE_TESTS ON CACHE BOOL "Enable tests")
 
 include(cmake/prelude.cmake)
 
@@ -20,11 +20,11 @@ find_package(spdlog REQUIRED)
 
 add_subdirectory(vendor/saf)
 
-add_library(adbfsm-lib STATIC)
+add_library(madbfs-lib STATIC)
 target_sources(
-    adbfsm-lib
+    madbfs-lib
     PRIVATE
-        source/adbfsm.cpp
+        source/madbfs.cpp
         source/data/cache.cpp
         source/data/connection.cpp
         source/data/ipc.cpp
@@ -34,7 +34,7 @@ target_sources(
         source/tree/node.cpp
 )
 target_link_libraries(
-    adbfsm-lib
+    madbfs-lib
     PUBLIC
         boost::boost
         fmt::fmt
@@ -43,19 +43,19 @@ target_link_libraries(
         saf::saf
         spdlog::spdlog
 )
-target_include_directories(adbfsm-lib PUBLIC include)
+target_include_directories(madbfs-lib PUBLIC include)
 
-add_executable(adbfsm source/main.cpp)
-target_link_libraries(adbfsm PRIVATE adbfsm-lib)
-target_compile_options(adbfsm PRIVATE -Wall -Wextra -Wconversion)
+add_executable(madbfs source/main.cpp)
+target_link_libraries(madbfs PRIVATE madbfs-lib)
+target_compile_options(madbfs PRIVATE -Wall -Wextra -Wconversion)
 
 # # sanitizer
-# # target_compile_options(adbfsm PRIVATE -fsanitize=address,leak,undefined)
-# # target_link_options(adbfsm PRIVATE -fsanitize=address,leak,undefined)
-# target_compile_options(adbfsm PRIVATE -fsanitize=address,undefined)
-# target_link_options(adbfsm PRIVATE -fsanitize=address,undefined)
+# # target_compile_options(madbfs PRIVATE -fsanitize=address,leak,undefined)
+# # target_link_options(madbfs PRIVATE -fsanitize=address,leak,undefined)
+# target_compile_options(madbfs PRIVATE -fsanitize=address,undefined)
+# target_link_options(madbfs PRIVATE -fsanitize=address,undefined)
 
-if(ADBFSM_ENABLE_TESTS)
+if(MADBFS_ENABLE_TESTS)
     message(STATUS "Building tests")
     enable_testing()
     add_subdirectory(test)

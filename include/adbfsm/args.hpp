@@ -1,6 +1,6 @@
 #pragma once
 
-#include "adbfsm/data/connection.hpp"
+#include "madbfs/data/connection.hpp"
 
 #define FUSE_USE_VERSION 31
 #include <fuse3/fuse.h>
@@ -9,10 +9,10 @@
 
 #include <iostream>
 
-namespace adbfsm::args
+namespace madbfs::args
 {
     // NOTE: don't set default value here for string, set them in the parse() function
-    struct AdbfsmOpt
+    struct MadbfsOpt
     {
         const char* serial     = nullptr;
         const char* log_level  = nullptr;
@@ -52,16 +52,16 @@ namespace adbfsm::args
         // clang-format on
     };
 
-    static constexpr auto adbfsm_opt_spec = Array<fuse_opt, 9>{ {
+    static constexpr auto madbfs_opt_spec = Array<fuse_opt, 9>{ {
         // clang-format off
-        { "--serial=%s",     offsetof(AdbfsmOpt, serial),     true },
-        { "--log-level=%s",  offsetof(AdbfsmOpt, log_level),  true },
-        { "--log-file=%s",   offsetof(AdbfsmOpt, log_file),   true },
-        { "--cache-size=%d", offsetof(AdbfsmOpt, cache_size), true },
-        { "--page-size=%d",  offsetof(AdbfsmOpt, page_size),  true },
-        { "-h",              offsetof(AdbfsmOpt, help),       true },
-        { "--help",          offsetof(AdbfsmOpt, help),       true },
-        { "--full-help",     offsetof(AdbfsmOpt, full_help),  true },
+        { "--serial=%s",     offsetof(MadbfsOpt, serial),     true },
+        { "--log-level=%s",  offsetof(MadbfsOpt, log_level),  true },
+        { "--log-file=%s",   offsetof(MadbfsOpt, log_file),   true },
+        { "--cache-size=%d", offsetof(MadbfsOpt, cache_size), true },
+        { "--page-size=%d",  offsetof(MadbfsOpt, page_size),  true },
+        { "-h",              offsetof(MadbfsOpt, help),       true },
+        { "--help",          offsetof(MadbfsOpt, help),       true },
+        { "--full-help",     offsetof(MadbfsOpt, full_help),  true },
         // clang-format on
         FUSE_OPT_END,
     } };
@@ -72,7 +72,7 @@ namespace adbfsm::args
         fmt::print(out, "usage: {} [options] <mountpoint>\n\n", prog);
         fmt::print(
             out,
-            "Options for adbfsm:\n"
+            "Options for madbfs:\n"
             "    --serial=<s>         serial number of the device to mount\n"
             "                           (you can omit this [detection is similar to adb])\n"
             "                           (will prompt if more than one device exists)\n"
@@ -129,15 +129,15 @@ namespace adbfsm::args
         if (devices.empty()) {
             co_return "";
         } else if (devices.size() == 1) {
-            fmt::println("[adbfsm] only one device found, using serial '{}'", devices[0].serial);
+            fmt::println("[madbfs] only one device found, using serial '{}'", devices[0].serial);
             co_return devices[0].serial;
         }
 
-        fmt::println("[adbfsm] multiple devices detected,");
-        for (auto i : adbfsm::sv::iota(0u, devices.size())) {
+        fmt::println("[madbfs] multiple devices detected,");
+        for (auto i : madbfs::sv::iota(0u, devices.size())) {
             fmt::println("         - {}: {}", i + 1, devices[i].serial);
         }
-        fmt::print("[adbfsm] please specify which one you would like to use: ");
+        fmt::print("[madbfs] please specify which one you would like to use: ");
 
         auto choice = 1u;
         while (true) {
@@ -145,9 +145,9 @@ namespace adbfsm::args
             if (choice > 0 and choice <= devices.size()) {
                 break;
             }
-            fmt::print("[adbfsm] invalid choice, please enter a number between 1 and {}: ", devices.size());
+            fmt::print("[madbfs] invalid choice, please enter a number between 1 and {}: ", devices.size());
         }
-        fmt::println("[adbfsm] using serial '{}'", devices[choice - 1].serial);
+        fmt::println("[madbfs] using serial '{}'", devices[choice - 1].serial);
 
         co_return devices[choice - 1].serial;
     }
@@ -163,7 +163,7 @@ namespace adbfsm::args
      */
     inline Await<ParseResult> parse(int argc, char** argv)
     {
-        fmt::println("[adbfsm] checking adb availability...");
+        fmt::println("[madbfs] checking adb availability...");
         if (auto status = co_await data::start_connection(); not status.has_value()) {
             const auto msg = std::make_error_code(status.error()).message();
             fmt::println(stderr, "\nerror: failed to start adb server [{}].", msg);
@@ -179,31 +179,31 @@ namespace adbfsm::args
 
         auto get_serial_env = []() -> const char* {
             if (auto serial = ::getenv("ANDROID_SERIAL"); serial != nullptr) {
-                fmt::println("[adbfsm] using serial '{}' from env variable 'ANDROID_SERIAL'", serial);
+                fmt::println("[madbfs] using serial '{}' from env variable 'ANDROID_SERIAL'", serial);
                 return ::strdup(serial);
             }
             return nullptr;
         };
 
         // NOTE: these strings must be malloc-ed since fuse_opt_parse will free them
-        auto adbfsm_opt = AdbfsmOpt{
+        auto madbfs_opt = MadbfsOpt{
             .serial    = get_serial_env(),
             .log_level = ::strdup("warn"),
             .log_file  = ::strdup("-"),
         };
 
-        if (fuse_opt_parse(&args, &adbfsm_opt, adbfsm_opt_spec.data(), NULL) != 0) {
+        if (fuse_opt_parse(&args, &madbfs_opt, madbfs_opt_spec.data(), NULL) != 0) {
             fmt::println(stderr, "error: failed to parse options\n");
             fmt::println(stderr, "try '{} --help' for more information", argv[0]);
             fmt::println(stderr, "try '{} --full-help' for full information", argv[0]);
             co_return ParseResult{ 1 };
         }
 
-        if (adbfsm_opt.help) {
+        if (madbfs_opt.help) {
             show_help(argv[0], false);
             ::fuse_opt_free_args(&args);
             co_return ParseResult{ 0 };
-        } else if (adbfsm_opt.full_help) {
+        } else if (madbfs_opt.full_help) {
             show_help(argv[0], false);
             fmt::println(stdout, "\nOptions for libfuse:");
             ::fuse_cmdline_help();
@@ -212,35 +212,35 @@ namespace adbfsm::args
             co_return ParseResult{ 0 };
         }
 
-        auto log_level = parse_level_str(adbfsm_opt.log_level);
+        auto log_level = parse_level_str(madbfs_opt.log_level);
         if (not log_level.has_value()) {
-            fmt::println(stderr, "error: invalid log level '{}'", adbfsm_opt.log_level);
+            fmt::println(stderr, "error: invalid log level '{}'", madbfs_opt.log_level);
             fmt::println(stderr, "valid log levels: trace, debug, info, warn, error, critical, off");
             ::fuse_opt_free_args(&args);
             co_return ParseResult{ 1 };
         }
 
-        if (adbfsm_opt.serial == nullptr) {
+        if (madbfs_opt.serial == nullptr) {
             auto serial = co_await get_serial();
             if (serial.empty()) {
                 fmt::println(stderr, "error: no device found, make sure your device is connected");
                 ::fuse_opt_free_args(&args);
                 co_return ParseResult{ 1 };
             }
-            adbfsm_opt.serial = ::strdup(serial.c_str());
-        } else if (auto r = co_await check_serial(adbfsm_opt.serial); r != data::DeviceStatus::Device) {
-            fmt::println(stderr, "error: serial '{} 'is not valid ({})", adbfsm_opt.serial, to_string(r));
+            madbfs_opt.serial = ::strdup(serial.c_str());
+        } else if (auto r = co_await check_serial(madbfs_opt.serial); r != data::DeviceStatus::Device) {
+            fmt::println(stderr, "error: serial '{} 'is not valid ({})", madbfs_opt.serial, to_string(r));
             ::fuse_opt_free_args(&args);
             co_return ParseResult{ 1 };
         }
 
         co_return ParseResult::Opt{
             .opt = {
-                .serial    = adbfsm_opt.serial,
+                .serial    = madbfs_opt.serial,
                 .log_level = log_level.value(),
-                .log_file  = adbfsm_opt.log_file,
-                .cachesize = std::bit_ceil(std::max(static_cast<usize>(adbfsm_opt.cache_size), 128uz)),
-                .pagesize  = std::bit_ceil(std::max(static_cast<usize>(adbfsm_opt.page_size), 64uz)),
+                .log_file  = madbfs_opt.log_file,
+                .cachesize = std::bit_ceil(std::max(static_cast<usize>(madbfs_opt.cache_size), 128uz)),
+                .pagesize  = std::bit_ceil(std::max(static_cast<usize>(madbfs_opt.page_size), 64uz)),
             },
             .args = args,
         };

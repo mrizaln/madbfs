@@ -12,7 +12,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace adbfsm::async
+namespace madbfs::async
 {
     template <typename CompletionToken>
     struct AsExpected
@@ -145,20 +145,20 @@ namespace boost::asio
 {
 
     template <typename T>
-    using ExpectedHandler = adbfsm::async::detail::ExpectedHandler<T>;
+    using ExpectedHandler = madbfs::async::detail::ExpectedHandler<T>;
 
     template <typename CompletionToken, typename Signature>
-    class async_result<adbfsm::async::AsExpected<CompletionToken>, Signature>
+    class async_result<madbfs::async::AsExpected<CompletionToken>, Signature>
     {
     private:
-        using ExpectedSignature = adbfsm::async::detail::ExpectedSignatureTrait_t<Signature>;
+        using ExpectedSignature = madbfs::async::detail::ExpectedSignatureTrait_t<Signature>;
         using ReturnType        = async_result<CompletionToken, ExpectedSignature>::return_type;
 
     public:
         template <typename Initiation, typename... Args>
         static ReturnType initiate(
             Initiation&&                                 initiation,
-            adbfsm::async::AsExpected<CompletionToken>&& token,
+            madbfs::async::AsExpected<CompletionToken>&& token,
             Args&&... args
         )
         {

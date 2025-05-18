@@ -1,7 +1,7 @@
-#include "adbfsm/data/cache.hpp"
-#include "adbfsm/log.hpp"
+#include "madbfs/data/cache.hpp"
+#include "madbfs/log.hpp"
 
-namespace adbfsm::data
+namespace madbfs::data
 {
     Page::Page(PageKey key, Uniq<char[]> buf, u32 size)
         : m_key{ key }
@@ -52,7 +52,7 @@ namespace adbfsm::data
     }
 }
 
-namespace adbfsm::data
+namespace madbfs::data
 {
     Cache::Cache(usize page_size, usize max_pages)
         : m_page_size{ std::bit_ceil(page_size) }

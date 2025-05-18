@@ -1,11 +1,11 @@
-#include "adbfsm/tree/node.hpp"
-#include "adbfsm/data/connection.hpp"
-#include "adbfsm/log.hpp"
-#include "adbfsm/util/overload.hpp"
+#include "madbfs/tree/node.hpp"
+#include "madbfs/data/connection.hpp"
+#include "madbfs/log.hpp"
+#include "madbfs/util/overload.hpp"
 
 #include <fcntl.h>
 
-namespace adbfsm::tree
+namespace madbfs::tree
 {
     Expect<Ref<Node>> Directory::find(Str name) const
     {
@@ -51,7 +51,7 @@ namespace adbfsm::tree
     }
 }
 
-namespace adbfsm::tree
+namespace madbfs::tree
 {
     Expect<Ref<const data::Stat>> Node::stat() const
     {

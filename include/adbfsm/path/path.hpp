@@ -1,11 +1,11 @@
 #pragma once
 
-#include "adbfsm/common.hpp"
+#include "madbfs/common.hpp"
 
 #include <cassert>
 #include <print>
 
-namespace adbfsm::path
+namespace madbfs::path
 {
     class PathBuf;
 
@@ -206,7 +206,7 @@ namespace adbfsm::path
     Opt<PathBuf> create_buf(String&& path_str);
 }
 
-namespace adbfsm::path::inline literals
+namespace madbfs::path::inline literals
 {
     namespace detail
     {

@@ -1,8 +1,8 @@
-#include "adbfsm/path/path.hpp"
+#include "madbfs/path/path.hpp"
 
 namespace
 {
-    adbfsm::Gen<adbfsm::Str> iter_path_impl(adbfsm::Str path)
+    madbfs::Gen<madbfs::Str> iter_path_impl(madbfs::Str path)
     {
         assert(not path.empty() and path.front() == '/');
         co_yield "/";
@@ -17,7 +17,7 @@ namespace
                 co_return;
             }
 
-            auto it = adbfsm::sr::find(path | adbfsm::sv::drop(index), '/');
+            auto it = madbfs::sr::find(path | madbfs::sv::drop(index), '/');
             if (it == path.end()) {
                 auto res = path.substr(index);
                 co_yield res;
@@ -35,7 +35,7 @@ namespace
 
 // TODO: verify offsets if PathBuf is root
 
-namespace adbfsm::path
+namespace madbfs::path
 {
     Opt<PathBuf> Path::extend_copy(Str name) const
     {

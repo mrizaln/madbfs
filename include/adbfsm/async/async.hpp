@@ -1,7 +1,7 @@
 #pragma once
 
-#include "adbfsm/async/as_expected.hpp"
-#include "adbfsm/common.hpp"
+#include "madbfs/async/as_expected.hpp"
+#include "madbfs/common.hpp"
 
 #include <boost/asio.hpp>
 #include <boost/asio/error.hpp>
@@ -10,7 +10,7 @@
 #include <expected>
 #include <utility>
 
-namespace adbfsm
+namespace madbfs
 {
     template <typename T>
     using Await = boost::asio::awaitable<T>;
@@ -19,7 +19,7 @@ namespace adbfsm
     using AExpect = Await<Expect<T>>;
 }
 
-namespace adbfsm::async
+namespace madbfs::async
 {
     using Context   = boost::asio::io_context;
     using Token     = AsExpected<boost::asio::use_awaitable_t<>>;

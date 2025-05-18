@@ -1,8 +1,6 @@
-# adbfsm
+# madbfs
 
-The name of the project can be separated as `adb`, `fs`, and `m` which means `adb filesystem modern`.
-
-This project aims to create a well-built filesystem abstraction over `adb` using `libfuse` that is fast, safe, and reliable while also have have well structured code according to modern C++ (20 and above) practices.
+This project, `madbfs` (modern adb filesystem, formerly `adbfsm`), aims to create a well-built filesystem abstraction over `adb` using `libfuse` that is fast, safe, and reliable while also have have well structured code according to modern C++ (20 and above) practices.
 
 ## Motivation
 
@@ -104,16 +102,16 @@ cmake --preset conan-release
 cmake --build --preset conan-release
 ```
 
-The built binary will be in `build/Release/` directory with the name `adbfsm`. You can place this binary anywhere you want (place it in PATH if you want it to be accessible from anywhere).
+The built binary will be in `build/Release/` directory with the name `madbfs`. You can place this binary anywhere you want (place it in PATH if you want it to be accessible from anywhere).
 
 ## Usage
 
 The help message can help you start using this program
 
 ```
-usage: adbfsm [options] <mountpoint>
+usage: madbfs [options] <mountpoint>
 
-Options for adbfsm:
+Options for madbfs:
     --serial=<s>         serial number of the device to mount
                            (you can omit this [detection is similar to adb])
                            (will prompt if more than one device exists)
@@ -136,28 +134,28 @@ Options for adbfsm:
 To mount your device you only need to specify the mount point if there is only one device. If there are more than one device then you can specify the serial using `--serial` option. If you omit the `--serial` option when there are multiple device connected to the computer, you will be prompted to specify the device you want to mount.
 
 ```sh
-$ ./adbfsm mount
-[adbfsm] checking adb availability...
-[adbfsm] multiple devices detected,
+$ ./madbfs mount
+[madbfs] checking adb availability...
+[madbfs] multiple devices detected,
          - 1: 068832516O101622
          - 2: 192.168.240.112:5555
-[adbfsm] please specify which one you would like to use: _
+[madbfs] please specify which one you would like to use: _
 ```
 
-`adbfsm` respects the env variable `ANDROID_SERIAL` (mimicking `adb` behavior) so you can alternately use it to specify the device.
+`madbfs` respects the env variable `ANDROID_SERIAL` (mimicking `adb` behavior) so you can alternately use it to specify the device.
 
 ```sh
-$ ANDROID_SERIAL=068832516O101622 ./adbfsm
-[adbfsm] checking adb availability...
-[adbfsm] using serial '068832516O101622' from env variable 'ANDROID_SERIAL'
+$ ANDROID_SERIAL=068832516O101622 ./madbfs
+[madbfs] checking adb availability...
+[madbfs] using serial '068832516O101622' from env variable 'ANDROID_SERIAL'
 ```
 
 ### Cache size
 
-`adbfsm` caches all the read/write operations on the files on the device. This cache is stored in memory. You can control the size of this cache using `--cache-size` option (in MiB). The default value is `512` (512MiB).
+`madbfs` caches all the read/write operations on the files on the device. This cache is stored in memory. You can control the size of this cache using `--cache-size` option (in MiB). The default value is `512` (512MiB).
 
 ```sh
-$ ./adbfsm --cache-size=512<mountpoint>    # using 512MiB of cache
+$ ./madbfs --cache-size=512<mountpoint>    # using 512MiB of cache
 ```
 
 ### Page size
@@ -165,7 +163,7 @@ $ ./adbfsm --cache-size=512<mountpoint>    # using 512MiB of cache
 In the cache, each file is divided into pages. The `--page-size` option dictates the size of this page (in KiB). Page size also dictates the size of the buffer used to read/write into the file on the device. You can adjust this value according to your use. From my testing, `page-size` of value `128` (means 128KiB) works well when using USB cable for the `adb` connection. You may want to decrease or increase this value for your use case. The default value is `128` (128KiB).
 
 ```sh
-$ ./adbfsm --page-size=128<mountpoint>    # using 128KiB of page size
+$ ./madbfs --page-size=128<mountpoint>    # using 128KiB of page size
 
 ```
 
@@ -174,16 +172,16 @@ $ ./adbfsm --page-size=128<mountpoint>    # using 128KiB of page size
 The default log file is stdout (which goes to nowhere when not run in foreground mode). You can manually set the log file using `--log-file` option and set the log level using `--log-level`.
 
 ```sh
-$ ./adbfsm --log-file=adbfsm.log --log-level=debug <mountpoint>
+$ ./madbfs --log-file=madbfs.log --log-level=debug <mountpoint>
 ```
 
 ### Debug mode
 
-As part of debugging functionality `libfuse` has provided debug mode through `-d` flag. You can use this to monitor `adbfsm` operations (if you don't want to use log file or want to see the log in real-time). If the debugging information is too verbose, you can use `-f` instead to make adbfsm run in foreground mode without printing `fuse` debug information.
+As part of debugging functionality `libfuse` has provided debug mode through `-d` flag. You can use this to monitor `madbfs` operations (if you don't want to use log file or want to see the log in real-time). If the debugging information is too verbose, you can use `-f` instead to make madbfs run in foreground mode without printing `fuse` debug information.
 
 ```sh
-$ ./adbfsm --log-file=- --log-level=debug -d <mountpoint>                     # this will print the libfuse debug messages and adbfsm log messages
-$ ./adbfsm --log-file=- --log-level=debug -d <mountpoint> 2> /dev/null        # this will print only adbfsm log messages since libfuse debug messages are printed to stderr
+$ ./madbfs --log-file=- --log-level=debug -d <mountpoint>                     # this will print the libfuse debug messages and madbfs log messages
+$ ./madbfs --log-file=- --log-level=debug -d <mountpoint> 2> /dev/null        # this will print only madbfs log messages since libfuse debug messages are printed to stderr
 ```
 
 ### IPC
@@ -202,7 +200,7 @@ The address of the socket in which you can connect to as client is composed of t
 For example, the socket path for a device with serial `192.168.240.112:5555`:
 
 ```
-/run/user/1000/adbfsm@192.168.240.112:5555.sock
+/run/user/1000/madbfs@192.168.240.112:5555.sock
 ```
 
 If at initialization this socket file exists, the IPC won't start. This may happen if the filesystem is terminated unexpectedly (crash or kill signal). You need to remove this file manually if that happens.
@@ -327,7 +325,7 @@ The `<value>` then will be different depending on the operation performed:
 ## TODO
 
 - [x] Make the codebase async using C++20 coroutines.
-- [x] IPC to talk to the `adbfsm` to control the filesystem parameters like invalidation, timeout, cache size, etc.
+- [x] IPC to talk to the `madbfs` to control the filesystem parameters like invalidation, timeout, cache size, etc.
 - [x] Implement the filesystem as actual tree for caching the stat.
 - [x] Implement file read and write operation caching in memory.
 - [x] ~~Implement proper multithreading, (not needed, since it's using async now, though multiple executor might help).~~

@@ -1,7 +1,7 @@
-#include "adbfsm/path/path.hpp"
-#include "adbfsm/tree/file_tree.hpp"
-#include "adbfsm/tree/node.hpp"
-#include "adbfsm/util/overload.hpp"
+#include "madbfs/path/path.hpp"
+#include "madbfs/tree/file_tree.hpp"
+#include "madbfs/tree/node.hpp"
+#include "madbfs/util/overload.hpp"
 
 #include <boost/ut.hpp>
 #include <dtl_modern/dtl_modern.hpp>
@@ -12,7 +12,7 @@
 #include <source_location>
 
 namespace ut = boost::ext::ut;
-using namespace adbfsm::aliases;
+using namespace madbfs::aliases;
 
 // NOTE: extra newline at the start of this string is intentional (make sure to take it into account)
 constexpr auto expected = R"(
@@ -68,11 +68,11 @@ constexpr auto expected_rm = R"(
 )";
 
 template <>
-struct fmt::formatter<adbfsm::tree::Node> : fmt::formatter<std::string_view>
+struct fmt::formatter<madbfs::tree::Node> : fmt::formatter<std::string_view>
 {
-    auto format(const adbfsm::tree::Node& node, auto&& ctx) const
+    auto format(const madbfs::tree::Node& node, auto&& ctx) const
     {
-        using namespace adbfsm::tree;
+        using namespace madbfs::tree;
 
         auto print_impl = [&](this auto&& self, const Node* node, usize depth) -> void {
             if (node == nullptr) {
@@ -83,7 +83,7 @@ struct fmt::formatter<adbfsm::tree::Node> : fmt::formatter<std::string_view>
                 fmt::format_to(ctx.out(), "    ");
             }
 
-            auto visitor = adbfsm::util::Overload{
+            auto visitor = madbfs::util::Overload{
                 [&](const Link& link) {
                     auto pathbuf = link.target().build_path();
                     return fmt::format("    ->    {}", pathbuf.as_path().fullpath());
@@ -126,7 +126,7 @@ public:
 };
 
 template <typename T>
-adbfsm::Unit raise_expect_error(std::errc errc, std::source_location loc = std::source_location::current())
+madbfs::Unit raise_expect_error(std::errc errc, std::source_location loc = std::source_location::current())
 {
     throw ExpectError{ errc, loc };
     return {};
@@ -144,13 +144,13 @@ String diff_str(Str str1, Str str2)
 
 namespace mock
 {
-    using namespace adbfsm;
-    using namespace adbfsm::data;
+    using namespace madbfs;
+    using namespace madbfs::data;
 
     class DummyConnection final : public IConnection
     {
     public:
-        AExpect<Gen<ParsedStat>> statdir(path::Path) override { co_return adbfsm::Unexpect{ {} }; }
+        AExpect<Gen<ParsedStat>> statdir(path::Path) override { co_return madbfs::Unexpect{ {} }; }
         AExpect<Stat>            stat(path::Path) override { co_return Stat{}; }
         AExpect<path::PathBuf>   readlink(path::Path path) override { co_return path.into_buf(); };
 
@@ -182,19 +182,19 @@ int main()
     auto _ = std::ignore;
 
     "constructed tree from raw node have same shape"_test = [&] {
-        using namespace adbfsm::tree;
+        using namespace madbfs::tree;
 
 #define unwrap() transform_error([](auto e) { return raise_expect_error<Node*>(e); }).value()
 
-        using adbfsm::path::operator""_path;
+        using madbfs::path::operator""_path;
 
         auto connection = mock::DummyConnection{};
-        auto cache      = adbfsm::data::Cache{ 64 * 1024, 1024 };
+        auto cache      = madbfs::data::Cache{ 64 * 1024, 1024 };
         auto context    = Node::Context{ connection, cache, "/dummy"_path };
 
-        auto io_context = adbfsm::async::Context{};
+        auto io_context = madbfs::async::Context{};
 
-        auto coro = [&] -> adbfsm::Await<void> {
+        auto coro = [&] -> madbfs::Await<void> {
             auto root = Node{ "/", nullptr, {}, Directory{} };
 
             Node& hello = (co_await root.mkdir(context, "hello")).unwrap();
@@ -242,26 +242,26 @@ int main()
             expect(expected == tree_str) << diff_str(expected, tree_str);
         };
 
-        adbfsm::async::spawn(io_context, coro(), adbfsm::async::detached);
+        madbfs::async::spawn(io_context, coro(), madbfs::async::detached);
         io_context.run_one();
 
 #undef unwrap
     };
 
     "constructed FileTree have same shape"_test = [&] {
-        using namespace adbfsm::tree;
+        using namespace madbfs::tree;
 
         auto connection = mock::DummyConnection{};
-        auto cache      = adbfsm::data::Cache{ 64 * 1024, 1024 };
+        auto cache      = madbfs::data::Cache{ 64 * 1024, 1024 };
         auto tree       = FileTree{ connection, cache };
 
-        auto io_context = adbfsm::async::Context{};
+        auto io_context = madbfs::async::Context{};
 
 #define unwrap(T) transform_error([](auto e) { return raise_expect_error<T>(e); }).value()
 
-        using adbfsm::path::operator""_path;
+        using madbfs::path::operator""_path;
 
-        auto coro = [&] -> adbfsm::Await<void> {
+        auto coro = [&] -> madbfs::Await<void> {
             (co_await tree.mkdir("/hello"_path)).unwrap(Node*);
             (co_await tree.mknod("/hello/world.txt"_path)).unwrap(Node*);
             (co_await tree.mknod("/hello/foo.txt"_path)).unwrap(Node*);
@@ -302,7 +302,7 @@ int main()
             // there is no recursive delete
             Node& bar      = tree.traverse("/hello/bar"_path).unwrap(Node*);
             auto  bar_path = bar.build_path();
-            auto  paths    = std::vector<adbfsm::path::PathBuf>{};
+            auto  paths    = std::vector<madbfs::path::PathBuf>{};
 
             _ = bar.list([&](Str name) { paths.push_back(bar_path.extend_copy(name).value()); });
             for (const auto& path : paths) {
@@ -315,7 +315,7 @@ int main()
             expect(expected_rm == tree_str) << diff_str(expected_rm, tree_str);
         };
 
-        adbfsm::async::spawn(io_context, coro(), adbfsm::async::detached);
+        madbfs::async::spawn(io_context, coro(), madbfs::async::detached);
         io_context.run_one();
 
 #undef unwrap

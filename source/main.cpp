@@ -1,6 +1,6 @@
-#include "adbfsm/adbfsm.hpp"
-#include "adbfsm/args.hpp"
-#include "adbfsm/log.hpp"
+#include "madbfs/madbfs.hpp"
+#include "madbfs/args.hpp"
+#include "madbfs/log.hpp"
 
 #include <execinfo.h>
 #include <unistd.h>
@@ -36,13 +36,13 @@ void unexpected_program_end(const char* msg, bool is_sigsegv)
     auto array = std::array<void*, 10>{};
     auto size  = ::backtrace(array.data(), array.size());
 
-    adbfsm::log_c({ "> Backtrace:" });
+    madbfs::log_c({ "> Backtrace:" });
     auto names = ::backtrace_symbols(array.data(), size);
-    for (auto i : adbfsm::sv::iota(0, size)) {
-        adbfsm::log_c({ "\t{}" }, names[i]);
+    for (auto i : madbfs::sv::iota(0, size)) {
+        madbfs::log_c({ "\t{}" }, names[i]);
     }
     fmt::println("> Backtrace:");
-    for (auto i : adbfsm::sv::iota(0, size)) {
+    for (auto i : madbfs::sv::iota(0, size)) {
         fmt::println("\t{}", names[i]);
     }
     free(names);
@@ -58,8 +58,8 @@ int main(int argc, char** argv)
     std::signal(SIGSEGV, [](int) { unexpected_program_end("SIGSEGV", true); });
     std::set_terminate([] { unexpected_program_end("std::terminate", false); });
 
-    auto ctx = adbfsm::async::Context{};
-    auto fut = adbfsm::async::spawn(ctx, adbfsm::args::parse(argc, argv), adbfsm::async::use_future);
+    auto ctx = madbfs::async::Context{};
+    auto fut = madbfs::async::spawn(ctx, madbfs::args::parse(argc, argv), madbfs::async::use_future);
     ctx.run();
 
     auto maybe_opt = fut.get();
@@ -68,8 +68,8 @@ int main(int argc, char** argv)
     }
     auto [opt, args] = std::move(maybe_opt).opt();
 
-    adbfsm::log::init(opt.log_level, opt.log_file);
-    adbfsm::log_i(
+    madbfs::log::init(opt.log_level, opt.log_file);
+    madbfs::log_i(
         { "mount device '{}' with cache size {}MiB and page size {}kiB" },
         opt.serial,
         opt.cachesize,
@@ -77,7 +77,7 @@ int main(int argc, char** argv)
     );
     if (opt.log_file != "-") {
         fmt::println(
-            "[adbfsm] mount device '{}' with cache size {}MiB and page size {}kiB",
+            "[madbfs] mount device '{}' with cache size {}MiB and page size {}kiB",
             opt.serial,
             opt.cachesize,
             opt.pagesize
@@ -89,12 +89,12 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    auto ret = fuse_main(args.argc, args.argv, &adbfsm::operations, (void*)&opt);
+    auto ret = fuse_main(args.argc, args.argv, &madbfs::operations, (void*)&opt);
     ::fuse_opt_free_args(&args);
 
     // on invalid argument (1) and no mount point specified (2)
     if (ret == 1 or ret == 2) {
-        adbfsm::args::show_help(argv[0], true);
+        madbfs::args::show_help(argv[0], true);
     }
 
     return ret;

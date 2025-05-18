@@ -1,12 +1,12 @@
 #pragma once
 
-#include "adbfsm/data/connection.hpp"
-#include "adbfsm/path/path.hpp"
-#include "adbfsm/tree/node.hpp"
+#include "madbfs/data/connection.hpp"
+#include "madbfs/path/path.hpp"
+#include "madbfs/tree/node.hpp"
 
 #include <functional>
 
-namespace adbfsm::tree
+namespace madbfs::tree
 {
     /**
      * @class FileTree

@@ -96,7 +96,7 @@ def try_connect(serial: str, retry_attempt: int, retry_delay: int) -> socket | N
     retry_atttempt = 0
     while True:
         try:
-            sock.connect(f"/run/user/1000/adbfsm@{serial}.sock")
+            sock.connect(f"/run/user/1000/madbfs@{serial}.sock")
             return sock
         except ConnectionRefusedError:
             eprint(

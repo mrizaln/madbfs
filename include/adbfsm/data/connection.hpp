@@ -1,17 +1,17 @@
 #pragma once
 
-#include "adbfsm/common.hpp"
-#include "adbfsm/data/stat.hpp"
+#include "madbfs/common.hpp"
+#include "madbfs/data/stat.hpp"
 
-#include <adbfsm/async/async.hpp>
+#include <madbfs/async/async.hpp>
 
-namespace adbfsm::path
+namespace madbfs::path
 {
     class Path;
     class PathBuf;
 }
 
-namespace adbfsm::data
+namespace madbfs::data
 {
     struct ParsedStat
     {

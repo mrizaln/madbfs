@@ -1,12 +1,12 @@
 #pragma once
 
-#include "adbfsm/common.hpp"
+#include "madbfs/common.hpp"
 
 #include <sys/stat.h>
 
 #include <atomic>
 
-namespace adbfsm::data
+namespace madbfs::data
 {
     /**
      * @class CacheId

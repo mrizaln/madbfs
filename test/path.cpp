@@ -1,4 +1,4 @@
-#include "adbfsm/path/path.hpp"
+#include "madbfs/path/path.hpp"
 
 #include <boost/ut.hpp>
 
@@ -9,7 +9,7 @@
 #include <iostream>
 
 namespace ut = boost::ut;
-using namespace adbfsm::aliases;
+using namespace madbfs::aliases;
 
 struct TestConstruct
 {
@@ -135,63 +135,63 @@ constexpr auto constructible_testcases = std::array{
         .filename       = "user",
     },
     TestConstruct{
-        .input          = "/home/user/projects/cpp/adbfsm",
+        .input          = "/home/user/projects/cpp/madbfs",
         .upper_parent   = "/home/user/projects",
         .upper_filename = "cpp",
         .parent         = "/home/user/projects/cpp",
-        .filename       = "adbfsm",
+        .filename       = "madbfs",
     },
     TestConstruct{
-        .input          = "///////home/user/projects/cpp/adbfsm",
+        .input          = "///////home/user/projects/cpp/madbfs",
         .upper_parent   = "/home/user/projects",
         .upper_filename = "cpp",
         .parent         = "/home/user/projects/cpp",
-        .filename       = "adbfsm",
+        .filename       = "madbfs",
     },
     TestConstruct{
-        .input          = "/home/user/projects/cpp/adbfsm////",
+        .input          = "/home/user/projects/cpp/madbfs////",
         .upper_parent   = "/home/user/projects",
         .upper_filename = "cpp",
         .parent         = "/home/user/projects/cpp",
-        .filename       = "adbfsm",
+        .filename       = "madbfs",
     },
     TestConstruct{
-        .input          = "/home/////user/projects/cpp/adbfsm",
+        .input          = "/home/////user/projects/cpp/madbfs",
         .upper_parent   = "/home/////user/projects",
         .upper_filename = "cpp",
         .parent         = "/home/////user/projects/cpp",
-        .filename       = "adbfsm",
+        .filename       = "madbfs",
     },
     TestConstruct{
-        .input          = "//home/user/////projects////cpp/adbfsm////",
+        .input          = "//home/user/////projects////cpp/madbfs////",
         .upper_parent   = "/home/user/////projects",
         .upper_filename = "cpp",
         .parent         = "/home/user/////projects////cpp",
-        .filename       = "adbfsm",
+        .filename       = "madbfs",
     },
     TestConstruct{
-        .input          = "/home/user/projects/cpp//////adbfsm",
+        .input          = "/home/user/projects/cpp//////madbfs",
         .upper_parent   = "/home/user/projects",
         .upper_filename = "cpp",
         .parent         = "/home/user/projects/cpp",
-        .filename       = "adbfsm",
+        .filename       = "madbfs",
     },
     TestConstruct{
-        .input          = "/home/user/projects/../projects/../../user/projects/cpp//////adbfsm",
+        .input          = "/home/user/projects/../projects/../../user/projects/cpp//////madbfs",
         .upper_parent   = "/home/user/projects/../projects/../../user/projects",
         .upper_filename = "cpp",
         .parent         = "/home/user/projects/../projects/../../user/projects/cpp",
-        .filename       = "adbfsm",
+        .filename       = "madbfs",
     },
 };
 
 constexpr auto non_constructible_testcases = std::array{
     "",
     "root",
-    "user/projects/cpp/adbfsm",
-    "C:/user/projects/cpp/adbfsm",
-    "C:\\user\\projects\\cpp\\adbfsm",
-    "ftp://user/projects/cpp/adbfsm",
+    "user/projects/cpp/madbfs",
+    "C:/user/projects/cpp/madbfs",
+    "C:\\user\\projects\\cpp\\madbfs",
+    "ftp://user/projects/cpp/madbfs",
     "https://google.com",
 };
 
@@ -249,22 +249,22 @@ const inline auto iter_testcases = std::array{
         .iterated = { "/", "home", "user", "projects" },
     },
     TestIter{
-        .input    = "/home/user/projects/cpp/adbfsm",
-        .iterated = { "/", "home", "user", "projects", "cpp", "adbfsm" },
+        .input    = "/home/user/projects/cpp/madbfs",
+        .iterated = { "/", "home", "user", "projects", "cpp", "madbfs" },
     },
     TestIter{
-        .input    = "///home/////user/projects/cpp/adbfsm",
-        .iterated = { "/", "home", "user", "projects", "cpp", "adbfsm" },
+        .input    = "///home/////user/projects/cpp/madbfs",
+        .iterated = { "/", "home", "user", "projects", "cpp", "madbfs" },
     },
     TestIter{
-        .input    = "/home//user//////projects/////cpp/adbfsm////////",
-        .iterated = { "/", "home", "user", "projects", "cpp", "adbfsm" },
+        .input    = "/home//user//////projects/////cpp/madbfs////////",
+        .iterated = { "/", "home", "user", "projects", "cpp", "madbfs" },
     },
     TestIter{
-        .input    = "/home/./user/projects/../projects/../../user/././projects/cpp//////adbfsm",
+        .input    = "/home/./user/projects/../projects/../../user/././projects/cpp//////madbfs",
         .iterated = { 
             "/", "home", ".", "user", "projects", "..", "projects", "..", "..", "user",
-            ".", ".", "projects", "cpp", "adbfsm",
+            ".", ".", "projects", "cpp", "madbfs",
         },
     },
 };
@@ -275,9 +275,9 @@ int main()
     using namespace ut::operators;
     using ut::expect, ut::log, ut::that;
 
-    using adbfsm::path::create;
-    using adbfsm::path::operator""_path;
-    using adbfsm::path::PathBuf;
+    using madbfs::path::create;
+    using madbfs::path::operator""_path;
+    using madbfs::path::PathBuf;
 
     "Path must be correctly constructed"_test = [](const TestConstruct& test) {
         auto path = create(test.input);
@@ -337,15 +337,15 @@ int main()
     } | iter_testcases;
 
     "Path can be constructed using literals"_test = [] {
-        auto path = "/home/user/projects/cpp/adbfsm"_path;
+        auto path = "/home/user/projects/cpp/madbfs"_path;
         expect(path.parent() == "/home/user/projects/cpp");
-        expect(path.filename() == "adbfsm");
-        expect(path.fullpath() == "/home/user/projects/cpp/adbfsm");
+        expect(path.filename() == "madbfs");
+        expect(path.fullpath() == "/home/user/projects/cpp/madbfs");
 
-        path = "/////home//user/projects////cpp/adbfsm////"_path;
+        path = "/////home//user/projects////cpp/madbfs////"_path;
         expect(path.parent() == "/home//user/projects////cpp");
-        expect(path.filename() == "adbfsm");
-        expect(path.fullpath() == "/home//user/projects////cpp/adbfsm");
+        expect(path.filename() == "madbfs");
+        expect(path.fullpath() == "/home//user/projects////cpp/madbfs");
 
         // path = "C:/Users/user0/Documents/Work and School/D"_path;      // won't compile
     };
