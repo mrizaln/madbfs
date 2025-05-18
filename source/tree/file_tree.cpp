@@ -162,7 +162,8 @@ namespace adbfsm::tree
             case S_IFREG: built = base->build(name, stat, RegularFile{}); break;
             case S_IFDIR: built = base->build(name, stat, Directory{}); break;
             case S_IFLNK: {
-                auto may_target = co_await m_connection.readlink(path.extend_copy(name)->as_path());
+                auto target     = path.extend_copy(name).value();
+                auto may_target = co_await m_connection.readlink(target.as_path());
                 if (not may_stats) {
                     co_return Unexpect{ may_target.error() };
                 }
