@@ -12,6 +12,9 @@
 
 namespace
 {
+    /**
+     * @brief Get application instance.
+     */
     adbfsm::Adbfsm& get_data()
     {
         auto ctx = ::fuse_get_context()->private_data;
@@ -19,10 +22,18 @@ namespace
         return *static_cast<adbfsm::Adbfsm*>(ctx);
     }
 
+    /**
+     * @brief Interface sync code of FUSE with async code of adbfsm on the tree access using future.
+     *
+     * @param fn The member function of `FileTree`.
+     * @param args Arguments to be passed into the member function.
+     *
+     * @return The return value of the member function.
+     */
     template <typename Ret, typename... Args>
     auto tree_blocking(Ret (adbfsm::tree::FileTree::*fn)(Args...), std::type_identity_t<Args>... args)
     {
-        // NOTE: for some reason con't use `use_future` as completion token, so I just implement it manually
+        // NOTE: for some reason can't use `use_future` as completion token, so I just implement it manually
 
         auto& data = get_data();
         auto& ctx  = data.async_ctx();
@@ -82,7 +93,7 @@ namespace
 namespace adbfsm
 {
     Adbfsm::Adbfsm(usize page_size, usize max_pages)
-        : m_connection{ std::make_unique<data::Connection>(m_async_ctx, page_size) }
+        : m_connection{ std::make_unique<data::Connection>() }
         , m_cache{ page_size, max_pages }
         , m_tree{ *m_connection, m_cache }
     {
@@ -248,11 +259,9 @@ namespace adbfsm
         stbuf->st_blksize = static_cast<blksize_t>(get_data().cache().page_size());
         stbuf->st_blocks  = stbuf->st_size / stbuf->st_blksize + (stbuf->st_size % stbuf->st_blksize != 0);
 
-        auto time = timespec{ .tv_sec = stat.mtime, .tv_nsec = 0 };
-
-        stbuf->st_atim = time;
-        stbuf->st_mtim = time;
-        stbuf->st_ctim = time;
+        stbuf->st_atim = timespec{ .tv_sec = stat.atime, .tv_nsec = 0 };
+        stbuf->st_mtim = timespec{ .tv_sec = stat.mtime, .tv_nsec = 0 };
+        stbuf->st_ctim = timespec{ .tv_sec = stat.ctime, .tv_nsec = 0 };
 
         return 0;
     }

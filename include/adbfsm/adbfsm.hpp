@@ -10,6 +10,14 @@
 
 namespace adbfsm
 {
+    /**
+     * @class Adbfsm
+     *
+     * @brief Main class of the filesystem.
+     *
+     * Everything is controlled from here. An instantiation of this class will live as long as the fs mounted.
+     * The instance will be available as fuse_context's private data.
+     */
     class Adbfsm
     {
     public:
@@ -23,11 +31,11 @@ namespace adbfsm
     private:
         boost::json::value ipc_handler(data::ipc::Op op);
 
-        async::Context          m_async_ctx;
-        Uniq<data::IConnection> m_connection;
-        data::Cache             m_cache;
-        tree::FileTree          m_tree;
-        Uniq<data::Ipc>         m_ipc;
+        async::Context         m_async_ctx;
+        Uniq<data::Connection> m_connection;
+        data::Cache            m_cache;
+        tree::FileTree         m_tree;
+        Uniq<data::Ipc>        m_ipc;
     };
 
     void* init(fuse_conn_info*, fuse_config*);
