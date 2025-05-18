@@ -409,13 +409,13 @@ namespace adbfsm::data
         const auto skip  = fmt::format("skip={}", offset);
         const auto count = fmt::format("count={}", out.size());
         const auto iff   = fmt::format("if=\"{}\"", path.fullpath());
-        const auto bs    = fmt::format("bs={}", m_page_size);
+
+        // bs is skipped, relies on `count_bytes`: https://stackoverflow.com/a/40792605/16506263
 
         const auto args = Array{
             "shell"sv,
             "dd"sv,
             "iflag=skip_bytes,count_bytes"sv,    // https://stackoverflow.com/a/40792605/16506263
-            Str{ bs },                           // https://superuser.com/a/234204
             Str{ skip },
             Str{ count },
             Str{ iff },
@@ -432,14 +432,12 @@ namespace adbfsm::data
     {
         const auto seek = fmt::format("seek={}", offset);
         const auto off  = fmt::format("of=\"{}\"", path.fullpath());
-        const auto bs   = fmt::format("bs={}", m_page_size);
 
         const auto args = Array{
             "shell"sv,
             "dd"sv,
             "oflag=seek_bytes"sv,    // same as above, though I don't know if this is really needed
             "conv=notrunc"sv,        // https://unix.stackexchange.com/a/146923
-            Str{ bs },               // https://superuser.com/a/234204
             Str{ seek },
             Str{ off },
         };
@@ -469,7 +467,10 @@ namespace adbfsm::data
 
         return {};
     }
+}
 
+namespace adbfsm::data
+{
     AExpect<void> start_connection()
     {
         const auto args = Array{ "start-server"sv };

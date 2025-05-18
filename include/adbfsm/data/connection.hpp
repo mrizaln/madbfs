@@ -50,11 +50,7 @@ namespace adbfsm::data
     class Connection final : public IConnection
     {
     public:
-        Connection(async::Context& context, usize page_size)
-            : m_context{ context }
-            , m_page_size{ page_size }
-        {
-        }
+        Connection() = default;
 
         // directory operations
         // --------------------
@@ -178,9 +174,7 @@ namespace adbfsm::data
         AExpect<void> touch(path::Path path, bool create) override;
 
     private:
-        async::Context&  m_context;
-        std::atomic<u64> m_counter   = 0;
-        usize            m_page_size = 0;
+        std::atomic<u64> m_counter = 0;
     };
 
     enum class DeviceStatus
