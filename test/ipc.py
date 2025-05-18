@@ -146,7 +146,10 @@ def main() -> int:
     # op = {"op": "set_cache_size", "value": {"mib": 128}}
 
     # op = {"op": "get_page_size"}
-    op = {"op": "set_page_size", "value": {"kib": 64}}
+    # op = {"op": "set_page_size", "value": {"kib": 64}}
+    #
+    # op = {"op": "invalidate_cache"}
+    op = {"op": "help"}
 
     Protocol.send(sock, json.dumps(op))
     resp = Protocol.receive(sock)
