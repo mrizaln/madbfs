@@ -126,16 +126,15 @@ namespace adbfsm::data
             return Unexpect{ Errc::bad_address };
         }
 
-        auto ep = async::unix_socket::Endpoint{
-            path->as_path().fullpath(),
-        };
+        auto name = path->as_path().fullpath();
+        auto ep   = async::unix_socket::Endpoint{ name };
 
         try {
             auto acc = Acceptor{ context, ep };    // may throw
             return Uniq<Ipc>{ new Ipc{ std::move(*path), std::move(acc) } };
         } catch (const boost::system::system_error& e) {
-            log_e({ "{}: failed to construct acceptor: {}" }, __func__, e.what());
-            return Unexpect{ async::to_generic_err(e.code()) };
+            log_e({ "{}: failed to construct acceptor {:?}: {}" }, __func__, name, e.what());
+            return Unexpect{ async::to_generic_err(e.code(), Errc::address_not_available) };
         }
     }
 
