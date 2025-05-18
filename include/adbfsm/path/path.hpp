@@ -29,6 +29,11 @@ namespace adbfsm::path
         constexpr Str  parent() const { return m_dirname; }
         constexpr Str  fullpath() const { return { m_dirname.begin(), m_basename.end() }; }
 
+        /**
+         * @brief Create a Path that points to parent as its basename.
+         *
+         * @return New Path.
+         */
         constexpr Path parent_path() const
         {
             if (m_dirname == "/") {

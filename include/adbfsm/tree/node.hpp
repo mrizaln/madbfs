@@ -44,15 +44,30 @@ namespace adbfsm::tree
         {
         }
 
+        /**
+         * @brief Insert `fd` into list of open files.
+         *
+         * @param fd File descriptor.
+         * @param flags Open flags.
+         *
+         * @return True if the fd has not been inserted before, false otherwise.
+         */
         bool open(u64 fd, int flags)
         {
-            if (sr::find(m_open_fds, fd, &Entry::fd) != m_open_fds.end()) {
+            if (is_open(fd)) {
                 return false;
             }
             m_open_fds.emplace_back(fd, flags);
             return true;
         }
 
+        /**
+         * @brief Remove `fd` from list of open files.
+         *
+         * @param fd File descriptor.
+         *
+         * @return True if `fd` actually removed, false otherwise.
+         */
         bool close(u64 fd)
         {
             return std::erase_if(m_open_fds, [&](const Entry& e) { return e.fd == fd; }) > 0;
@@ -232,9 +247,6 @@ namespace adbfsm::tree
          * @brief List children of this node.
          *
          * @param Function to operate on these children.
-         *
-         * This function will acquire a shared lock, so beware if you call any function that use this node
-         * that locks a unique lock (non-const functions). It will deadlock.
          */
         Expect<void> list(std::move_only_function<void(Str)>&& fn) const;
 

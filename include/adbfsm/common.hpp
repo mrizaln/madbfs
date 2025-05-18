@@ -90,6 +90,14 @@ namespace adbfsm
         inline constexpr auto sink_void = [](auto&&) { };
         inline constexpr auto sink_unit = [](auto&&) { return Unit{}; };
 
+        /**
+         * @brief Convert `std::optional` to `std::expected`.
+         *
+         * @param opt Opt to be converted.
+         * @param err Err value when `opt` is `std::nullopt`;
+         *
+         * @return New `std::expected` with the value from `opt` or `err`.
+         */
         template <typename T>
         Expect<T> ok_or(Opt<T>&& opt, std::errc err)
         {
@@ -100,6 +108,16 @@ namespace adbfsm
             }
         }
 
+        /**
+         * @brief Simple project member function to a type and return as lambda.
+         *
+         * @param args Member function to be called on.
+         * @param args The args to be passed on to the member function.
+         *
+         * @return The Resulting lambda.
+         *
+         * This function will convert references into `std::reference_wrapper`
+         */
         template <typename T, typename Ret, typename... Args>
         auto proj(Ret (T::*fn)(Args...) const, std::type_identity_t<Args>... args)
         {
@@ -114,6 +132,16 @@ namespace adbfsm
             }
         }
 
+        /**
+         * @brief Simple project member function to a type and return as lambda.
+         *
+         * @param args Member function to be called on.
+         * @param args The args to be passed on to the member function.
+         *
+         * @return The Resulting lambda.
+         *
+         * This function will convert references into `std::reference_wrapper`
+         */
         template <typename T, typename Ret, typename... Args>
         auto proj(Ret (T::*fn)(Args...), std::type_identity_t<Args>... args)
         {

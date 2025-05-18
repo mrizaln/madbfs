@@ -12,7 +12,6 @@
 
 namespace adbfsm::log
 {
-
     // inspired by this issue on spdlog: https://github.com/gabime/spdlog/issues/1959
     template <typename... Args>
     struct FmtWithLoc
