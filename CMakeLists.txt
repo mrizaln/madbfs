@@ -18,7 +18,7 @@ find_package(libfuse REQUIRED)
 find_package(rapidhash REQUIRED)
 find_package(spdlog REQUIRED)
 
-include(cmake/fetched-libs.cmake) # saf
+add_subdirectory(vendor/saf)
 
 add_library(adbfsm-lib STATIC)
 target_sources(
@@ -40,7 +40,7 @@ target_link_libraries(
         fmt::fmt
         libfuse::libfuse
         rapidhash::rapidhash
-        saf
+        saf::saf
         spdlog::spdlog
 )
 target_include_directories(adbfsm-lib PUBLIC include)
