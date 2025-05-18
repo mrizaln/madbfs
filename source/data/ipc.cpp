@@ -68,25 +68,29 @@ namespace adbfsm::data
     {
         try {
             const auto json = boost::json::parse(msg);
-            const auto op   = json.at("op").as_string();
+            const auto op   = boost::json::value_to<std::string>(json.at("op"));
 
             if (op == ipc::names::help) {
                 return ipc::Op{ ipc::Help{} };
             } else if (op == ipc::names::invalidate_cache) {
                 return ipc::Op{ ipc::InvalidateCache{} };
             } else if (op == ipc::names::set_page_size) {
-                return ipc::Op{ ipc::SetPageSize{ .kib = json.at("value").at("kib").as_uint64() } };
+                return ipc::Op{
+                    ipc::SetPageSize{ .kib = boost::json::value_to<u32>(json.at("value").at("kib")) },
+                };
             } else if (op == ipc::names::get_page_size) {
                 return ipc::Op{ ipc::GetPageSize{} };
             } else if (op == ipc::names::set_cache_size) {
-                return ipc::Op{ ipc::SetCacheSize{ .mib = json.at("value").at("mib").as_uint64() } };
+                return ipc::Op{
+                    ipc::SetCacheSize{ .mib = boost::json::value_to<u32>(json.at("value").at("mib")) },
+                };
             } else if (op == ipc::names::get_cache_size) {
                 return ipc::Op{ ipc::GetCacheSize{} };
             }
 
             return std::unexpected{ fmt::format("'{}' is not a valid operation, try 'help'", op) };
-        } catch (const std::exception& e) {
-            return std::unexpected{ e.what() };
+        } catch (const boost::system::system_error& e) {
+            return std::unexpected{ e.code().message() };
         }
     }
 }
@@ -133,7 +137,7 @@ namespace adbfsm::data
             auto acc = Acceptor{ context, ep };    // may throw
             return Uniq<Ipc>{ new Ipc{ std::move(*path), std::move(acc) } };
         } catch (const boost::system::system_error& e) {
-            log_e({ "{}: failed to construct acceptor {:?}: {}" }, __func__, name, e.what());
+            log_e({ "{}: failed to construct acceptor {:?}: {}" }, __func__, name, e.code().message());
             return Unexpect{ async::to_generic_err(e.code(), Errc::address_not_available) };
         }
     }
