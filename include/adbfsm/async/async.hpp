@@ -21,9 +21,10 @@ namespace adbfsm
 
 namespace adbfsm::async
 {
-    using Context  = boost::asio::io_context;
-    using Token    = AsExpected<boost::asio::use_awaitable_t<>>;
-    using Executor = Context::executor_type;
+    using Context   = boost::asio::io_context;
+    using Token     = AsExpected<boost::asio::use_awaitable_t<>>;
+    using Executor  = Context::executor_type;
+    using WorkGuard = boost::asio::executor_work_guard<Executor>;
 
     template <typename Exec, typename Awaited, typename Completion>
     auto spawn(Exec&& ex, Awaited&& func, Completion&& completion)

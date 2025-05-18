@@ -3,7 +3,6 @@
 #include "adbfsm/data/ipc.hpp"
 #include "adbfsm/log.hpp"
 #include "adbfsm/util/overload.hpp"
-#include "adbfsm/util/threadpool.hpp"
 
 #include <fcntl.h>
 
@@ -93,12 +92,18 @@ namespace
 namespace adbfsm
 {
     Adbfsm::Adbfsm(usize page_size, usize max_pages)
-        : m_connection{ std::make_unique<data::Connection>() }
+        : m_work_guard{ m_async_ctx.get_executor() }
+        , m_connection{ std::make_unique<data::Connection>() }
         , m_cache{ page_size, max_pages }
         , m_tree{ *m_connection, m_cache }
     {
-
         log_d({ "{}: ctor of Adbfsm" }, __func__);
+
+        m_work_thread = std::jthread{ [this] {
+            log_i({ "Adbfsm: io_context running..." });
+            auto num_handlers = m_async_ctx.run();
+            log_i({ "Adbfsm: io_context stopped with {} handlers executed" }, num_handlers);
+        } };
 
         auto ipc = data::Ipc::create(m_async_ctx);
         if (not ipc.has_value()) {
@@ -112,16 +117,14 @@ namespace adbfsm
         m_ipc = std::move(*ipc);
 
         auto coro = m_ipc->launch([this](data::ipc::Op op) { return ipc_handler(op); });
-        async::spawn(m_async_ctx, std::move(coro), [](const std::exception_ptr& exceptionPtr) {
-            if (exceptionPtr) {
-                std::rethrow_exception(exceptionPtr);
-            }
-        });
+        async::spawn(m_async_ctx, std::move(coro), async::detached);
     }
 
     Adbfsm::~Adbfsm()
     {
+        m_work_guard.reset();
         m_async_ctx.stop();
+        m_work_thread.join();
     }
 
     boost::json::value Adbfsm::ipc_handler(data::ipc::Op op)
@@ -192,18 +195,7 @@ namespace adbfsm
         auto page_size  = args->pagesize * 1024;
         auto max_pages  = cache_size / page_size;
 
-        util::Threadpool::init();
-
-        auto* adbfsm     = new Adbfsm{ page_size, max_pages };
-        auto* threadpool = util::Threadpool::get_instance();
-
-        threadpool->enqueue_detached([ctx = &adbfsm->async_ctx()] {
-            log_d({ "adbfsm: io_context running..." });
-            auto num_handlers = ctx->run();
-            log_d({ "adbfsm: io_context stopped with {} handlers executed" }, num_handlers);
-        });
-
-        return adbfsm;
+        return new Adbfsm{ page_size, max_pages };
     }
 
     void destroy(void* private_data)
@@ -211,11 +203,6 @@ namespace adbfsm
         auto* data = static_cast<Adbfsm*>(private_data);
         assert(data != nullptr and "data should not be empty!");
         delete data;
-
-        auto ignored = util::Threadpool::terminate();
-        if (ignored != 0) {
-            log_w({ "There are {} jobs waiting in Threadpool queue. Ignoring them." }, ignored);
-        }
 
         auto serial = ::getenv("ANDROID_SERIAL");
         if (serial != nullptr) {

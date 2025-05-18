@@ -8,6 +8,8 @@
 #include <fcntl.h>
 #include <fuse3/fuse.h>
 
+#include <thread>
+
 namespace adbfsm
 {
     /**
@@ -31,7 +33,10 @@ namespace adbfsm
     private:
         boost::json::value ipc_handler(data::ipc::Op op);
 
-        async::Context         m_async_ctx;
+        async::Context   m_async_ctx;
+        async::WorkGuard m_work_guard;    // to prevent `io_context` from returning immediately
+        std::jthread     m_work_thread;
+
         Uniq<data::Connection> m_connection;
         data::Cache            m_cache;
         tree::FileTree         m_tree;
