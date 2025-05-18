@@ -58,8 +58,6 @@ int main(int argc, char** argv)
     std::signal(SIGSEGV, [](int) { unexpected_program_end("SIGSEGV", true); });
     std::set_terminate([] { unexpected_program_end("std::terminate", false); });
 
-    adbfsm::log::init(spdlog::level::debug, "-");
-
     auto ctx = adbfsm::async::Context{};
     auto fut = adbfsm::async::spawn(ctx, adbfsm::args::parse(argc, argv), adbfsm::async::use_future);
     ctx.run();
@@ -70,7 +68,7 @@ int main(int argc, char** argv)
     }
     auto [opt, args] = std::move(maybe_opt).opt();
 
-    // adbfsm::log::init(opt.log_level, opt.log_file);
+    adbfsm::log::init(opt.log_level, opt.log_file);
     adbfsm::log_i(
         { "mount device '{}' with cache size {}MiB and page size {}kiB" },
         opt.serial,
