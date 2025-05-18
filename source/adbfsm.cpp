@@ -137,7 +137,12 @@ namespace adbfsm
 
         auto overload = util::Overload{
             [&](ipc::Help) {
-                return boost::json::value("not implemented yet :P");    // TODO: implement
+                auto json          = boost::json::object{};
+                json["operations"] = {
+                    "help",          "invalidate_cache", "set_page_size",
+                    "get_page_size", "set_cache_size",   "get_cache_size",
+                };
+                return boost::json::value{ json };
             },
             [&](ipc::InvalidateCache) {
                 m_cache.invalidate();
