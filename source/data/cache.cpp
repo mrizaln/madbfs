@@ -75,8 +75,8 @@ namespace madbfs::data
             auto queued = m_queue.find(key);
             if (queued != m_queue.end()) {
                 auto fut = queued->second;
-                co_await fut->async_wait();
-                if (auto err = fut->get(); static_cast<bool>(err)) {
+                co_await fut.async_wait();
+                if (auto err = fut.get(); static_cast<bool>(err)) {
                     co_return Unexpect{ err };
                 }
             }
@@ -84,7 +84,7 @@ namespace madbfs::data
             auto entry = m_table.find(key);
             if (entry == m_table.end()) {
                 auto promise = saf::promise<Errc>{ co_await async::this_coro::executor };
-                auto future  = std::make_shared<saf::shared_future<Errc>>(promise.get_future().share());
+                auto future  = promise.get_future().share();
                 m_queue.emplace(key, std::move(future));
 
                 auto data    = std::make_unique<char[]>(m_page_size);
@@ -149,8 +149,8 @@ namespace madbfs::data
             auto queued = m_queue.find(key);
             if (queued != m_queue.end()) {
                 auto fut = queued->second;
-                co_await fut->async_wait();
-                if (auto err = fut->get(); static_cast<bool>(err)) {
+                co_await fut.async_wait();
+                if (auto err = fut.get(); static_cast<bool>(err)) {
                     co_return Unexpect{ err };
                 }
             }
@@ -209,8 +209,8 @@ namespace madbfs::data
             auto queued = m_queue.find(key);
             if (queued != m_queue.end()) {
                 auto fut = queued->second;
-                co_await fut->async_wait();
-                if (auto err = fut->get(); static_cast<bool>(err)) {
+                co_await fut.async_wait();
+                if (auto err = fut.get(); static_cast<bool>(err)) {
                     co_return Unexpect{ err };
                 }
             }

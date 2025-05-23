@@ -53,7 +53,7 @@ namespace madbfs::data
     public:
         using Lru    = std::list<Page>;
         using Lookup = std::unordered_map<PageKey, Lru::iterator>;
-        using Queue  = std::unordered_map<PageKey, Shared<saf::shared_future<Errc>>>;
+        using Queue  = std::unordered_map<PageKey, saf::shared_future<Errc>>;
 
         // NOTE: can't use std::move_only_function in gcc: "atomic constraint depends on itself"
         using OnMiss  = std::function<AExpect<usize>(Span<char> out, off_t offset)>;
