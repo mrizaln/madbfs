@@ -19,6 +19,7 @@ find_package(rapidhash REQUIRED)
 find_package(spdlog REQUIRED)
 
 add_subdirectory(vendor/saf)
+include(cmake/fetched-libs.cmake)   # linr
 
 add_library(madbfs-lib STATIC)
 target_sources(
@@ -36,6 +37,7 @@ target_sources(
 target_link_libraries(
     madbfs-lib
     PUBLIC
+        linr
         boost::boost
         fmt::fmt
         libfuse::libfuse

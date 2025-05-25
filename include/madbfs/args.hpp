@@ -5,6 +5,7 @@
 #define FUSE_USE_VERSION 31
 #include <fuse3/fuse.h>
 #include <fuse3/fuse_lowlevel.h>
+#include <linr/read.hpp>
 #include <spdlog/spdlog.h>
 
 #include <iostream>
@@ -137,15 +138,19 @@ namespace madbfs::args
         for (auto i : madbfs::sv::iota(0u, devices.size())) {
             fmt::println("         - {}: {}", i + 1, devices[i].serial);
         }
-        fmt::print("[madbfs] please specify which one you would like to use: ");
 
-        auto choice = 1u;
+        auto choice = 1uz;
         while (true) {
-            std::cin >> choice;
-            if (choice > 0 and choice <= devices.size()) {
+            auto input = linr::read<usize>("[madbfs] please specify which one you would like to use: ");
+            if (input and input.value() > 0 and input.value() <= devices.size()) {
+                choice = *input;
                 break;
+            } else if (not input and is_stream_error(input.error())) {
+                fmt::println("\n[madbfs] stdin closed, aborting.");
+                exit(1);    // I don't think there is an easy way out of this but exit
             }
-            fmt::print("[madbfs] invalid choice, please enter a number between 1 and {}: ", devices.size());
+            fmt::println("[madbfs] invalid choice, enter a number between 1 - {}: ", devices.size());
+            continue;
         }
         fmt::println("[madbfs] using serial '{}'", devices[choice - 1].serial);
 
