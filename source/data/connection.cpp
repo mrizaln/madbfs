@@ -124,7 +124,8 @@ namespace
         madbfs::Str                     exe,
         madbfs::Span<const madbfs::Str> args,
         madbfs::Str                     in,
-        bool                            check
+        bool                            check,
+        bool                            merge_err = false
     )
     {
         madbfs::log_d({ "{}: run {} {}" }, __func__, exe, args);
@@ -182,6 +183,10 @@ namespace
             auto errmsg = not err.empty() ? madbfs::util::strip(err) : madbfs::util::strip(out);
             madbfs::log_w({ "non-zero command status ({}) {} {}: err: [{}]" }, ret, exe, args, errmsg);
             co_return madbfs::Unexpect{ to_errc(parse_stderr(errmsg)) };
+        }
+
+        if (merge_err) {
+            out += err;
         }
 
         co_return std::move(out);
@@ -466,6 +471,50 @@ namespace madbfs::data
          */
 
         return {};
+    }
+
+    AExpect<usize> Connection::copy_file_range(
+        path::Path in,
+        off_t      in_off,
+        path::Path out,
+        off_t      out_off,
+        usize      size
+    )
+    {
+        const auto skip  = fmt::format("skip={}", in_off);
+        const auto count = fmt::format("count={}", size);
+        const auto iff   = fmt::format("if=\"{}\"", in.fullpath());
+        const auto seek  = fmt::format("seek={}", out_off);
+        const auto off   = fmt::format("of=\"{}\"", out.fullpath());
+
+        const auto args = Array{
+            "shell"sv,
+            "dd"sv,
+            "iflag=skip_bytes,count_bytes"sv,    // https://stackoverflow.com/a/40792605/16506263
+            Str{ skip },
+            Str{ count },
+            Str{ iff },
+            "oflag=seek_bytes"sv,    // same as above, though I don't know if this is really needed
+            "conv=notrunc"sv,        // https://unix.stackexchange.com/a/146923
+            Str{ seek },
+            Str{ off },
+        };
+
+        // example output
+        /*
+         * conv=4
+         * 1024+0 records in
+         * 1024+0 records out
+         * 1048576 bytes (1.0 M) copied, 0.054401 s, 18 M/s
+         */
+
+        co_return (co_await exec_async("adb", args, "", true, true)).transform([&](String str) {
+            log_d({ "copy_file_range: {:?}" }, str);
+            return util::split_n<4>(str, '\n')
+                .and_then([](util::SplitResult<4> r) { return util::split_n<1>(r.result[3], ' '); })
+                .and_then([](util::SplitResult<1> r) { return parse_fundamental<usize>(r.result[0], 10); })
+                .value_or(0);
+        });
     }
 }
 

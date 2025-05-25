@@ -63,6 +63,17 @@ namespace madbfs
     i32 access(const char*, i32);
     i32 utimens(const char*, const timespec tv[2], fuse_file_info*);
 
+    isize copy_file_range(
+        const char*            path_in,
+        struct fuse_file_info* fi_in,
+        off_t                  offset_in,
+        const char*            path_out,
+        struct fuse_file_info* fi_out,
+        off_t                  offset_out,
+        size_t                 size,
+        int                    flags
+    );
+
     static constexpr auto operations = fuse_operations{
         .getattr         = madbfs::getattr,
         .readlink        = madbfs::readlink,
@@ -104,7 +115,7 @@ namespace madbfs
         .read_buf        = nullptr,
         .flock           = nullptr,
         .fallocate       = nullptr,
-        .copy_file_range = nullptr,
+        .copy_file_range = madbfs::copy_file_range,
         .lseek           = nullptr,
     };
 }

@@ -52,6 +52,16 @@ namespace madbfs::tree
         AExpect<void>  flush(path::Path path, u64 fd);
         AExpect<void>  release(path::Path path, u64 fd);
 
+        AExpect<usize> copy_file_range(
+            path::Path in_path,
+            u64        in_fd,
+            off_t      in_off,
+            path::Path path_out,
+            u64        out_fd,
+            off_t      offset_out,
+            size_t     size
+        );
+
         AExpect<void> utimens(path::Path path);
 
         // this function only used to link already existing files, user can't use it

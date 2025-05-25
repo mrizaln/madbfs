@@ -173,6 +173,11 @@ namespace mock
         AExpect<void>  flush(path::Path) override { co_return Expect<void>{}; }
         AExpect<void>  release(path::Path) override { co_return Expect<void>{}; }
 
+        AExpect<usize> copy_file_range(path::Path, off_t, path::Path, off_t, usize size) override
+        {
+            co_return size;
+        }
+
         // directory operation (adding file) or file operation (update time)
         AExpect<void> touch(path::Path, bool) override { co_return Expect<void>{}; }
     };

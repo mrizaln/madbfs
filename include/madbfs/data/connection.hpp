@@ -41,6 +41,14 @@ namespace madbfs::data
         virtual AExpect<void>  flush(path::Path path)                                    = 0;
         virtual AExpect<void>  release(path::Path path)                                  = 0;
 
+        virtual AExpect<usize> copy_file_range(
+            path::Path in,
+            off_t      in_off,
+            path::Path out,
+            off_t      out_off,
+            usize      size
+        ) = 0;
+
         // directory operation (adding file) or file operation (update time)
         virtual AExpect<void> touch(path::Path path, bool create) = 0;
 
@@ -162,6 +170,18 @@ namespace madbfs::data
          * @param path Path to the file on the device.
          */
         AExpect<void> release(path::Path path) override;
+
+        /**
+         * @brief Copy file server-side.
+         *
+         * @param in Input file path.
+         * @param in_off Input offset.
+         * @param out Output file path.
+         * @param out_off Output offset.
+         * @param size Number of bytes to be copied.
+         */
+        AExpect<usize> copy_file_range(path::Path in, off_t in_off, path::Path out, off_t out_off, usize size)
+            override;
 
         // ---------------
 

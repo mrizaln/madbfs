@@ -437,4 +437,39 @@ namespace madbfs
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
+
+    isize copy_file_range(
+        const char*            in_path,
+        struct fuse_file_info* in_fi,
+        off_t                  in_off,
+        const char*            out_path,
+        struct fuse_file_info* out_fi,
+        off_t                  out_off,
+        size_t                 size,
+        [[maybe_unused]] int   flags
+    )
+    {
+        log_i(
+            { "{}: [size={}] | {:?} [off={}] -> {:?} [off={}]" },
+            __func__,
+            size,
+            in_path,
+            in_off,
+            out_path,
+            out_off
+        );
+
+        auto in  = path::create(in_path);
+        auto out = path::create(out_path);
+
+        if (not in) {
+            return fuse_err(__func__, in_path)(Errc::operation_not_supported);
+        } else if (not out) {
+            return fuse_err(__func__, out_path)(Errc::operation_not_supported);
+        }
+
+        auto op  = &tree::FileTree::copy_file_range;
+        auto res = tree_blocking(op, *in, in_fi->fh, in_off, *out, out_fi->fh, out_off, size);
+        return res ? static_cast<isize>(res.value()) : fuse_err(__func__, in_path)(res.error());
+    }
 }

@@ -331,6 +331,36 @@ namespace madbfs::tree
         co_return co_await node->get().release(context, fd);
     }
 
+    AExpect<usize> FileTree::copy_file_range(
+        path::Path in_path,
+        u64        in_fd,
+        off_t      in_off,
+        path::Path out_path,
+        u64        out_fd,
+        off_t      out_off,
+        size_t     size
+    )
+    {
+        // just in-case they have dirty pages
+        std::ignore = co_await flush(in_path, in_fd);
+        std::ignore = co_await flush(out_path, out_fd);
+
+        auto node = traverse(out_path);    // path must exist
+        if (not node) {
+            co_return Unexpect{ node.error() };
+        }
+
+        auto copied = co_await m_connection.copy_file_range(in_path, in_off, out_path, out_off, size);
+        if (not copied) {
+            co_return Unexpect{ copied.error() };
+        }
+
+        co_return (co_await m_connection.stat(out_path)).and_then([&](data::Stat new_stat) {
+            node->get().set_stat(new_stat);
+            return copied;
+        });
+    }
+
     AExpect<void> FileTree::utimens(path::Path path)
     {
         auto context = Node::Context{ m_connection, m_cache, path };
