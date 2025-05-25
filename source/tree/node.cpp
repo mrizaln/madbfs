@@ -7,9 +7,29 @@
 
 namespace madbfs::tree
 {
+    u64 Directory::NodeHash::operator()(const Uniq<Node>& node) const
+    {
+        return (*this)(node->name());
+    }
+
+    bool Directory::NodeEq::operator()(Str lhs, const Uniq<Node>& rhs) const
+    {
+        return lhs == rhs->name();
+    }
+
+    bool Directory::NodeEq::operator()(const Uniq<Node>& lhs, Str rhs) const
+    {
+        return lhs->name() == rhs;
+    }
+
+    bool Directory::NodeEq::operator()(const Uniq<Node>& lhs, const Uniq<Node>& rhs) const
+    {
+        return lhs->name() == rhs->name();
+    }
+
     Expect<Ref<Node>> Directory::find(Str name) const
     {
-        auto found = sr::find_if(m_children, [&](const Uniq<Node>& n) { return n->name() == name; });
+        auto found = m_children.find(name);
         if (found == m_children.end()) {
             return Unexpect{ Errc::no_such_file_or_directory };
         }
@@ -18,36 +38,32 @@ namespace madbfs::tree
 
     bool Directory::erase(Str name)
     {
-        return std::erase_if(m_children, [&](const Uniq<Node>& n) { return n->name() == name; }) > 0;
+        return m_children.erase(name) > 0;
     }
 
     Expect<Pair<Ref<Node>, Uniq<Node>>> Directory::insert(Uniq<Node> node, bool overwrite)
     {
-        auto found = sr::find_if(m_children, [&](const Uniq<Node>& n) { return n->name() == node->name(); });
-
-        if (found == m_children.end()) {
-            auto& back = m_children.emplace_back(std::move(node));
-            return Pair{ std::ref(*back.get()), nullptr };
-        } else if (overwrite) {
-            auto node_ptr = node.get();
-            auto released = std::exchange(*found, std::move(node));
-            return Pair{ std::ref(*node_ptr), std::move(released) };
+        auto found = m_children.find(node->name());
+        if (found != m_children.end() and not overwrite) {
+            return Unexpect{ Errc::file_exists };
         }
 
-        return Unexpect{ Errc::file_exists };
+        auto released = Uniq<Node>{};
+        if (found != m_children.end()) {
+            released = m_children.extract(found);
+        }
+
+        auto [back, _] = m_children.emplace(std::move(node));
+        return Pair{ std::ref(*back->get()), std::move(released) };
     }
 
     Expect<Uniq<Node>> Directory::extract(Str name)
     {
-        auto found = sr::find_if(m_children, [&](const Uniq<Node>& n) { return n->name() == name; });
+        auto found = m_children.find(name);
         if (found == m_children.end()) {
             return Unexpect{ Errc::no_such_file_or_directory };
         }
-
-        auto node = std::move(*found);
-        m_children.erase(found);
-
-        return node;
+        return m_children.extract(found);
     }
 }
 

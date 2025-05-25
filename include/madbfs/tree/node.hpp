@@ -6,6 +6,8 @@
 #include "madbfs/data/stat.hpp"
 #include "madbfs/path/path.hpp"
 
+#include <ankerl/unordered_dense.h>
+
 #include <sys/types.h>
 
 #include <algorithm>
@@ -86,6 +88,29 @@ namespace madbfs::tree
     class Directory
     {
     public:
+        struct NodeHash
+        {
+            using is_transparent = void;
+            using is_avalanching = void;
+
+            u64 operator()(Str str) const { return ankerl::unordered_dense::hash<Str>{}(str); }
+            u64 operator()(const Uniq<Node>& node) const;
+        };
+
+        struct NodeEq
+        {
+            using is_transparent = void;
+            using is_avalanching = void;
+
+            bool operator()(Str lhs, Str rhs) const { return lhs == rhs; }
+            bool operator()(Str lhs, const Uniq<Node>& rhs) const;
+            bool operator()(const Uniq<Node>& lhs, Str rhs) const;
+            bool operator()(const Uniq<Node>& lhs, const Uniq<Node>& rhs) const;
+        };
+
+        // NOTE: use with caution, Node::m_name field must not be modified unless the node is extracted
+        using List = ankerl::unordered_dense::set<Uniq<Node>, NodeHash, NodeEq>;
+
         Directory() = default;
 
         bool has_readdir() const { return m_has_readdir; }
@@ -127,11 +152,11 @@ namespace madbfs::tree
          */
         Expect<Uniq<Node>> extract(Str name);
 
-        Span<const Uniq<Node>> children() const { return m_children; }
+        const List& children() const { return m_children; }
 
     private:
-        Vec<Uniq<Node>> m_children;
-        bool            m_has_readdir = false;
+        List m_children;
+        bool m_has_readdir = false;
     };
 
     class Link

@@ -17,9 +17,10 @@ find_package(fmt REQUIRED)
 find_package(libfuse REQUIRED)
 find_package(rapidhash REQUIRED)
 find_package(spdlog REQUIRED)
+find_package(unordered_dense REQUIRED)
 
 add_subdirectory(vendor/saf)
-include(cmake/fetched-libs.cmake)   # linr
+include(cmake/fetched-libs.cmake) # linr
 
 add_library(madbfs-lib STATIC)
 target_sources(
@@ -44,6 +45,7 @@ target_link_libraries(
         rapidhash::rapidhash
         saf::saf
         spdlog::spdlog
+        unordered_dense::unordered_dense
 )
 target_include_directories(madbfs-lib PUBLIC include)
 
