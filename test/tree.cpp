@@ -14,59 +14,61 @@
 namespace ut = boost::ext::ut;
 using namespace madbfs::aliases;
 
-// NOTE: extra newline at the start of this string is intentional (make sure to take it into account)
+// NOTE: alphabetical order per level
 constexpr auto expected = R"(
 - /
-    - hello/
-        - world.txt
-        - foo.txt
-        - movie.mp4
-        - bar/
-            - baz.txt
-            - qux.txt
-            - quux.txt
-        - wife    ->    /bye/friends/work/loughshinny <3.txt
     - bye/
-        - world.txt
-        - movie.mp4
-        - music.mp3
         - family/
             - dad.txt
             - mom.txt
         - friends/
             - bob.txt
             - school/
-                - kal'tsit.txt
                 - closure.txt
                 - hehe    ->    /bye/friends/work
+                - kal'tsit.txt
             - work/
-                - loughshinny <3.txt
                 - eblana?.mp4
+                - loughshinny <3.txt
+        - movie.mp4
+        - music.mp3
         - theresa.txt
-)";
-
-constexpr auto expected_rm = R"(
-- /
+        - world.txt
     - hello/
+        - bar/
+            - baz.txt
+            - quux.txt
+            - qux.txt
         - foo.txt
         - movie.mp4
         - wife    ->    /bye/friends/work/loughshinny <3.txt
-    - bye/
         - world.txt
-        - movie.mp4
+)";
+
+// NOTE: alphabetical order per level
+constexpr auto expected_rm = R"(
+- /
+    - bye/
         - family/
             - dad.txt
             - mom.txt
         - friends/
             - school/
-                - kal'tsit.txt
                 - closure.txt
+                - kal'tsit.txt
             - work/
-                - loughshinny <3.txt
                 - eblana?.mp4
+                - loughshinny <3.txt
+        - movie.mp4
         - theresa.txt
+        - world.txt
+    - hello/
+        - foo.txt
+        - movie.mp4
+        - wife    ->    /bye/friends/work/loughshinny <3.txt
 )";
 
+// NOTE: since there is no ordering guarantee from the VFS, this formatter just order them alphabetically
 template <>
 struct fmt::formatter<madbfs::tree::Node> : fmt::formatter<std::string_view>
 {
@@ -98,8 +100,11 @@ struct fmt::formatter<madbfs::tree::Node> : fmt::formatter<std::string_view>
             fmt::format_to(ctx.out(), "- {}{}\n", name, additional);
 
             if (auto* dir = std::get_if<Directory>(&node->value())) {
-                for (const auto& child : dir->children()) {
-                    self(child.get(), depth + 1);
+                auto to_ref = [](const Uniq<Node>& f) { return std::ref(*f); };
+                auto ptrs   = dir->children() | sv::transform(to_ref) | sr::to<std::vector>();
+                sr::sort(ptrs, std::less<>{}, &Node::name);
+                for (const Node& child : ptrs) {
+                    self(&child, depth + 1);
                 }
             };
         };
