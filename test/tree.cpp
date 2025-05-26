@@ -152,7 +152,7 @@ namespace mock
     using namespace madbfs;
     using namespace madbfs::data;
 
-    class DummyConnection final : public IConnection
+    class DummyConnection final : public Connection
     {
     public:
         AExpect<Gen<ParsedStat>> statdir(path::Path) override { co_return madbfs::Unexpect{ {} }; }

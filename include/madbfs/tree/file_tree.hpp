@@ -19,7 +19,7 @@ namespace madbfs::tree
     public:
         using Filler = std::function<void(const char* name)>;
 
-        FileTree(data::IConnection& connection, data::Cache& cache);
+        FileTree(data::Connection& connection, data::Cache& cache);
         ~FileTree();
 
         FileTree(Node&& root)            = delete;
@@ -77,9 +77,9 @@ namespace madbfs::tree
          */
         AExpect<Ref<Node>> traverse_or_build(path::Path path);
 
-        Node               m_root;
-        data::IConnection& m_connection;
-        data::Cache&       m_cache;
-        bool               m_root_initialized = false;
+        Node              m_root;
+        data::Connection& m_connection;
+        data::Cache&      m_cache;
+        bool              m_root_initialized = false;
     };
 }

@@ -202,9 +202,9 @@ namespace madbfs::tree
     public:
         struct Context
         {
-            data::IConnection& connection;
-            data::Cache&       cache;
-            const path::Path&  path;    // path for connection
+            data::Connection& connection;
+            data::Cache&      cache;
+            const path::Path& path;    // path for connection
         };
 
         Node(Str name, Node* parent, data::Stat stat, File value)

@@ -28,6 +28,7 @@ target_sources(
         source/madbfs.cpp
         source/data/cache.cpp
         source/data/connection.cpp
+        source/data/adb_connection.cpp
         source/data/ipc.cpp
         source/path/path.cpp
         source/tree/file_tree.cpp

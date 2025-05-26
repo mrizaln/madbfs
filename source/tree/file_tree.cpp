@@ -4,7 +4,7 @@
 
 namespace madbfs::tree
 {
-    FileTree::FileTree(data::IConnection& connection, data::Cache& cache)
+    FileTree::FileTree(data::Connection& connection, data::Cache& cache)
         : m_root{ "/", nullptr, {}, Directory{} }
         , m_connection{ connection }
         , m_cache{ cache }
