@@ -34,7 +34,7 @@ namespace madbfs::data
         }
 
         auto buffer      = String(len, '\0');
-        auto [ec, count] = co_await async::read_exact(sock, buffer);
+        auto [ec, count] = co_await async::read_exact<char>(sock, buffer);
         if (ec) {
             log_w({ "{}: failed to read from peer: {}" }, __func__, ec.message());
             co_return Unexpect{ async::to_generic_err(ec) };
@@ -49,12 +49,12 @@ namespace madbfs::data
     {
         auto len     = std::bit_cast<LenInfo>(::htonl(static_cast<u32>(msg.size())));
         auto len_str = Str{ len.data(), len.size() };
-        if (auto [ec, _] = co_await async::write_exact(sock, len_str); ec) {
+        if (auto [ec, _] = co_await async::write_exact<char>(sock, len_str); ec) {
             log_w({ "{}: failed to write to peer: {}" }, __func__, ec.message());
             co_return Unexpect{ async::to_generic_err(ec) };
         }
 
-        auto [ec, count] = co_await async::write_exact(sock, msg);
+        auto [ec, count] = co_await async::write_exact<char>(sock, msg);
         if (ec) {
             log_w({ "{}: failed to write to peer: {}" }, __func__, ec.message());
             co_return Unexpect{ async::to_generic_err(ec) };

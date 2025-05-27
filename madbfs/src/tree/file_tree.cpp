@@ -233,7 +233,7 @@ namespace madbfs::tree
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().rm(context, path.filename(), false);
+        co_return co_await node->get().unlink(context, path.filename());
     }
 
     AExpect<void> FileTree::rmdir(path::Path path)
@@ -259,7 +259,7 @@ namespace madbfs::tree
             co_return Unexpect{ from_node.error() };
         }
 
-        co_return (co_await m_connection.mv(from, to))
+        co_return (co_await m_connection.rename(from, to))
             .transform([&] { return std::ref(*from_node->get().parent()); })    // non-root (always exists)
             .and_then(proj(&Node::extract, from.filename()))
             .and_then([&](Uniq<Node>&& node) {

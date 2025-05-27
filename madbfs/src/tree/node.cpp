@@ -1,8 +1,8 @@
 #include "madbfs/tree/node.hpp"
 
+#include "madbfs-common/util/overload.hpp"
 #include "madbfs/data/connection.hpp"
 #include "madbfs/log.hpp"
-#include "madbfs/util/overload.hpp"
 
 namespace madbfs::tree
 {
@@ -283,7 +283,7 @@ namespace madbfs::tree
             .transform([&](auto&& pair) { return pair.first; });
     }
 
-    AExpect<void> Node::rm(Context context, Str name, bool recursive)
+    AExpect<void> Node::unlink(Context context, Str name)
     {
         if (auto err = as<Error>(); err.has_value()) {
             co_return Unexpect{ err->get().error };
@@ -291,7 +291,7 @@ namespace madbfs::tree
 
         auto res = as<Directory>().and_then([&](Directory& dir) -> Expect<void> {
             return dir.find(name).and_then([&](Node& node) -> Expect<void> {
-                if (node.is<Directory>() and not recursive) {
+                if (node.is<Directory>()) {
                     return Unexpect{ Errc::is_a_directory };
                 }
                 auto success = dir.erase(name);
@@ -303,7 +303,7 @@ namespace madbfs::tree
         if (not res) {
             co_return Unexpect{ res.error() };
         }
-        co_return co_await context.connection.rm(context.path, recursive);
+        co_return co_await context.connection.unlink(context.path);
     }
 
     AExpect<void> Node::rmdir(Context context, Str name)

@@ -1,7 +1,7 @@
 #include "madbfs/data/connection.hpp"
 
+#include "madbfs-common/util/split.hpp"
 #include "madbfs/log.hpp"
-#include "madbfs/util/split.hpp"
 
 #define BOOST_PROCESS_VERSION 2
 #include <boost/process.hpp>

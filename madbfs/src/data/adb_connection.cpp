@@ -1,8 +1,8 @@
 #include "madbfs/data/adb_connection.hpp"
 
+#include "madbfs-common/util/split.hpp"
 #include "madbfs/log.hpp"
 #include "madbfs/path/path.hpp"
-#include "madbfs/util/split.hpp"
 
 #include <grp.h>
 #include <pwd.h>
@@ -180,16 +180,11 @@ namespace madbfs::data
         co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
     }
 
-    AExpect<void> AdbConnection::rm(path::Path path, bool recursive)
+    AExpect<void> AdbConnection::unlink(path::Path path)
     {
         const auto qpath = quoted(path);
-        if (not recursive) {
-            const auto args = Array{ "shell"sv, "rm"sv, Str{ qpath } };
-            co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
-        } else {
-            const auto args = Array{ "shell"sv, "rm"sv, "-r"sv, Str{ qpath } };
-            co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
-        }
+        const auto args  = Array{ "shell"sv, "rm"sv, Str{ qpath } };
+        co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
     }
 
     AExpect<void> AdbConnection::rmdir(path::Path path)
@@ -199,7 +194,7 @@ namespace madbfs::data
         co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
     }
 
-    AExpect<void> AdbConnection::mv(path::Path from, path::Path to)
+    AExpect<void> AdbConnection::rename(path::Path from, path::Path to)
     {
         const auto qfrom = quoted(from);
         const auto qto   = quoted(to);

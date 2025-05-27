@@ -50,7 +50,7 @@ namespace madbfs::data
          * @param path Path to the file on the device.
          * @param bool Whether to remove recursively or not.
          */
-        AExpect<void> rm(path::Path path, bool recursive) override;
+        AExpect<void> unlink(path::Path path) override;
 
         /**
          * @brief Remove a directory on the device.
@@ -65,7 +65,7 @@ namespace madbfs::data
          * @param from Target file.
          * @param to Destination file.
          */
-        AExpect<void> mv(path::Path from, path::Path to) override;
+        AExpect<void> rename(path::Path from, path::Path to) override;
 
         // --------------------
 

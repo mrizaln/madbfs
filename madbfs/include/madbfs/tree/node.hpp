@@ -349,9 +349,8 @@ namespace madbfs::tree
          *
          * @param context Context needed to communicate with device and local.
          * @param name The name of the child node.
-         * @param recursive Whether to remove recursively or not.
          */
-        AExpect<void> rm(Context context, Str name, bool recursive);
+        AExpect<void> unlink(Context context, Str name);
 
         /**
          * @brief Remove a child node by its name (Directory).

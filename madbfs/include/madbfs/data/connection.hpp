@@ -27,10 +27,10 @@ namespace madbfs::data
         virtual AExpect<path::PathBuf>   readlink(path::Path path) = 0;
 
         // directory operations
-        virtual AExpect<void> mkdir(path::Path path)              = 0;
-        virtual AExpect<void> rm(path::Path path, bool recursive) = 0;
-        virtual AExpect<void> rmdir(path::Path path)              = 0;
-        virtual AExpect<void> mv(path::Path from, path::Path to)  = 0;
+        virtual AExpect<void> mkdir(path::Path path)                 = 0;
+        virtual AExpect<void> unlink(path::Path path)                = 0;
+        virtual AExpect<void> rmdir(path::Path path)                 = 0;
+        virtual AExpect<void> rename(path::Path from, path::Path to) = 0;
 
         // file operations
         virtual AExpect<void>  truncate(path::Path path, off_t size)                     = 0;

@@ -1,7 +1,7 @@
+#include "madbfs-common/util/overload.hpp"
 #include "madbfs/path/path.hpp"
 #include "madbfs/tree/file_tree.hpp"
 #include "madbfs/tree/node.hpp"
-#include "madbfs/util/overload.hpp"
 
 #include <boost/ut.hpp>
 #include <dtl_modern/dtl_modern.hpp>
@@ -161,9 +161,9 @@ namespace mock
 
         // directory operations
         AExpect<void> mkdir(path::Path) override { co_return Expect<void>{}; }
-        AExpect<void> rm(path::Path, bool) override { co_return Expect<void>{}; }
+        AExpect<void> unlink(path::Path) override { co_return Expect<void>{}; }
         AExpect<void> rmdir(path::Path) override { co_return Expect<void>{}; }
-        AExpect<void> mv(path::Path, path::Path) override { co_return Expect<void>{}; }
+        AExpect<void> rename(path::Path, path::Path) override { co_return Expect<void>{}; }
 
         // file operations
         AExpect<void>  truncate(path::Path, off_t) override { co_return Expect<void>{}; }
