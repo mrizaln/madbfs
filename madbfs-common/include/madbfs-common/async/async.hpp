@@ -6,6 +6,7 @@
 #include <boost/asio.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
+#include <boost/asio/experimental/coro.hpp>
 
 #include <expected>
 #include <utility>
@@ -17,6 +18,9 @@ namespace madbfs
 
     template <typename T>
     using AExpect = Await<Expect<T>>;
+
+    template <typename T>
+    using AGen = boost::asio::experimental::generator<T>;
 }
 
 namespace madbfs::async
@@ -42,8 +46,8 @@ namespace madbfs::async
         return static_cast<bool>(fallback) ? fallback : Errc::invalid_argument;
     }
 
-    template <typename AStream>
-    Await<Pair<boost::system::error_code, usize>> write_exact(AStream& stream, Span<const char> in)
+    template <typename Char, typename AStream>
+    Await<Pair<boost::system::error_code, usize>> write_exact(AStream& stream, Span<const Char> in)
     {
         auto written = 0uz;
         while (written < in.size()) {
@@ -61,8 +65,8 @@ namespace madbfs::async
         co_return Pair{ std::error_code{}, written };
     }
 
-    template <typename AStream>
-    Await<Pair<boost::system::error_code, usize>> read_exact(AStream& stream, Span<char> out)
+    template <typename Char, typename AStream>
+    Await<Pair<boost::system::error_code, usize>> read_exact(AStream& stream, Span<Char> out)
     {
         auto read = 0uz;
         while (read < out.size()) {
