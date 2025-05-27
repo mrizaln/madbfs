@@ -38,14 +38,14 @@ namespace madbfs::data
 
     struct Stat
     {
-        Id      id    = Id::incr();
-        nlink_t links = 1;
-        off_t   size  = 0;
-        time_t  mtime = {};    // last modification time (only seconds part is used)
-        time_t  atime = {};
-        time_t  ctime = {};
-        mode_t  mode  = 0;    // -rwxrwxrwx
-        uid_t   uid   = 0;
-        gid_t   gid   = 0;
+        Id       id    = Id::incr();
+        nlink_t  links = 1;
+        off_t    size  = 0;
+        timespec mtime = {};    // last modification time (only seconds part is used)
+        timespec atime = {};
+        timespec ctime = {};
+        mode_t   mode  = 0;    // -rwxrwxrwx
+        uid_t    uid   = 0;
+        gid_t    gid   = 0;
     };
 }

@@ -38,6 +38,13 @@ namespace madbfs::data
         AExpect<path::PathBuf> readlink(path::Path path) override;
 
         /**
+         * @brief Create a new empty file.
+         *
+         * @param path Path of the new file.
+         */
+        AExpect<void> mknod(path::Path path) override;
+
+        /**
          * @brief Make a directory on the device.
          *
          * @param path Path to the directory.
@@ -81,14 +88,6 @@ namespace madbfs::data
         AExpect<void> truncate(path::Path path, off_t size) override;
 
         /**
-         * @brief Open a file on the device.
-         *
-         * @param path Path to the file on the device.
-         * @param flags Flags to open the file with.
-         */
-        AExpect<u64> open(path::Path path, int flags) override;
-
-        /**
          * @brief Read from a file on the device.
          *
          * @param path Path to the file on the device.
@@ -107,18 +106,13 @@ namespace madbfs::data
         AExpect<usize> write(path::Path path, Span<const char> in, off_t offset) override;
 
         /**
-         * @brief Flush a file on the device.
+         * @brief Update change time and modification time of a file
          *
          * @param path Path to the file on the device.
+         * @param atime Access time.
+         * @param mtime Modification time.
          */
-        AExpect<void> flush(path::Path path) override;
-
-        /**
-         * @brief Release a file on the device.
-         *
-         * @param path Path to the file on the device.
-         */
-        AExpect<void> release(path::Path path) override;
+        AExpect<void> utimens(path::Path path, timespec atime, timespec mtime) override;
 
         /**
          * @brief Copy file server-side.
@@ -133,16 +127,5 @@ namespace madbfs::data
             override;
 
         // ---------------
-
-        /**
-         * @brief Touch a file on the device.
-         *
-         * @param path Path to the file.
-         * @param create Indicate whether to create a file if not exist.
-         */
-        AExpect<void> touch(path::Path path, bool create) override;
-
-    private:
-        std::atomic<u64> m_counter = 0;
     };
 }

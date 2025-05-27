@@ -21,6 +21,8 @@ namespace madbfs::path
 
         constexpr Path() = default;
 
+        static Path root() { return {}; }
+
         constexpr bool is_root() const { return m_dirname == "/" and m_basename == "/"; }
         constexpr Str  filename() const { return m_basename; }
         constexpr Str  parent() const { return m_dirname; }
@@ -99,12 +101,7 @@ namespace madbfs::path
 
         PathBuf() = default;
 
-        static PathBuf root()
-        {
-            auto pathbuf  = PathBuf{};
-            pathbuf.m_buf = String{ "/" };
-            return pathbuf;
-        }
+        static PathBuf root() { return {}; }
 
         /**
          * @brief Extend the path with a name.

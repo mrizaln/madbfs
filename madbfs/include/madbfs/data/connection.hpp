@@ -27,6 +27,7 @@ namespace madbfs::data
         virtual AExpect<path::PathBuf>   readlink(path::Path path) = 0;
 
         // directory operations
+        virtual AExpect<void> mknod(path::Path path)                 = 0;
         virtual AExpect<void> mkdir(path::Path path)                 = 0;
         virtual AExpect<void> unlink(path::Path path)                = 0;
         virtual AExpect<void> rmdir(path::Path path)                 = 0;
@@ -34,11 +35,9 @@ namespace madbfs::data
 
         // file operations
         virtual AExpect<void>  truncate(path::Path path, off_t size)                     = 0;
-        virtual AExpect<u64>   open(path::Path path, int flags)                          = 0;
         virtual AExpect<usize> read(path::Path path, Span<char> out, off_t offset)       = 0;
         virtual AExpect<usize> write(path::Path path, Span<const char> in, off_t offset) = 0;
-        virtual AExpect<void>  flush(path::Path path)                                    = 0;
-        virtual AExpect<void>  release(path::Path path)                                  = 0;
+        virtual AExpect<void>  utimens(path::Path path, timespec atime, timespec mtime)  = 0;
 
         virtual AExpect<usize> copy_file_range(
             path::Path in,
@@ -47,9 +46,6 @@ namespace madbfs::data
             off_t      out_off,
             usize      size
         ) = 0;
-
-        // directory operation (adding file) or file operation (update time)
-        virtual AExpect<void> touch(path::Path path, bool create) = 0;
 
         virtual ~Connection() = default;
     };

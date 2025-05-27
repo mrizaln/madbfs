@@ -160,6 +160,7 @@ namespace mock
         AExpect<path::PathBuf>   readlink(path::Path path) override { co_return path.into_buf(); };
 
         // directory operations
+        AExpect<void> mknod(path::Path) override { co_return Expect<void>{}; }
         AExpect<void> mkdir(path::Path) override { co_return Expect<void>{}; }
         AExpect<void> unlink(path::Path) override { co_return Expect<void>{}; }
         AExpect<void> rmdir(path::Path) override { co_return Expect<void>{}; }
@@ -167,19 +168,14 @@ namespace mock
 
         // file operations
         AExpect<void>  truncate(path::Path, off_t) override { co_return Expect<void>{}; }
-        AExpect<u64>   open(path::Path, int) override { co_return Expect<u64>{}; }
         AExpect<usize> read(path::Path, Span<char>, off_t) override { co_return Expect<usize>{}; }
         AExpect<usize> write(path::Path, Span<const char>, off_t) override { co_return Expect<usize>{}; }
-        AExpect<void>  flush(path::Path) override { co_return Expect<void>{}; }
-        AExpect<void>  release(path::Path) override { co_return Expect<void>{}; }
+        AExpect<void>  utimens(path::Path, timespec, timespec) override { co_return Expect<void>{}; }
 
         AExpect<usize> copy_file_range(path::Path, off_t, path::Path, off_t, usize size) override
         {
             co_return size;
         }
-
-        // directory operation (adding file) or file operation (update time)
-        AExpect<void> touch(path::Path, bool) override { co_return Expect<void>{}; }
     };
 }
 
@@ -200,53 +196,64 @@ int main()
 
         auto connection = mock::DummyConnection{};
         auto cache      = madbfs::data::Cache{ 64 * 1024, 1024 };
-        auto context    = Node::Context{ connection, cache, "/dummy"_path };
+        auto counter    = std::atomic<u64>{};
+
+        // NOTE: operations like mknod and mkdir only considers filename
+        // NOTE: full path only matter for connection and caching
+        auto dummy = madbfs::path::PathBuf::root();
+        auto path  = madbfs::path::Path::root();
+
+        auto make_context = [&](Str name) {
+            dummy.extend(name);
+            path = dummy.as_path();
+            return Node::Context{ connection, cache, counter, path };
+        };
 
         auto io_context = madbfs::async::Context{};
 
         auto coro = [&] -> madbfs::Await<void> {
             auto root = Node{ "/", nullptr, {}, Directory{} };
 
-            Node& hello = (co_await root.mkdir(context, "hello")).unwrap();
+            Node& hello = (co_await root.mkdir(make_context("hello"))).unwrap();
 
-            _ = (co_await hello.touch(context, "world.txt")).unwrap();
-            _ = (co_await hello.touch(context, "foo.txt")).unwrap();
-            _ = (co_await hello.touch(context, "movie.mp4")).unwrap();
+            _ = (co_await hello.mknod(make_context("world.txt"))).unwrap();
+            _ = (co_await hello.mknod(make_context("foo.txt"))).unwrap();
+            _ = (co_await hello.mknod(make_context("movie.mp4"))).unwrap();
 
-            Node& bar = (co_await hello.mkdir(context, "bar")).unwrap();
+            Node& bar = (co_await hello.mkdir(make_context("bar"))).unwrap();
 
-            _ = (co_await bar.touch(context, "baz.txt")).unwrap();
-            _ = (co_await bar.touch(context, "qux.txt")).unwrap();
-            _ = (co_await bar.touch(context, "quux.txt")).unwrap();
+            _ = (co_await bar.mknod(make_context("baz.txt"))).unwrap();
+            _ = (co_await bar.mknod(make_context("qux.txt"))).unwrap();
+            _ = (co_await bar.mknod(make_context("quux.txt"))).unwrap();
 
-            Node& bye = (co_await root.mkdir(context, "bye")).unwrap();
+            Node& bye = (co_await root.mkdir(make_context("bye"))).unwrap();
 
-            _ = (co_await bye.touch(context, "world.txt")).unwrap();
-            _ = (co_await bye.touch(context, "movie.mp4")).unwrap();
-            _ = (co_await bye.touch(context, "music.mp3")).unwrap();
+            _ = (co_await bye.mknod(make_context("world.txt"))).unwrap();
+            _ = (co_await bye.mknod(make_context("movie.mp4"))).unwrap();
+            _ = (co_await bye.mknod(make_context("music.mp3"))).unwrap();
 
-            Node& family = (co_await bye.mkdir(context, "family")).unwrap();
+            Node& family = (co_await bye.mkdir(make_context("family"))).unwrap();
 
-            _ = (co_await family.touch(context, "dad.txt")).unwrap();
-            _ = (co_await family.touch(context, "mom.txt")).unwrap();
+            _ = (co_await family.mknod(make_context("dad.txt"))).unwrap();
+            _ = (co_await family.mknod(make_context("mom.txt"))).unwrap();
 
-            Node& friends = (co_await bye.mkdir(context, "friends")).unwrap();
+            Node& friends = (co_await bye.mkdir(make_context("friends"))).unwrap();
 
-            _ = (co_await friends.touch(context, "bob.txt")).unwrap();
+            _ = (co_await friends.mknod(make_context("bob.txt"))).unwrap();
 
-            Node& school = (co_await friends.mkdir(context, "school")).unwrap();
+            Node& school = (co_await friends.mkdir(make_context("school"))).unwrap();
 
-            _ = (co_await school.touch(context, "kal'tsit.txt")).unwrap();
-            _ = (co_await school.touch(context, "closure.txt")).unwrap();
+            _ = (co_await school.mknod(make_context("kal'tsit.txt"))).unwrap();
+            _ = (co_await school.mknod(make_context("closure.txt"))).unwrap();
 
-            Node& work = (co_await friends.mkdir(context, "work")).unwrap();
+            Node& work = (co_await friends.mkdir(make_context("work"))).unwrap();
 
-            Node& wife = (co_await work.touch(context, "loughshinny <3.txt")).unwrap();
+            Node& wife = (co_await work.mknod(make_context("loughshinny <3.txt"))).unwrap();
 
-            _ = (co_await work.touch(context, "eblana?.mp4")).unwrap();
-            _ = school.link("hehe", &work).unwrap();
-            _ = hello.link("wife", &wife).unwrap();
-            _ = (co_await bye.touch(context, "theresa.txt")).unwrap();
+            _ = (co_await work.mknod(make_context("eblana?.mp4"))).unwrap();
+            _ = school.symlink("hehe", &work).unwrap();
+            _ = hello.symlink("wife", &wife).unwrap();
+            _ = (co_await bye.mknod(make_context("theresa.txt"))).unwrap();
 
             auto tree_str = fmt::format("\n{}", root);
             expect(expected == tree_str) << diff_str(expected, tree_str);

@@ -99,8 +99,6 @@ namespace madbfs
         , m_cache{ page_size, max_pages }
         , m_tree{ *m_connection, m_cache }
     {
-        log_d({ "{}: ctor of Madbfs" }, __func__);
-
         m_work_thread = std::jthread{ [this] {
             log_i({ "Madbfs: io_context running..." });
             auto num_handlers = m_async_ctx.run();
@@ -253,9 +251,9 @@ namespace madbfs
         stbuf->st_blksize = static_cast<blksize_t>(get_data().cache().page_size());
         stbuf->st_blocks  = stbuf->st_size / stbuf->st_blksize + (stbuf->st_size % stbuf->st_blksize != 0);
 
-        stbuf->st_atim = timespec{ .tv_sec = stat.atime, .tv_nsec = 0 };
-        stbuf->st_mtim = timespec{ .tv_sec = stat.mtime, .tv_nsec = 0 };
-        stbuf->st_ctim = timespec{ .tv_sec = stat.ctime, .tv_nsec = 0 };
+        stbuf->st_atim = stat.atime;
+        stbuf->st_mtim = stat.mtime;
+        stbuf->st_ctim = stat.ctime;
 
         return 0;
     }
@@ -435,7 +433,7 @@ namespace madbfs
         log_i({ "{}: {:?}" }, __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return tree_blocking(&tree::FileTree::utimens, p); })
+            .and_then([&](path::Path p) { return tree_blocking(&tree::FileTree::utimens, p, tv[0], tv[1]); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }

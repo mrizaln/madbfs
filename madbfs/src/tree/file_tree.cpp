@@ -205,46 +205,42 @@ namespace madbfs::tree
 
     AExpect<Ref<Node>> FileTree::mknod(path::Path path)
     {
-        auto parent  = path.parent_path();
-        auto context = Node::Context{ m_connection, m_cache, path };
-        auto node    = co_await traverse_or_build(parent);
+        auto parent = path.parent_path();
+        auto node   = co_await traverse_or_build(parent);
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().touch(context, path.filename());
+        co_return co_await node->get().mknod(make_context(path));
     }
 
     AExpect<Ref<Node>> FileTree::mkdir(path::Path path)
     {
-        auto parent  = path.parent_path();
-        auto context = Node::Context{ m_connection, m_cache, path };
-        auto node    = co_await traverse_or_build(parent);
+        auto parent = path.parent_path();
+        auto node   = co_await traverse_or_build(parent);
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().mkdir(context, path.filename());
+        co_return co_await node->get().mkdir(make_context(path));
     }
 
     AExpect<void> FileTree::unlink(path::Path path)
     {
-        auto parent  = path.parent_path();
-        auto context = Node::Context{ m_connection, m_cache, path };
-        auto node    = co_await traverse_or_build(parent);
+        auto parent = path.parent_path();
+        auto node   = co_await traverse_or_build(parent);
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().unlink(context, path.filename());
+        co_return co_await node->get().unlink(make_context(path));
     }
 
     AExpect<void> FileTree::rmdir(path::Path path)
     {
-        auto parent  = path.parent_path();
-        auto context = Node::Context{ m_connection, m_cache, path };
-        auto node    = co_await traverse_or_build(parent);
+        auto parent = path.parent_path();
+        auto node   = co_await traverse_or_build(parent);
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().rmdir(context, path.filename());
+        co_return co_await node->get().rmdir(make_context(path));
     }
 
     AExpect<void> FileTree::rename(path::Path from, path::Path to)
@@ -274,62 +270,56 @@ namespace madbfs::tree
 
     AExpect<void> FileTree::truncate(path::Path path, off_t size)
     {
-        auto context = Node::Context{ m_connection, m_cache, path };
-        auto node    = co_await traverse_or_build(path);
+        auto node = co_await traverse_or_build(path);
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().truncate(context, size);
+        co_return co_await node->get().truncate(make_context(path), size);
     }
 
     AExpect<u64> FileTree::open(path::Path path, int flags)
     {
-        auto context = Node::Context{ m_connection, m_cache, path };
-        auto node    = co_await traverse_or_build(path);
+        auto node = co_await traverse_or_build(path);
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().open(context, flags);
+        co_return co_await node->get().open(make_context(path), flags);
     }
 
     AExpect<usize> FileTree::read(path::Path path, u64 fd, Span<char> out, off_t offset)
     {
-        auto context = Node::Context{ m_connection, m_cache, path };
-        auto node    = co_await traverse_or_build(path);
+        auto node = co_await traverse_or_build(path);
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().read(context, fd, out, offset);
+        co_return co_await node->get().read(make_context(path), fd, out, offset);
     }
 
     AExpect<usize> FileTree::write(path::Path path, u64 fd, Str in, off_t offset)
     {
-        auto context = Node::Context{ m_connection, m_cache, path };
-        auto node    = co_await traverse_or_build(path);
+        auto node = co_await traverse_or_build(path);
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().write(context, fd, in, offset);
+        co_return co_await node->get().write(make_context(path), fd, in, offset);
     }
 
     AExpect<void> FileTree::flush(path::Path path, u64 fd)
     {
-        auto context = Node::Context{ m_connection, m_cache, path };
-        auto node    = co_await traverse_or_build(path);
+        auto node = co_await traverse_or_build(path);
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().flush(context, fd);
+        co_return co_await node->get().flush(make_context(path), fd);
     }
 
     AExpect<void> FileTree::release(path::Path path, u64 fd)
     {
-        auto context = Node::Context{ m_connection, m_cache, path };
-        auto node    = co_await traverse_or_build(path);
+        auto node = co_await traverse_or_build(path);
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().release(context, fd);
+        co_return co_await node->get().release(make_context(path), fd);
     }
 
     AExpect<usize> FileTree::copy_file_range(
@@ -362,14 +352,13 @@ namespace madbfs::tree
         });
     }
 
-    AExpect<void> FileTree::utimens(path::Path path)
+    AExpect<void> FileTree::utimens(path::Path path, timespec atime, timespec mtime)
     {
-        auto context = Node::Context{ m_connection, m_cache, path };
-        auto node    = co_await traverse_or_build(path);
+        auto node = co_await traverse_or_build(path);
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().utimens(context);
+        co_return co_await node->get().utimens(make_context(path), atime, mtime);
     }
 
     Expect<void> FileTree::symlink(path::Path path, path::Path target)
@@ -381,7 +370,7 @@ namespace madbfs::tree
         }
 
         return traverse(path.parent_path())
-            .and_then(proj(&Node::link, path.filename(), &target_node->get()))
+            .and_then(proj(&Node::symlink, path.filename(), &target_node->get()))
             .transform(sink_void);
     }
 }

@@ -107,12 +107,21 @@ namespace madbfs::tree
         return path::create_buf(std::move(path)).value();
     }
 
-    void Node::refresh_stat()
+    void Node::refresh_stat(timespec atime, timespec mtime)
     {
-        auto now     = Clock::to_time_t(Clock::now());
-        m_stat.atime = now;
-        m_stat.mtime = now;
-        m_stat.ctime = now;
+        auto now  = Clock::now().time_since_epoch();
+        auto sec  = std::chrono::duration_cast<std::chrono::seconds>(now);
+        auto nsec = std::chrono::duration_cast<std::chrono::nanoseconds>(now - sec);
+
+        auto time = timespec{ .tv_sec = sec.count(), .tv_nsec = nsec.count() };
+
+        if (atime.tv_nsec != UTIME_OMIT) {
+            m_stat.atime = atime.tv_nsec == UTIME_NOW ? time : atime;
+        }
+        if (mtime.tv_nsec != UTIME_OMIT) {
+            m_stat.mtime = mtime.tv_nsec == UTIME_NOW ? time : mtime;
+        }
+        m_stat.ctime = time;
     }
 
     bool Node::has_synced() const
@@ -183,7 +192,7 @@ namespace madbfs::tree
         return as<Directory>().and_then(proj(&Directory::insert, std::move(node), overwrite));
     }
 
-    Expect<Ref<Node>> Node::link(Str name, Node* target)
+    Expect<Ref<Node>> Node::symlink(Str name, Node* target)
     {
         if (auto err = as<Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
@@ -196,14 +205,20 @@ namespace madbfs::tree
             // NOTE: we can't really make a symlink on android from adb (unless rooted device iirc), so this
             // operation actually not creating any link on the adb device, just on the in-memory filetree.
 
+            auto now  = Clock::now().time_since_epoch();
+            auto sec  = std::chrono::duration_cast<std::chrono::seconds>(now);
+            auto nsec = std::chrono::duration_cast<std::chrono::nanoseconds>(now - sec);
+
+            auto time = timespec{ .tv_sec = sec.count(), .tv_nsec = nsec.count() };
+
             // dummy stat for symlink based on
             // lrw-r--r--  root root 21 2024-10-05 09:19:29.000000000 +0700 /sdcard -> /storage/self/primary
             auto dummy_stat = data::Stat{
                 .links = 1,
                 .size  = 21,
-                .mtime = Clock::to_time_t(Clock::now()),
-                .atime = Clock::to_time_t(Clock::now()),
-                .ctime = Clock::to_time_t(Clock::now()),
+                .mtime = time,
+                .atime = time,
+                .ctime = time,
                 .mode  = S_IFLNK | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,    // mode: "lrw-r--r--"
                 .uid   = 0,
                 .gid   = 0,
@@ -214,7 +229,7 @@ namespace madbfs::tree
         });
     }
 
-    AExpect<Ref<Node>> Node::touch(Context context, Str name)
+    AExpect<Ref<Node>> Node::mknod(Context context)
     {
         if (auto err = as<Error>(); err.has_value()) {
             co_return Unexpect{ err->get().error };
@@ -224,22 +239,20 @@ namespace madbfs::tree
         if (not may_dir) {
             co_return Unexpect{ may_dir.error() };
         }
-        auto& dir = may_dir->get();
+
+        auto& dir  = may_dir->get();
+        auto  name = context.path.filename();
 
         auto overwrite = false;
         if (auto node = dir.find(name); node.has_value()) {
             if (not node->get().is<Error>()) {
-                node.transform(&Node::refresh_stat).value();
-                co_return (co_await context.connection.touch(context.path, false)).transform([&] {
-                    return *node;
-                });
+                co_return Unexpect{ Errc::file_exists };
             }
             overwrite = true;
         }
 
-        auto may_touch = co_await context.connection.touch(context.path, true);
-        if (not may_touch) {
-            co_return Unexpect{ may_touch.error() };
+        if (auto created = co_await context.connection.mknod(context.path); not created) {
+            co_return Unexpect{ created.error() };
         }
 
         co_return (co_await context.connection.stat(context.path))
@@ -250,7 +263,7 @@ namespace madbfs::tree
             .transform([&](auto&& pair) { return pair.first; });
     }
 
-    AExpect<Ref<Node>> Node::mkdir(Context context, Str name)
+    AExpect<Ref<Node>> Node::mkdir(Context context)
     {
         if (auto err = as<Error>(); err.has_value()) {
             co_return Unexpect{ err->get().error };
@@ -260,7 +273,9 @@ namespace madbfs::tree
         if (not may_dir) {
             co_return Unexpect{ may_dir.error() };
         }
-        auto& dir = may_dir->get();
+
+        auto& dir  = may_dir->get();
+        auto  name = context.path.filename();
 
         auto overwrite = false;
         if (auto node = dir.find(name); node.has_value()) {
@@ -283,13 +298,14 @@ namespace madbfs::tree
             .transform([&](auto&& pair) { return pair.first; });
     }
 
-    AExpect<void> Node::unlink(Context context, Str name)
+    AExpect<void> Node::unlink(Context context)
     {
         if (auto err = as<Error>(); err.has_value()) {
             co_return Unexpect{ err->get().error };
         }
 
         auto res = as<Directory>().and_then([&](Directory& dir) -> Expect<void> {
+            auto name = context.path.filename();
             return dir.find(name).and_then([&](Node& node) -> Expect<void> {
                 if (node.is<Directory>()) {
                     return Unexpect{ Errc::is_a_directory };
@@ -306,11 +322,13 @@ namespace madbfs::tree
         co_return co_await context.connection.unlink(context.path);
     }
 
-    AExpect<void> Node::rmdir(Context context, Str name)
+    AExpect<void> Node::rmdir(Context context)
     {
         if (auto err = as<Error>(); err.has_value()) {
             co_return Unexpect{ err->get().error };
         }
+
+        auto name = context.path.filename();
 
         auto res = as<Directory>().and_then([&](Directory& dir) {
             return dir.find(name).and_then([&](Node& node) {
@@ -348,11 +366,11 @@ namespace madbfs::tree
         }
         auto& file = may_file->get();
 
-        co_return (co_await context.connection.open(context.path, flags)).transform([&](u64 fd) {
-            auto res = file.open(fd, flags);
-            assert(res);
-            return fd;
-        });
+        auto fd  = context.fd_counter.fetch_add(1, std::memory_order::relaxed) + 1;
+        auto res = file.open(fd, flags);
+        assert(res);
+
+        co_return fd;
     }
 
     AExpect<usize> Node::read(Context context, u64 fd, Span<char> out, off_t offset)
@@ -437,10 +455,10 @@ namespace madbfs::tree
         });
     }
 
-    AExpect<void> Node::utimens(Context context)
+    AExpect<void> Node::utimens(Context context, timespec atime, timespec mtime)
     {
-        if (auto may_touch = co_await context.connection.touch(context.path, false); not may_touch) {
-            co_return Unexpect{ may_touch.error() };
+        if (auto res = co_await context.connection.utimens(context.path, atime, mtime); not res) {
+            co_return Unexpect{ res.error() };
         }
         co_return (co_await context.connection.stat(context.path)).transform([&](data::Stat stat) {
             m_stat = std::move(stat);

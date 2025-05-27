@@ -51,6 +51,7 @@ namespace madbfs::tree
         AExpect<usize> write(path::Path path, u64 fd, Str in, off_t offset);
         AExpect<void>  flush(path::Path path, u64 fd);
         AExpect<void>  release(path::Path path, u64 fd);
+        AExpect<void>  utimens(path::Path path, timespec atime, timespec mtime);
 
         AExpect<usize> copy_file_range(
             path::Path in_path,
@@ -61,8 +62,6 @@ namespace madbfs::tree
             off_t      offset_out,
             size_t     size
         );
-
-        AExpect<void> utimens(path::Path path);
 
         // this function only used to link already existing files, user can't use it
         Expect<void> symlink(path::Path path, path::Path target);
@@ -77,9 +76,20 @@ namespace madbfs::tree
          */
         AExpect<Ref<Node>> traverse_or_build(path::Path path);
 
+        Node::Context make_context(const path::Path& path)
+        {
+            return {
+                .connection = m_connection,
+                .cache      = m_cache,
+                .fd_counter = m_fd_counter,
+                .path       = path,
+            };
+        }
+
         Node              m_root;
         data::Connection& m_connection;
         data::Cache&      m_cache;
+        std::atomic<u64>  m_fd_counter       = 0;
         bool              m_root_initialized = false;
     };
 }

@@ -161,16 +161,11 @@ namespace madbfs::data
         });
     }
 
-    AExpect<void> AdbConnection::touch(path::Path path, bool create)
+    AExpect<void> AdbConnection::mknod(path::Path path)
     {
         const auto qpath = quoted(path);
-        if (create) {
-            const auto args = Array{ "shell"sv, "touch"sv, Str{ qpath } };
-            co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
-        } else {
-            const auto args = Array{ "shell"sv, "touch"sv, "-c"sv, Str{ qpath } };
-            co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
-        }
+        const auto args  = Array{ "shell"sv, "touch"sv, Str{ qpath } };
+        co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
     }
 
     AExpect<void> AdbConnection::mkdir(path::Path path)
@@ -208,19 +203,6 @@ namespace madbfs::data
         const auto sizes = fmt::format("{}", size);
         const auto args  = Array{ "shell"sv, "truncate"sv, "-s"sv, Str{ sizes }, Str{ qpath } };
         co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
-    }
-
-    AExpect<u64> AdbConnection::open(path::Path /* path */, int /* flags */)
-    {
-        /*
-         * Since we're using a streaming approach to read/write files, there is no need to do open or
-         * close operation on the file. The file is opened when we read or write to it, and closed after
-         * those operation complete on the device.
-         *
-         * Thus, there is really no need to do anything here.
-         */
-
-        co_return m_counter.fetch_add(1, std::memory_order::relaxed) + 1;
     }
 
     AExpect<usize> AdbConnection::read(path::Path path, Span<char> out, off_t offset)
@@ -267,24 +249,32 @@ namespace madbfs::data
         });
     }
 
-    AExpect<void> AdbConnection::flush(path::Path /* path */)
+    AExpect<void> AdbConnection::utimens(path::Path path, timespec atime, timespec mtime)
     {
-        /*
-         * The streaming approach is immediate, so there is no need to flush the file. At least for the
-         * moment. In the future we might want to implement caching once again.
-         */
+        // since I can only use touch, I can only use one value. I decided then that the value to be used on
+        // touch command must be the highest between atime and mtime.
 
-        return {};
-    }
+        auto time = atime;
+        if (atime.tv_sec < mtime.tv_sec or (atime.tv_sec == mtime.tv_sec and atime.tv_nsec < mtime.tv_nsec)) {
+            time = mtime;
+        }
 
-    AExpect<void> AdbConnection::release(path::Path /* path */)
-    {
-        /*
-         * The reason this part is a no-op is the same as the open function. We don't need to do any
-         * open or close operation on the file.
-         */
+        if (time.tv_nsec == UTIME_NOW) {
+            const auto qpath = quoted(path);
+            const auto args  = Array{ "shell"sv, "touch"sv, "-c"sv, Str{ qpath } };
+            co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
+        }
 
-        return {};
+        auto tm_info = std::gmtime(&time.tv_sec);
+        if (tm_info == nullptr) {
+            time.tv_sec = std::time(nullptr);
+            tm_info     = std::gmtime(&time.tv_sec);
+        }
+        auto time_str = fmt::format("{:%Y%m%d%H%M.%S}{}", *tm_info, time.tv_nsec);
+
+        const auto qpath = quoted(path);
+        const auto args  = Array{ "shell"sv, "touch"sv, "-c"sv, "-d"sv, Str{ time_str }, Str{ qpath } };
+        co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
     }
 
     AExpect<usize> AdbConnection::copy_file_range(

@@ -200,6 +200,7 @@ namespace madbfs::tree
         {
             data::Connection& connection;
             data::Cache&      cache;
+            std::atomic<u64>& fd_counter;
             const path::Path& path;    // path for connection
         };
 
@@ -232,7 +233,7 @@ namespace madbfs::tree
         Str           printable_type() const;
         path::PathBuf build_path() const;
 
-        void refresh_stat();
+        void refresh_stat(timespec atime, timespec mtime);
 
         /**
          * @brief Check whether node is synced with device.
@@ -322,17 +323,16 @@ namespace madbfs::tree
          *
          * @return The new link node.
          */
-        Expect<Ref<Node>> link(Str name, Node* target);
+        Expect<Ref<Node>> symlink(Str name, Node* target);
 
         /**
-         * @brief Create a new child node as RegularFile or touch an existing one.
+         * @brief Create a new child node as RegularFile.
          *
          * @param context Context needed to communicate with device and local.
-         * @param name The name of the child node.
          *
          * @return The new regular file node.
          */
-        AExpect<Ref<Node>> touch(Context context, Str name);
+        AExpect<Ref<Node>> mknod(Context context);
 
         /**
          * @brief Create a new child node as Directory.
@@ -342,7 +342,7 @@ namespace madbfs::tree
          *
          * @return The new directory node.
          */
-        AExpect<Ref<Node>> mkdir(Context context, Str name);
+        AExpect<Ref<Node>> mkdir(Context context);
 
         /**
          * @brief Remove a child node by its name (RegularFile or Directory).
@@ -350,7 +350,7 @@ namespace madbfs::tree
          * @param context Context needed to communicate with device and local.
          * @param name The name of the child node.
          */
-        AExpect<void> unlink(Context context, Str name);
+        AExpect<void> unlink(Context context);
 
         /**
          * @brief Remove a child node by its name (Directory).
@@ -358,7 +358,7 @@ namespace madbfs::tree
          * @param context Context needed to communicate with device and local.
          * @param name The name of the child node.
          */
-        AExpect<void> rmdir(Context context, Str name);
+        AExpect<void> rmdir(Context context);
 
         // -----------------------
 
@@ -429,7 +429,7 @@ namespace madbfs::tree
          *
          * @param context Context needed to communicate with device and local.
          */
-        AExpect<void> utimens(Context context);
+        AExpect<void> utimens(Context context, timespec atime, timespec mtime);
 
         // -------------------------
 
