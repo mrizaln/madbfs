@@ -5,11 +5,35 @@
 
 #include <spdlog/spdlog.h>
 
+#include <dirent.h>
+#include <sys/stat.h>
+
 namespace
 {
     std::string err_msg(madbfs::Errc errc)
     {
         return std::make_error_code(errc).message();
+    }
+
+    madbfs::rpc::Status log_status_from_errno(madbfs::Str name, madbfs::Str path, madbfs::Str msg)
+    {
+        auto err = errno;
+        spdlog::debug("{}: {} {:?}: {}", name, msg, path, strerror(err));
+        auto status = static_cast<madbfs::rpc::Status>(err);
+
+        switch (status) {
+        case madbfs::rpc::Status::Success:
+        case madbfs::rpc::Status::NoSuchFileOrDirectory:
+        case madbfs::rpc::Status::PermissionDenied:
+        case madbfs::rpc::Status::FileExists:
+        case madbfs::rpc::Status::NotADirectory:
+        case madbfs::rpc::Status::IsADirectory:
+        case madbfs::rpc::Status::InvalidArgument:
+        case madbfs::rpc::Status::DirectoryNotEmpty: return status;
+        }
+
+        // revert to InvalidArgument as default
+        return madbfs::rpc::Status::InvalidArgument;
     }
 }
 
@@ -62,39 +86,174 @@ namespace madbfs::server
         if (ec) {
             spdlog::error("{}: failed to get endpoint: {}", __func__, ec.message());
         }
-        spdlog::info("{}: new connection from {}:{}", __func__, peer.address().to_string(), peer.port());
+        spdlog::debug("{}: new connection from {}:{}", __func__, peer.address().to_string(), peer.port());
 
         auto buffer     = Vec<u8>{};
         auto rpc_server = rpc::Server{ sock, buffer };
 
-        auto request = co_await rpc_server.recv_req();
-        if (not request) {
-            spdlog::error("{}: failed to get param for procedure {}", __func__, err_msg(request.error()));
+        auto procedure = co_await rpc_server.peek_req();
+        if (not procedure) {
+            spdlog::error("{}: failed to get param for procedure {}", __func__, err_msg(procedure.error()));
             co_return Expect<void>{};
         }
+        spdlog::debug("{}: accepted procedure [{}]", __func__, to_string(*procedure));
 
-        spdlog::debug("{}: accepted procedure {}", __func__, request->index() + 1);
+        // clang-format off
+        switch (*procedure) {
+        case rpc::Procedure::Listdir:       co_return co_await handle_req_listdir        (rpc_server);
+        case rpc::Procedure::Stat:          co_return co_await handle_req_stat           (rpc_server);
+        case rpc::Procedure::Readlink:      co_return co_await handle_req_readlink       (rpc_server);
+        case rpc::Procedure::Mknod:         co_return co_await handle_req_mknod          (rpc_server);
+        case rpc::Procedure::Mkdir:         co_return co_await handle_req_mkdir          (rpc_server);
+        case rpc::Procedure::Unlink:        co_return co_await handle_req_unlink         (rpc_server);
+        case rpc::Procedure::Rmdir:         co_return co_await handle_req_rmdir          (rpc_server);
+        case rpc::Procedure::Rename:        co_return co_await handle_req_rename         (rpc_server);
+        case rpc::Procedure::Truncate:      co_return co_await handle_req_truncate       (rpc_server);
+        case rpc::Procedure::Read:          co_return co_await handle_req_read           (rpc_server);
+        case rpc::Procedure::Write:         co_return co_await handle_req_write          (rpc_server);
+        case rpc::Procedure::Utimens:       co_return co_await handle_req_utimens        (rpc_server);
+        case rpc::Procedure::CopyFileRange: co_return co_await handle_req_copy_file_range(rpc_server);
+        }
+        // clang-format on
+
+        spdlog::error("{}: invalid procedure with integral value {}", __func__, static_cast<u8>(*procedure));
 
         co_return Expect<void>{};
-
-        auto overload = util::Overload{
-            // clang-format off
-            [&](const rpc::req::Listdir&       req) { return handle_req_listdir        (rpc_server, req); },
-            [&](const rpc::req::Stat&          req) { return handle_req_stat           (rpc_server, req); },
-            [&](const rpc::req::Readlink&      req) { return handle_req_readlink       (rpc_server, req); },
-            [&](const rpc::req::Mknod&         req) { return handle_req_mknod          (rpc_server, req); },
-            [&](const rpc::req::Mkdir&         req) { return handle_req_mkdir          (rpc_server, req); },
-            [&](const rpc::req::Unlink&        req) { return handle_req_unlink         (rpc_server, req); },
-            [&](const rpc::req::Rmdir&         req) { return handle_req_rmdir          (rpc_server, req); },
-            [&](const rpc::req::Rename&        req) { return handle_req_rename         (rpc_server, req); },
-            [&](const rpc::req::Truncate&      req) { return handle_req_truncate       (rpc_server, req); },
-            [&](const rpc::req::Read&          req) { return handle_req_read           (rpc_server, req); },
-            [&](const rpc::req::Write&         req) { return handle_req_write          (rpc_server, req); },
-            [&](const rpc::req::Utimens&       req) { return handle_req_utimens        (rpc_server, req); },
-            [&](const rpc::req::CopyFileRange& req) { return handle_req_copy_file_range(rpc_server, req); },
-            // clang-format on
-        };
-
-        co_return co_await std::visit(std::move(overload), *request);
     }
+
+    AExpect<void> Server::handle_req_listdir(rpc::Server& serv)
+    {
+        auto listdir = co_await serv.recv_req_listdir();
+        if (not listdir) {
+            co_return Unexpect{ listdir.error() };
+        }
+        spdlog::debug("{}: path={:?}", __func__, listdir->path.data());
+
+        auto dir = ::opendir(listdir->path.data());
+        if (dir == nullptr) {
+            auto err = log_status_from_errno(__func__, listdir->path, "failed to open dir");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        if (auto res = co_await serv.send_resp(rpc::resp::Listdir{}); not res) {
+            co_return Unexpect{ res.error() };
+        }
+
+        auto channel = rpc::listdir_channel::Sender{ serv.sock() };
+        auto dirfd   = ::dirfd(dir);
+
+        while (auto entry = ::readdir(dir)) {
+            struct stat filestat = {};
+            if (auto res = ::fstatat(dirfd, entry->d_name, &filestat, AT_SYMLINK_NOFOLLOW); res < 0) {
+                auto err = log_status_from_errno(__func__, entry->d_name, "failed to stat file");
+                if (auto res = co_await channel.send_next(static_cast<rpc::Status>(err)); not res) {
+                    co_return Unexpect{ res.error() };
+                }
+                continue;
+            }
+            auto res = co_await channel.send_next(rpc::listdir_channel::Dirent{
+                .name  = entry->d_name,
+                .links = filestat.st_nlink,
+                .size  = filestat.st_size,
+                .mtime = filestat.st_mtim,
+                .atime = filestat.st_atim,
+                .ctime = filestat.st_ctim,
+                .mode  = filestat.st_mode,
+                .uid   = filestat.st_uid,
+                .gid   = filestat.st_gid,
+            });
+            if (not res) {
+                co_return Unexpect{ res.error() };
+            }
+        }
+
+        co_return co_await channel.send_next(Unit{});
+    }
+
+    AExpect<void> Server::handle_req_stat(rpc::Server& serv)
+    {
+        auto stat = co_await serv.recv_req_stat();
+        if (not stat) {
+            co_return Unexpect{ stat.error() };
+        }
+        spdlog::debug("{}: path={:?}", __func__, stat->path.data());
+
+        struct stat filestat = {};
+        if (auto res = ::lstat(stat->path.data(), &filestat); res < 0) {
+            auto err = log_status_from_errno(__func__, stat->path, "failed to stat file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        co_return co_await serv.send_resp(rpc::resp::Stat{
+            .size  = filestat.st_size,
+            .links = filestat.st_nlink,
+            .mtime = filestat.st_mtim,
+            .atime = filestat.st_atim,
+            .ctime = filestat.st_ctim,
+            .mode  = filestat.st_mode,
+            .uid   = filestat.st_uid,
+            .gid   = filestat.st_gid,
+        });
+    }
+
+    AExpect<void> Server::handle_req_readlink(rpc::Server& serv)
+    {
+        auto readlink = co_await serv.recv_req_readlink();
+        if (not readlink) {
+            co_return Unexpect{ readlink.error() };
+        }
+        spdlog::debug("{}: path={:?}", __func__, readlink->path.data());
+
+        auto buffer = Array<char, 1024>{};
+        auto len    = ::readlink(readlink->path.data(), buffer.data(), buffer.size());
+        if (len < 0) {
+            auto err = log_status_from_errno(__func__, readlink->path, "failed to readlink");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        co_return co_await serv.send_resp(rpc::resp::Readlink{
+            .target = Str{ buffer.begin(), static_cast<usize>(len) },
+        });
+    }
+
+    AExpect<void> Server::handle_req_mknod(rpc::Server& serv)
+    {
+    }
+
+    AExpect<void> Server::handle_req_mkdir(rpc::Server& serv)
+    {
+    }
+
+    AExpect<void> Server::handle_req_unlink(rpc::Server& serv)
+    {
+    }
+
+    AExpect<void> Server::handle_req_rmdir(rpc::Server& serv)
+    {
+    }
+
+    AExpect<void> Server::handle_req_rename(rpc::Server& serv)
+    {
+    }
+
+    AExpect<void> Server::handle_req_truncate(rpc::Server& serv)
+    {
+    }
+
+    AExpect<void> Server::handle_req_read(rpc::Server& serv)
+    {
+    }
+
+    AExpect<void> Server::handle_req_write(rpc::Server& serv)
+    {
+    }
+
+    AExpect<void> Server::handle_req_utimens(rpc::Server& serv)
+    {
+    }
+
+    AExpect<void> Server::handle_req_copy_file_range(rpc::Server& serv)
+    {
+    }
+
 }
