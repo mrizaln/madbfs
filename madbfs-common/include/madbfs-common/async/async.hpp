@@ -49,6 +49,8 @@ namespace madbfs::async
     using Executor  = Context::executor_type;
     using WorkGuard = asio::executor_work_guard<Executor>;
 
+    using Timer = Token::as_default_on_t<asio::steady_timer>;
+
     template <typename Exec, typename Awaited, typename Completion>
     auto spawn(Exec&& ex, Awaited&& func, Completion&& completion)
     {
