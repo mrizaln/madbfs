@@ -1,7 +1,7 @@
 #pragma once
 
+#include "madbfs/connection/connection.hpp"
 #include "madbfs/data/cache.hpp"
-#include "madbfs/data/connection.hpp"
 #include "madbfs/data/stat.hpp"
 #include "madbfs/path/path.hpp"
 
@@ -198,10 +198,10 @@ namespace madbfs::tree
     public:
         struct Context
         {
-            data::Connection& connection;
-            data::Cache&      cache;
-            std::atomic<u64>& fd_counter;
-            const path::Path& path;    // path for connection
+            connection::Connection& connection;
+            data::Cache&            cache;
+            std::atomic<u64>&       fd_counter;
+            const path::Path&       path;    // path for connection
         };
 
         Node(Str name, Node* parent, data::Stat stat, File value)

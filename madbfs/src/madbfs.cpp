@@ -2,7 +2,7 @@
 
 #include "madbfs-common/util/overload.hpp"
 #include "madbfs/args.hpp"
-#include "madbfs/data/adb_connection.hpp"
+#include "madbfs/connection/adb_connection.hpp"
 #include "madbfs/data/ipc.hpp"
 #include "madbfs/log.hpp"
 
@@ -95,7 +95,7 @@ namespace madbfs
 {
     Madbfs::Madbfs(usize page_size, usize max_pages)
         : m_work_guard{ m_async_ctx.get_executor() }
-        , m_connection{ std::make_unique<data::AdbConnection>() }
+        , m_connection{ std::make_unique<connection::AdbConnection>() }
         , m_cache{ page_size, max_pages }
         , m_tree{ *m_connection, m_cache }
     {

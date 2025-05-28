@@ -1,4 +1,4 @@
-#include "madbfs/data/connection.hpp"
+#include "madbfs/connection/connection.hpp"
 
 #include "madbfs-common/util/split.hpp"
 #include "madbfs/log.hpp"
@@ -25,29 +25,32 @@ namespace
         return {};
     }
 
-    inline madbfs::Errc to_errc(madbfs::data::AdbError err)
+    inline madbfs::Errc to_errc(madbfs::connection::AdbError err)
     {
+        using Err = madbfs::connection::AdbError;
         switch (err) {
-        case madbfs::data::AdbError::Unknown: return madbfs::Errc::io_error;
-        case madbfs::data::AdbError::NoDev: return madbfs::Errc::no_such_device;
-        case madbfs::data::AdbError::PermDenied: return madbfs::Errc::permission_denied;
-        case madbfs::data::AdbError::NoSuchFileOrDir: return madbfs::Errc::no_such_file_or_directory;
-        case madbfs::data::AdbError::NotADir: return madbfs::Errc::not_a_directory;
-        case madbfs::data::AdbError::Inaccessible: return madbfs::Errc::operation_not_supported;
-        case madbfs::data::AdbError::ReadOnly: return madbfs::Errc::read_only_file_system;
-        case madbfs::data::AdbError::TryAgain: return madbfs::Errc::resource_unavailable_try_again;
+        case Err::Unknown: return madbfs::Errc::io_error;
+        case Err::NoDev: return madbfs::Errc::no_such_device;
+        case Err::PermDenied: return madbfs::Errc::permission_denied;
+        case Err::NoSuchFileOrDir: return madbfs::Errc::no_such_file_or_directory;
+        case Err::NotADir: return madbfs::Errc::not_a_directory;
+        case Err::Inaccessible: return madbfs::Errc::operation_not_supported;
+        case Err::ReadOnly: return madbfs::Errc::read_only_file_system;
+        case Err::TryAgain: return madbfs::Errc::resource_unavailable_try_again;
         default: std::terminate();
         }
     }
 
-    inline madbfs::data::AdbError parse_stderr(madbfs::Str str)
+    inline madbfs::connection::AdbError parse_stderr(madbfs::Str str)
     {
+        using Err = madbfs::connection::AdbError;
+
         auto splitter = madbfs::util::StringSplitter{ str, '\n' };
         while (auto line = splitter.next()) {
             if (*line == no_device or *line == device_offline) {
-                return madbfs::data::AdbError::NoDev;
+                return Err::NoDev;
             } else if (*line == get_no_dev_serial()) {
-                return madbfs::data::AdbError::TryAgain;
+                return Err::TryAgain;
             }
 
             auto rev       = madbfs::String{ line->rbegin(), line->rend() };
@@ -60,16 +63,16 @@ namespace
             auto eq = [&](auto rhs) { return madbfs::sr::equal(*err, rhs | madbfs::sv::reverse); };
 
             // clang-format off
-            if      (eq(permission_denied))   return madbfs::data::AdbError::PermDenied;
-            else if (eq(no_such_file_or_dir)) return madbfs::data::AdbError::NoSuchFileOrDir;
-            else if (eq(not_a_directory))     return madbfs::data::AdbError::NotADir;
-            else if (eq(inaccessible))        return madbfs::data::AdbError::Inaccessible;
-            else if (eq(read_only))           return madbfs::data::AdbError::ReadOnly;
-            else                              return madbfs::data::AdbError::Unknown;
+            if      (eq(permission_denied))   return Err::PermDenied;
+            else if (eq(no_such_file_or_dir)) return Err::NoSuchFileOrDir;
+            else if (eq(not_a_directory))     return Err::NotADir;
+            else if (eq(inaccessible))        return Err::Inaccessible;
+            else if (eq(read_only))           return Err::ReadOnly;
+            else                              return Err::Unknown;
             // clang-format on
         }
 
-        return madbfs::data::AdbError::Unknown;
+        return Err::Unknown;
     }
 
     inline madbfs::Await<boost::system::error_code> drain_pipe(
@@ -103,7 +106,7 @@ namespace
     }
 }
 
-namespace madbfs::data
+namespace madbfs::connection
 {
     using namespace std::string_view_literals;
 

@@ -150,13 +150,13 @@ String diff_str(Str str1, Str str2)
 namespace mock
 {
     using namespace madbfs;
-    using namespace madbfs::data;
+    using namespace madbfs::connection;
 
     class DummyConnection final : public Connection
     {
     public:
         AExpect<Gen<ParsedStat>> statdir(path::Path) override { co_return madbfs::Unexpect{ {} }; }
-        AExpect<Stat>            stat(path::Path) override { co_return Stat{}; }
+        AExpect<data::Stat>      stat(path::Path) override { co_return data::Stat{}; }
         AExpect<path::PathBuf>   readlink(path::Path path) override { co_return path.into_buf(); };
 
         // directory operations

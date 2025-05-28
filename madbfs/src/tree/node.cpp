@@ -1,7 +1,6 @@
 #include "madbfs/tree/node.hpp"
 
 #include "madbfs-common/util/overload.hpp"
-#include "madbfs/data/connection.hpp"
 #include "madbfs/log.hpp"
 
 namespace madbfs::tree

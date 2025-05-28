@@ -1,8 +1,8 @@
 #pragma once
 
-#include "madbfs/data/connection.hpp"
+#include "madbfs/connection/connection.hpp"
 
-namespace madbfs::data
+namespace madbfs::connection
 {
     class AdbConnection final : public Connection
     {
@@ -28,7 +28,7 @@ namespace madbfs::data
          *
          * @return The stat of the file or directory.
          */
-        AExpect<Stat> stat(path::Path path) override;
+        AExpect<data::Stat> stat(path::Path path) override;
 
         /**
          * @brief Get the real file pointed by a symlink.

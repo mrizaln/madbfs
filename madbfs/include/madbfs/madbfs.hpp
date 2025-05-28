@@ -1,6 +1,6 @@
 #pragma once
 
-#include "madbfs/data/connection.hpp"
+#include "madbfs/connection/connection.hpp"
 #include "madbfs/data/ipc.hpp"
 #include "madbfs/tree/file_tree.hpp"
 
@@ -37,10 +37,10 @@ namespace madbfs
         async::WorkGuard m_work_guard;    // to prevent `io_context` from returning immediately
         std::jthread     m_work_thread;
 
-        Uniq<data::Connection> m_connection;
-        data::Cache            m_cache;
-        tree::FileTree         m_tree;
-        Uniq<data::Ipc>        m_ipc;
+        Uniq<connection::Connection> m_connection;
+        data::Cache                  m_cache;
+        tree::FileTree               m_tree;
+        Uniq<data::Ipc>              m_ipc;
     };
 
     void* init(fuse_conn_info*, fuse_config*);

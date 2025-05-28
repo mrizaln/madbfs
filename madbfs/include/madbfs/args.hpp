@@ -1,6 +1,6 @@
 #pragma once
 
-#include "data/connection.hpp"
+#include "madbfs/connection/connection.hpp"
 
 #define FUSE_USE_VERSION 31
 #include <fuse3/fuse.h>
@@ -104,26 +104,26 @@ namespace madbfs::args
         // clang-format on
     }
 
-    inline Await<data::DeviceStatus> check_serial(Str serial)
+    inline Await<connection::DeviceStatus> check_serial(Str serial)
     {
-        if (auto maybe_devices = co_await data::list_devices(); maybe_devices.has_value()) {
-            auto found = sr::find(*maybe_devices, serial, &data::Device::serial);
+        if (auto maybe_devices = co_await connection::list_devices(); maybe_devices.has_value()) {
+            auto found = sr::find(*maybe_devices, serial, &connection::Device::serial);
             if (found != maybe_devices->end()) {
                 co_return found->status;
             }
         }
-        co_return data::DeviceStatus::Unknown;
+        co_return connection::DeviceStatus::Unknown;
     }
 
     inline Await<String> get_serial()
     {
-        auto maybe_devices = co_await data::list_devices();
+        auto maybe_devices = co_await connection::list_devices();
         if (not maybe_devices.has_value()) {
             co_return "";
         }
-        auto devices = *maybe_devices                                                                 //
-                     | sv::filter([](auto&& d) { return d.status == data::DeviceStatus::Device; })    //
-                     | sr::to<Vec<data::Device>>();
+        auto devices = *maybe_devices
+                     | sv::filter([](auto&& d) { return d.status == connection::DeviceStatus::Device; })
+                     | sr::to<Vec<connection::Device>>();
 
         if (devices.empty()) {
             co_return "";
@@ -167,7 +167,7 @@ namespace madbfs::args
     inline Await<ParseResult> parse(int argc, char** argv)
     {
         fmt::println("[madbfs] checking adb availability...");
-        if (auto status = co_await data::start_connection(); not status.has_value()) {
+        if (auto status = co_await connection::start_connection(); not status.has_value()) {
             const auto msg = std::make_error_code(status.error()).message();
             fmt::println(stderr, "\nerror: failed to start adb server [{}].", msg);
             fmt::println(stderr, "\nnote: make sure adb is installed and in PATH.");
@@ -231,7 +231,7 @@ namespace madbfs::args
                 co_return ParseResult{ 1 };
             }
             madbfs_opt.serial = ::strdup(serial.c_str());
-        } else if (auto r = co_await check_serial(madbfs_opt.serial); r != data::DeviceStatus::Device) {
+        } else if (auto r = co_await check_serial(madbfs_opt.serial); r != connection::DeviceStatus::Device) {
             fmt::println(stderr, "error: serial '{} 'is not valid ({})", madbfs_opt.serial, to_string(r));
             ::fuse_opt_free_args(&args);
             co_return ParseResult{ 1 };

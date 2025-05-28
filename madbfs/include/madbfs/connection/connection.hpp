@@ -10,20 +10,19 @@ namespace madbfs::path
     class PathBuf;
 }
 
-namespace madbfs::data
+namespace madbfs::connection
 {
     struct ParsedStat
     {
-        Stat stat;
-        Str  path;
+        data::Stat stat;
+        Str        path;
     };
 
-    // NOTE: I made this interface to make Node and FileTree testable
     class Connection
     {
     public:
         virtual AExpect<Gen<ParsedStat>> statdir(path::Path path)  = 0;
-        virtual AExpect<Stat>            stat(path::Path path)     = 0;
+        virtual AExpect<data::Stat>      stat(path::Path path)     = 0;
         virtual AExpect<path::PathBuf>   readlink(path::Path path) = 0;
 
         // directory operations

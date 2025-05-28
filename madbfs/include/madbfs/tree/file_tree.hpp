@@ -1,6 +1,6 @@
 #pragma once
 
-#include "madbfs/data/connection.hpp"
+#include "madbfs/connection/connection.hpp"
 #include "madbfs/path/path.hpp"
 #include "madbfs/tree/node.hpp"
 
@@ -19,7 +19,7 @@ namespace madbfs::tree
     public:
         using Filler = std::function<void(const char* name)>;
 
-        FileTree(data::Connection& connection, data::Cache& cache);
+        FileTree(connection::Connection& connection, data::Cache& cache);
         ~FileTree();
 
         FileTree(Node&& root)            = delete;
@@ -86,10 +86,10 @@ namespace madbfs::tree
             };
         }
 
-        Node              m_root;
-        data::Connection& m_connection;
-        data::Cache&      m_cache;
-        std::atomic<u64>  m_fd_counter       = 0;
-        bool              m_root_initialized = false;
+        Node                    m_root;
+        connection::Connection& m_connection;
+        data::Cache&            m_cache;
+        std::atomic<u64>        m_fd_counter       = 0;
+        bool                    m_root_initialized = false;
     };
 }

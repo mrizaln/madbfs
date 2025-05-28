@@ -1,4 +1,4 @@
-#include "madbfs/data/adb_connection.hpp"
+#include "madbfs/connection/adb_connection.hpp"
 
 #include "madbfs-common/util/split.hpp"
 #include "madbfs/log.hpp"
@@ -37,17 +37,17 @@ namespace
     /**
      * @brief Parse the output of `stat -c '%f %h %s %u %g %X %Y %Z %n' <path>`
      */
-    madbfs::Opt<madbfs::data::ParsedStat> parse_file_stat(madbfs::Str str)
+    madbfs::Opt<madbfs::connection::ParsedStat> parse_file_stat(madbfs::Str str)
     {
         return madbfs::util::split_n<8>(str, ' ').transform([](madbfs::util::SplitResult<8>&& res) {
             auto [mode_hex, hardlinks, size, uid, gid, atime, mtime, ctime] = res.result;
-            return madbfs::data::ParsedStat{
+            return madbfs::connection::ParsedStat{
                 .stat = madbfs::data::Stat{
                     .links = parse_fundamental<nlink_t>(hardlinks, 10).value_or(0),
                     .size  = parse_fundamental<off_t>(size, 10).value_or(0),
-                    .mtime = parse_fundamental<time_t>(mtime, 10).value_or(0),
-                    .atime = parse_fundamental<time_t>(atime, 10).value_or(0),
-                    .ctime = parse_fundamental<time_t>(ctime, 10).value_or(0),
+                    .mtime = { parse_fundamental<time_t>(mtime, 10).value_or(0), 0 },
+                    .atime = { parse_fundamental<time_t>(atime, 10).value_or(0), 0 },
+                    .ctime = { parse_fundamental<time_t>(ctime, 10).value_or(0), 0 },
                     .mode  = parse_fundamental<mode_t>(mode_hex, 16).value_or(0),
                     .uid   = parse_fundamental<uid_t>(uid, 10).value_or(0),
                     .gid   = parse_fundamental<uid_t>(gid, 10).value_or(0),
@@ -97,7 +97,7 @@ namespace
     }
 }
 
-namespace madbfs::data
+namespace madbfs::connection
 {
     using namespace std::string_view_literals;
 
@@ -131,7 +131,7 @@ namespace madbfs::data
         co_return generator(std::move(*out));
     }
 
-    AExpect<Stat> AdbConnection::stat(path::Path path)
+    AExpect<data::Stat> AdbConnection::stat(path::Path path)
     {
         const auto qpath = quoted(path);
         const auto cmd = Array{ "shell"sv, "stat"sv, "-c"sv, "'%f %h %s %u %g %X %Y %Z %n'"sv, Str{ qpath } };
