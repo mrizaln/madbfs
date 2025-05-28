@@ -163,14 +163,18 @@ namespace madbfs::tree
             case S_IFREG: built = base->build(name, stat, RegularFile{}); break;
             case S_IFDIR: built = base->build(name, stat, Directory{}); break;
             case S_IFLNK: {
-                auto target     = path.extend_copy(name).value();
-                auto may_target = co_await m_connection.readlink(target.as_path());
-                if (not may_stats) {
-                    co_return Unexpect{ may_target.error() };
+                auto target = path.extend_copy(name);
+                if (not target) {
+                    log_w({ "{}: failed to extend {:?} with {:?}" }, __func__, path.fullpath(), name);
+                } else {
+                    auto may_target = co_await m_connection.readlink(target->as_path());
+                    if (not may_stats) {
+                        co_return Unexpect{ may_target.error() };
+                    }
+                    built = (co_await traverse_or_build(may_target->as_path())).and_then([&](Node& node) {
+                        return base->build(name, stat, Link{ &node });
+                    });
                 }
-                built = (co_await traverse_or_build(may_target->as_path())).and_then([&](Node& node) {
-                    return base->build(name, stat, Link{ &node });
-                });
             } break;
             default: built = base->build(name, stat, Other{}); break;
             }
