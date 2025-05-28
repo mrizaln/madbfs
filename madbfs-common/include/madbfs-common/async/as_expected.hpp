@@ -4,13 +4,23 @@
 /// inspiration:
 /// https://gist.github.com/cstratopoulos/901b5cdd41d07c6ce6d83798b09ecf9b/863c1dbf3b063a5ff9ff2bdd834242ead556e74e
 
-#include <boost/asio.hpp>
-#include <boost/asio/detail/handler_alloc_helpers.hpp>
+#ifndef MADBFS_NON_BOOST_ASIO
+#    define MADBFS_NON_BOOST_ASIO 0
+#endif
+
+#if MADBFS_NON_BOOST_ASIO
+#    include <asio.hpp>
+#    include <asio/detail/handler_cont_helpers.hpp>
+#    include <system_error>
+#else
+#    include <boost/asio.hpp>
+#    include <boost/asio/detail/handler_cont_helpers.hpp>
+#    include <boost/system/error_code.hpp>
+#endif
 
 #include <concepts>
 #include <expected>
 #include <type_traits>
-#include <utility>
 
 namespace madbfs::async
 {
@@ -31,171 +41,214 @@ namespace madbfs::async
             DefaultConstructorTag = DefaultConstructorTag{},
             CompletionToken token = CompletionToken{}    //
         )
-            : m_token(std::move(token))
+            : token_{ static_cast<CompletionToken&&>(token) }
         {
         }
 
         // constructor
         template <typename T>
         constexpr explicit AsExpected(T&& completion_token)
-            : m_token(std::forward<T>(completion_token))
+            : token_{ static_cast<T&&>(completion_token) }
         {
         }
 
-        // adapts an executor to add the as_expected_t completion token as the default.
+        // adapts an executor to add the AsExpected completion token as the default.
         template <typename InnerExecutor>
         struct ExecutorWithDefault : InnerExecutor
         {
-            // NOTE: integration with Asio; keep don't change the name
+            // NOTE: integration with Asio; don't change the name
             using default_completion_token_type = AsExpected;
 
             // Construct the adapted executor from the inner executor type.
             template <typename InnerExecutor1>
-                requires (!std::same_as<InnerExecutor1, ExecutorWithDefault> && std::convertible_to<InnerExecutor1, InnerExecutor>)
-            ExecutorWithDefault(InnerExecutor1&& ex) noexcept
-                : InnerExecutor(std::forward<InnerExecutor1>(ex))
+                requires (not std::same_as<InnerExecutor1, ExecutorWithDefault> //
+                        and std::convertible_to<InnerExecutor1, InnerExecutor>)
+            ExecutorWithDefault(const InnerExecutor1& ex) noexcept
+                : InnerExecutor{ ex }
             {
             }
         };
 
-        // Type alias to adapt an I/O object to use as_expected_t as its default completion token type.
+        // Type alias to adapt an I/O object to use AsExpected as its default completion token type.
         // NOTE: integration with Asio. you can change the name, but it would be better if not
         template <typename T>
-        using as_default_on_t
-            = T::template rebind_executor<ExecutorWithDefault<typename T::executor_type>>::other;
+        using as_default_on_t =
+            typename T::template rebind_executor<ExecutorWithDefault<typename T::executor_type>>::other;
 
-        // function helper to adapt an I/O object to use as_expected_t as its default completion token type.
+        // function helper to adapt an I/O object to use AsExpected as its default completion token type.
         // NOTE: integration with Asio. you can change the name, but it would be better if not
         template <typename T>
-        static std::decay_t<T>::template rebind_executor<
-            ExecutorWithDefault<typename std::decay_t<T>::executor_type>>::other
-        as_default_on(T&& object)
+        static as_default_on_t<std::decay_t<T>> as_default_on(T&& object)
         {
-            return std::decay_t<T>::template rebind_executor<
-                ExecutorWithDefault<typename std::decay_t<T>::executor_type>>::other(std::forward<T>(object));
+            return as_default_on_t<std::decay_t<T>>{ static_cast<T&&>(object) };
         }
-        CompletionToken m_token;
+
+        CompletionToken token_;
     };
 
-    namespace detail
+    // Adapt a completion_token to specify that the completion handler
+    // arguments should be combined into a single expected argument.
+    template <typename CompletionToken>
+    [[nodiscard]] inline constexpr AsExpected<std::decay_t<CompletionToken>> as_expected(
+        CompletionToken&& completion_token
+    )
     {
-        template <typename T, typename... Ts>
-        concept AnyOf = (std::same_as<T, Ts> || ...);
+        return AsExpected<std::decay_t<CompletionToken>>{ static_cast<CompletionToken&&>(completion_token) };
+    }
+}
 
-        template <typename T>
-        concept Error
-            = AnyOf<T, boost::system::error_code, const boost::system::error_code&, std::exception_ptr>;
-
-        // Class to adapt as_expected_t as a completion handler
-        template <typename Handler>
-        struct ExpectedHandler
-        {
-            template <Error E>
-            void operator()(E e)
-            {
-                using Result = std::expected<void, std::remove_cvref_t<E>>;
-
-                if (e) {
-                    m_handler(Result{ std::unexpected(e) });
-                } else {
-                    m_handler(Result{});
-                }
-            }
-
-            template <typename T, Error E>
-            void operator()(E e, T t)
-            {
-                using Result = std::expected<T, std::remove_cvref_t<E>>;
-
-                if (e) {
-                    m_handler(Result{ std::unexpected(e) });
-                } else {
-                    m_handler(Result{ std::move(t) });
-                }
-            }
-
-            Handler m_handler;
-        };
-
-        template <typename Signature>
-        struct ExpectedSignatureTrait;
-
-        template <Error E>
-        struct ExpectedSignatureTrait<void(E)>
-        {
-            using type = void(std::expected<void, E>);
-        };
-
-        template <typename T, Error E>
-        struct ExpectedSignatureTrait<void(E, T)>
-        {
-            using type = void(std::expected<T, E>);
-        };
-
-        template <typename Signature>
-        using ExpectedSignatureTrait_t = ExpectedSignatureTrait<Signature>::type;
-
-    }    // namespace detail
-
-}    // namespace async
-
-// NOTE: any partial specialization here are for integration with Asio, don't change the name of it. some
-// typedef also for integration and have a fixed name
-namespace boost::asio
+namespace madbfs::async::detail
 {
+    template <typename T, typename... Ts>
+    concept AnyOf = (std::same_as<T, Ts> || ...);
 
-    template <typename T>
-    using ExpectedHandler = madbfs::async::detail::ExpectedHandler<T>;
+#if MADBFS_NON_BOOST_ASIO
+    using ErrorCode = std::error_code;
+#else
+    using ErrorCode = boost::system::error_code;
+#endif
 
-    template <typename CompletionToken, typename Signature>
-    class async_result<madbfs::async::AsExpected<CompletionToken>, Signature>
+    // Class to adapt AsExpected as a completion handler
+    template <typename Handler>
+    struct AsExpectedHandler
     {
-    private:
-        using ExpectedSignature = madbfs::async::detail::ExpectedSignatureTrait_t<Signature>;
-        using ReturnType        = async_result<CompletionToken, ExpectedSignature>::return_type;
+        // NOTE: integration with ASIO, don't change the name
+        using result_type = void;
 
-    public:
-        template <typename Initiation, typename... Args>
-        static ReturnType initiate(
-            Initiation&&                                 initiation,
-            madbfs::async::AsExpected<CompletionToken>&& token,
-            Args&&... args
-        )
+        template <typename Error>
+            requires AnyOf<std::decay_t<Error>, ErrorCode, std::exception_ptr>
+        void operator()(Error e)
         {
-            return async_initiate<CompletionToken, ExpectedSignature>(
-                [init = std::forward<Initiation>(initiation)]<typename Handler, typename... CArgs>(
-                    Handler&& handler, CArgs&&... callArgs    //
-                ) mutable {
-                    std::move(init)(
-                        ExpectedHandler<Handler>{ std::forward<Handler>(handler) },
-                        std::forward<CArgs>(callArgs)...    //
-                    );
-                },
-                token.m_token,
-                std::forward<Args>(args)...
+            using Expect = std::expected<void, ErrorCode>;
+            if (e) {
+                static_cast<Handler&&>(handler_)(std::unexpected{ e });
+            } else {
+                static_cast<Handler&&>(handler_)(Expect{});
+            }
+        }
+
+        template <typename T, typename Error>
+            requires AnyOf<std::decay_t<Error>, ErrorCode, std::exception_ptr>
+        void operator()(Error e, T&& t)
+        {
+            using Expect = std::expected<std::decay_t<T>, ErrorCode>;
+            if (e) {
+                static_cast<Handler&&>(handler_)(std::unexpected{ e });
+            } else {
+                static_cast<Handler&&>(handler_)(Expect{ static_cast<T&&>(t) });
+            }
+        }
+
+        Handler handler_;
+    };
+
+    template <typename Signature>
+    struct AsExpectedSignatureTrait;
+
+    template <typename Error>
+        requires AnyOf<std::decay_t<Error>, ErrorCode, std::exception_ptr>
+    struct AsExpectedSignatureTrait<void(Error)>
+    {
+        using type = void(std::expected<void, Error>);
+    };
+
+    template <typename T, typename Error>
+        requires AnyOf<std::decay_t<Error>, ErrorCode, std::exception_ptr>
+    struct AsExpectedSignatureTrait<void(Error, T)>
+    {
+        using type = void(std::expected<std::decay_t<T>, std::decay_t<Error>>);
+    };
+}
+
+// NOTE: any partial specialization here are for integration with Asio, don't change the name of them. some
+// typedef also for integration and have a fixed name
+
+#if MADBFS_NON_BOOST_ASIO
+namespace asio
+#else
+namespace boost::asio
+#endif
+{
+    template <typename Sig>
+    using AsExpectedSignature = madbfs::async::detail::AsExpectedSignatureTrait<Sig>;
+
+    template <typename Handler>
+    using AsExpectedHandler = madbfs::async::detail::AsExpectedHandler<Handler>;
+
+    template <typename Handler>
+    inline bool asio_handler_is_continuation(AsExpectedHandler<Handler>* this_handler)
+    {
+#if MADBFS_NON_BOOST_ASIO
+        return asio_handler_cont_helpers::is_continuation(this_handler->handler_);
+#else
+        return boost_asio_handler_cont_helpers::is_continuation(this_handler->handler_);
+#endif
+    }
+
+    template <typename CompletionToken, typename... Signatures>
+    struct async_result<madbfs::async::AsExpected<CompletionToken>, Signatures...>
+        : async_result<CompletionToken, typename AsExpectedSignature<Signatures>::type...>
+    {
+        template <typename Initiation>
+        struct init_wrapper
+        {
+            init_wrapper(Initiation init)
+                : initiation_{ static_cast<Initiation&&>(init) }
+            {
+            }
+
+            template <typename Handler, typename... Args>
+            void operator()(Handler&& handler, Args&&... args)
+            {
+                static_cast<Initiation&&>(initiation_)(
+                    AsExpectedHandler<std::decay_t<Handler>>(static_cast<Handler&&>(handler)),
+                    static_cast<Args&&>(args)...
+                );
+            }
+
+            Initiation initiation_;
+        };
+
+        template <typename Initiation, typename RawCompletionToken, typename... Args>
+        static auto initiate(Initiation&& initiation, RawCompletionToken&& token, Args&&... args)
+            -> decltype(async_initiate<
+                        conditional_t<
+                            std::is_const_v<remove_reference_t<RawCompletionToken>>,
+                            const CompletionToken,
+                            CompletionToken>,
+                        typename AsExpectedSignature<Signatures>::type...>(
+                init_wrapper<std::decay_t<Initiation>>(static_cast<Initiation&&>(initiation)),
+                token.token_,
+                static_cast<Args&&>(args)...
+            ))
+        {
+            return async_initiate<
+                conditional_t<
+                    is_const<remove_reference_t<RawCompletionToken>>::value,
+                    const CompletionToken,
+                    CompletionToken>,
+                typename AsExpectedSignature<Signatures>::type...>(
+                init_wrapper<decay_t<Initiation>>(static_cast<Initiation&&>(initiation)),
+                token.token_,
+                static_cast<Args&&>(args)...
             );
         }
     };
 
-    template <typename Handler, typename Executor>
-    struct associated_executor<ExpectedHandler<Handler>, Executor>
+    template <template <typename, typename> class Associator, typename Handler, typename DefaultCandidate>
+    struct associator<Associator, AsExpectedHandler<Handler>, DefaultCandidate>
+        : Associator<Handler, DefaultCandidate>
     {
-        using type = associated_executor<Handler, Executor>::type;
-
-        static type get(const ExpectedHandler<Handler>& h, const Executor& ex = Executor()) noexcept
+        static typename Associator<Handler, DefaultCandidate>::type get(const AsExpectedHandler<Handler>& h
+        ) noexcept
         {
-            return associated_executor<Handler, Executor>::get(h.m_handler, ex);
+            return Associator<Handler, DefaultCandidate>::get(h.handler_);
+        }
+
+        static auto get(const AsExpectedHandler<Handler>& h, const DefaultCandidate& c) noexcept
+            -> decltype(Associator<Handler, DefaultCandidate>::get(h.handler_, c))
+        {
+            return Associator<Handler, DefaultCandidate>::get(h.handler_, c);
         }
     };
-
-    template <typename Handler, typename Allocator>
-    struct associated_allocator<ExpectedHandler<Handler>, Allocator>
-    {
-        using type = associated_allocator<Handler, Allocator>::type;
-
-        static type get(const ExpectedHandler<Handler>& h, const Allocator& a = Allocator()) noexcept
-        {
-            return associated_allocator<Handler, Allocator>::get(h.m_handler, a);
-        }
-    };
-}    // namespace asio
+}
