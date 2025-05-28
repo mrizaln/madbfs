@@ -61,7 +61,6 @@ namespace madbfs::rpc
         DirectoryNotEmpty     = ENOTEMPTY,
     };
 
-    // Corresponds to `madbfs::connection::Connection` calls
     namespace req
     {
         // NOTE: server after receiving this request must immediately use `listdir_channel::Sender` and send
@@ -104,11 +103,11 @@ namespace madbfs::rpc
 
     namespace resp
     {
-        // NOTE: empty. client must use `listdir_channel::Receiver` immediately after getting this
-        // response. this is done in order to allow asynchronous stat read for each file while doing
-        // iterating the directory.
+        struct Stat;
+
         struct Listdir
         {
+            Vec<Pair<Str, Stat>> entries;
         };
 
         struct Stat
@@ -182,8 +181,8 @@ namespace madbfs::rpc
         // clang-format on
 
     private:
-        Socket& m_socket;
-        Vec<u8> m_buffer;
+        Socket&  m_socket;
+        Vec<u8>& m_buffer;
     };
 
     class Server
@@ -216,57 +215,9 @@ namespace madbfs::rpc
         AExpect<req::CopyFileRange> recv_req_copy_file_range();
 
     private:
-        Socket& m_socket;
-        Vec<u8> m_buffer;
+        Socket&  m_socket;
+        Vec<u8>& m_buffer;
     };
-
-    namespace listdir_channel
-    {
-        struct Dirent
-        {
-            Str      name;
-            nlink_t  links;
-            off_t    size;
-            timespec mtime;
-            timespec atime;
-            timespec ctime;
-            mode_t   mode;
-            uid_t    uid;
-            gid_t    gid;
-        };
-
-        class Sender
-        {
-        public:
-            Sender(Socket& socket)
-                : m_socket{ socket }
-            {
-            }
-
-            // std::nullopt if stream ends
-            AExpect<void> send_next(Var<Dirent, Status, Unit> dirent);
-
-        private:
-            Socket& m_socket;
-        };
-
-        class Receiver
-        {
-        public:
-            Receiver(Socket& socket, Vec<u8>& buffer)
-                : m_socket{ socket }
-                , m_buffer{ buffer }
-            {
-            }
-
-            // std::nullopt if stream ends
-            AExpect<Var<Dirent, Status, Unit>> recv_next();
-
-        private:
-            Socket&  m_socket;
-            Vec<u8>& m_buffer;
-        };
-    }
 
     static constexpr Str server_ready_string = "SERVER_IS_READY";
 

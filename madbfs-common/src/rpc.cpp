@@ -197,7 +197,48 @@ namespace madbfs::rpc
         TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Listdir));
         TRY_SCOPED(co_await write_path(m_socket, req.path));
         TRY_SCOPED(co_await read_status(m_socket));
-        co_return resp::Listdir{};
+
+        TRY(size, co_await read_int<u64>(m_socket));
+        auto slices = Vec<Pair<Slice, resp::Stat>>{};
+        slices.reserve(*size);
+
+        for (auto _ : sv::iota(0uz, *size)) {
+            TRY(slice, co_await read_bytes(m_socket, m_buffer));
+            TRY(size, co_await read_int<i64>(m_socket));
+            TRY(links, co_await read_int<u64>(m_socket));
+            TRY(mtime_sec, co_await read_int<i64>(m_socket));
+            TRY(mtime_nsec, co_await read_int<i64>(m_socket));
+            TRY(atime_sec, co_await read_int<i64>(m_socket));
+            TRY(atime_nsec, co_await read_int<i64>(m_socket));
+            TRY(ctime_sec, co_await read_int<i64>(m_socket));
+            TRY(ctime_nsec, co_await read_int<i64>(m_socket));
+            TRY(mode, co_await read_int<u32>(m_socket));
+            TRY(uid, co_await read_int<u32>(m_socket));
+            TRY(gid, co_await read_int<u32>(m_socket));
+
+            slices.emplace_back(
+                *slice,
+                resp::Stat{
+                    .size  = *size,
+                    .links = static_cast<nlink_t>(*links),
+                    .mtime = { .tv_sec = *mtime_sec, .tv_nsec = *mtime_nsec },
+                    .atime = { .tv_sec = *atime_sec, .tv_nsec = *atime_nsec },
+                    .ctime = { .tv_sec = *ctime_sec, .tv_nsec = *ctime_nsec },
+                    .mode  = *mode,
+                    .uid   = *uid,
+                    .gid   = *gid,
+                }
+            );
+        }
+
+        auto entries = Vec<Pair<Str, resp::Stat>>{};
+        entries.reserve(*size);
+
+        for (auto&& [slice, stat] : std::move(slices)) {
+            entries.emplace_back(slice_as_str(m_buffer, slice), std::move(stat));
+        }
+
+        co_return resp::Listdir{ .entries = std::move(entries) };
     }
 
     AExpect<resp::Stat> Client::send_req_stat(req::Stat req)
@@ -467,8 +508,29 @@ namespace madbfs::rpc
 
     // server send response
     // --------------------
+    AExpect<void> write_resp_listdir(Socket& sock, resp::Listdir&& resp)
+    {
+        TRY_SCOPED(co_await write_int<u64>(sock, resp.entries.size()));
 
-    AExpect<void> write_resp_stat(Socket& sock, const resp::Stat& resp)
+        for (const auto& [name, stat] : resp.entries) {
+            TRY_SCOPED(co_await write_path(sock, name));
+            TRY_SCOPED(co_await write_int<i64>(sock, stat.size));
+            TRY_SCOPED(co_await write_int<u64>(sock, stat.links));
+            TRY_SCOPED(co_await write_int<i64>(sock, stat.mtime.tv_sec));
+            TRY_SCOPED(co_await write_int<i64>(sock, stat.mtime.tv_nsec));
+            TRY_SCOPED(co_await write_int<i64>(sock, stat.atime.tv_sec));
+            TRY_SCOPED(co_await write_int<i64>(sock, stat.atime.tv_nsec));
+            TRY_SCOPED(co_await write_int<i64>(sock, stat.ctime.tv_sec));
+            TRY_SCOPED(co_await write_int<i64>(sock, stat.ctime.tv_nsec));
+            TRY_SCOPED(co_await write_int<u32>(sock, stat.mode));
+            TRY_SCOPED(co_await write_int<u32>(sock, stat.uid));
+            TRY_SCOPED(co_await write_int<u32>(sock, stat.gid));
+        }
+
+        co_return Expect<void>{};
+    }
+
+    AExpect<void> write_resp_stat(Socket& sock, resp::Stat&& resp)
     {
         TRY_SCOPED(co_await write_int<i64>(sock, resp.size));
         TRY_SCOPED(co_await write_int<u64>(sock, resp.links));
@@ -483,22 +545,22 @@ namespace madbfs::rpc
         co_return co_await write_int<u32>(sock, resp.gid);
     }
 
-    AExpect<void> write_resp_readlink(Socket& sock, const resp::Readlink& resp)
+    AExpect<void> write_resp_readlink(Socket& sock, resp::Readlink&& resp)
     {
         return write_path(sock, resp.target);
     }
 
-    AExpect<void> write_resp_read(Socket& sock, const resp::Read& resp)
+    AExpect<void> write_resp_read(Socket& sock, resp::Read&& resp)
     {
         return write_bytes(sock, resp.read);
     }
 
-    AExpect<void> write_resp_write(Socket& sock, const resp::Write& resp)
+    AExpect<void> write_resp_write(Socket& sock, resp::Write&& resp)
     {
         return write_int<u64>(sock, resp.size);
     }
 
-    AExpect<void> write_resp_copy_file_range(Socket& sock, const resp::CopyFileRange& resp)
+    AExpect<void> write_resp_copy_file_range(Socket& sock, resp::CopyFileRange&& resp)
     {
         return write_int<u64>(sock, resp.size);
     }
@@ -527,96 +589,23 @@ namespace madbfs::rpc
 
         auto overload = util::Overload{
             // clang-format off
-            [&](const resp::Listdir&           ) { return empty_response();                           },
-            [&](const resp::Stat&          resp) { return write_resp_stat           (m_socket, resp); },
-            [&](const resp::Readlink&      resp) { return write_resp_readlink       (m_socket, resp); },
-            [&](const resp::Mknod&             ) { return empty_response();                           },
-            [&](const resp::Mkdir&             ) { return empty_response();                           },
-            [&](const resp::Unlink&            ) { return empty_response();                           },
-            [&](const resp::Rmdir&             ) { return empty_response();                           },
-            [&](const resp::Rename&            ) { return empty_response();                           },
-            [&](const resp::Truncate&          ) { return empty_response();                           },
-            [&](const resp::Read&          resp) { return write_resp_read           (m_socket, resp); },
-            [&](const resp::Write&         resp) { return write_resp_write          (m_socket, resp); },
-            [&](const resp::Utimens&           ) { return empty_response();                           },
-            [&](const resp::CopyFileRange& resp) { return write_resp_copy_file_range(m_socket, resp); },
+            [&](resp::Listdir&&       resp) { return write_resp_listdir        (m_socket, std::move(resp)); },
+            [&](resp::Stat&&          resp) { return write_resp_stat           (m_socket, std::move(resp)); },
+            [&](resp::Readlink&&      resp) { return write_resp_readlink       (m_socket, std::move(resp)); },
+            [&](resp::Mknod&&             ) { return empty_response();                                      },
+            [&](resp::Mkdir&&             ) { return empty_response();                                      },
+            [&](resp::Unlink&&            ) { return empty_response();                                      },
+            [&](resp::Rmdir&&             ) { return empty_response();                                      },
+            [&](resp::Rename&&            ) { return empty_response();                                      },
+            [&](resp::Truncate&&          ) { return empty_response();                                      },
+            [&](resp::Read&&          resp) { return write_resp_read           (m_socket, std::move(resp)); },
+            [&](resp::Write&&         resp) { return write_resp_write          (m_socket, std::move(resp)); },
+            [&](resp::Utimens&&           ) { return empty_response();                                      },
+            [&](resp::CopyFileRange&& resp) { return write_resp_copy_file_range(m_socket, std::move(resp)); },
             // clang-format on
         };
 
         co_return co_await std::visit(std::move(overload), std::get<Response>(std::move(response)));
-    }
-}
-
-namespace madbfs::rpc::listdir_channel
-{
-    static constexpr auto end_of_stream   = u8{ 0xff };
-    static constexpr auto stream_continue = u8{ 0x00 };
-
-    AExpect<void> Sender::send_next(Var<Dirent, Status, Unit> dirent)
-    {
-        if (dirent.index() == 2) {
-            TRY_SCOPED(co_await write_int<u8>(m_socket, end_of_stream));
-        }
-        TRY_SCOPED(co_await write_int<u8>(m_socket, stream_continue));
-
-        if (dirent.index() == 1) {
-            co_return co_await write_status(m_socket, std::get<Status>(dirent));
-        }
-
-        auto entry = std::get<Dirent>(dirent);
-        TRY_SCOPED(co_await write_status(m_socket, Status::Success));
-
-        TRY_SCOPED(co_await write_path(m_socket, entry.name));
-        TRY_SCOPED(co_await write_int<u64>(m_socket, entry.links));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, entry.size));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, entry.mtime.tv_sec));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, entry.mtime.tv_nsec));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, entry.atime.tv_sec));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, entry.atime.tv_nsec));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, entry.ctime.tv_sec));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, entry.ctime.tv_nsec));
-        TRY_SCOPED(co_await write_int<u32>(m_socket, entry.mode));
-        TRY_SCOPED(co_await write_int<u32>(m_socket, entry.uid));
-        co_return co_await write_int<u32>(m_socket, entry.gid);
-    }
-
-    AExpect<Var<Dirent, Status, Unit>> Receiver::recv_next()
-    {
-        TRY(stream_status, co_await read_int<u8>(m_socket));
-        if (stream_status != stream_continue) {
-            co_return Unit{};
-        }
-
-        // NOTE: I want to differentiate the status here
-        TRY(status_int, co_await read_int<u8>(m_socket));
-        if (auto status = static_cast<Status>(*status_int); status != Status::Success) {
-            co_return status;
-        }
-
-        TRY(name_slice, co_await read_bytes(m_socket, m_buffer));
-        TRY(links, co_await read_int<u64>(m_socket));
-        TRY(size, co_await read_int<i64>(m_socket));
-        TRY(mtime_sec, co_await read_int<i64>(m_socket));
-        TRY(mtime_nsec, co_await read_int<i64>(m_socket));
-        TRY(atime_sec, co_await read_int<i64>(m_socket));
-        TRY(atime_nsec, co_await read_int<i64>(m_socket));
-        TRY(ctime_sec, co_await read_int<i64>(m_socket));
-        TRY(ctime_nsec, co_await read_int<i64>(m_socket));
-        TRY(mode, co_await read_int<u32>(m_socket));
-        TRY(uid, co_await read_int<u32>(m_socket));
-        TRY(gid, co_await read_int<u32>(m_socket));
-
-        co_return Dirent{
-            .name  = slice_as_str(m_buffer, *name_slice),
-            .links = static_cast<nlink_t>(*links),
-            .size  = *size,
-            .mtime = { .tv_sec = *mtime_sec, .tv_nsec = *mtime_nsec },
-            .atime = { .tv_sec = *atime_sec, .tv_nsec = *atime_nsec },
-            .ctime = { .tv_sec = *ctime_sec, .tv_nsec = *ctime_nsec },
-            .mode  = *mode,
-            .uid   = *uid,
-            .gid   = *gid,
-        };
     }
 }
 
