@@ -167,26 +167,38 @@ namespace madbfs::connection
             if (not dirent) {
                 co_return Unexpect{ dirent.error() };
             }
-            if (not(*dirent).has_value()) {
+
+            if (dirent->index() == 2) {
                 break;
+            } else if (dirent->index() == 1) {
+                log_w({ "{}: failed to stat file entry {:?}: {}" }, __func__, path.fullpath(), stats.size());
+                continue;
             }
 
-            auto slice = Slice{ static_cast<isize>(name_buffer.size()), (*dirent)->name.size() };
-            name_buffer.insert(name_buffer.end(), (*dirent)->name.begin(), (*dirent)->name.end());
+            auto entry = std::get<rpc::listdir_channel::Dirent>(*dirent);
+            if (entry.name == "." or entry.name == "..") {
+                log_w({ "{}: skipping {:?}" }, __func__, entry.name);
+                continue;
+            }
+
+            auto slice = Slice{ static_cast<isize>(name_buffer.size()), entry.name.size() };
+            name_buffer.insert(name_buffer.end(), entry.name.begin(), entry.name.end());
 
             auto stat = data::Stat{
-                .links = (*dirent)->links,
-                .size  = (*dirent)->size,
-                .mtime = (*dirent)->mtime,
-                .atime = (*dirent)->atime,
-                .ctime = (*dirent)->ctime,
-                .mode  = (*dirent)->mode,
-                .uid   = (*dirent)->uid,
-                .gid   = (*dirent)->gid,
+                .links = entry.links,
+                .size  = entry.size,
+                .mtime = entry.mtime,
+                .atime = entry.atime,
+                .ctime = entry.ctime,
+                .mode  = entry.mode,
+                .uid   = entry.uid,
+                .gid   = entry.gid,
             };
 
             stats.emplace_back(std::move(stat), slice);
         }
+
+        log_d({ "{}: name buffer: {:?s}" }, __func__, name_buffer);
 
         auto generator = [](Vec<char> buf, Vec<Pair<data::Stat, Slice>> stats) -> Gen<ParsedStat> {
             for (auto&& [stat, slice] : stats) {
@@ -233,8 +245,9 @@ namespace madbfs::connection
         auto client = rpc::Client{ *socket, buffer };
         auto req    = rpc::req::Readlink{ .path = path.fullpath() };
 
-        co_return (co_await client.send_req_readlink(req)).transform([](rpc::resp::Readlink resp) {
-            return path::create(resp.target).value().into_buf();
+        co_return (co_await client.send_req_readlink(req)).transform([&](rpc::resp::Readlink resp) {
+            auto target_path = path::resolve(path.parent_path(), resp.target);
+            return path::create(target_path).value().into_buf();    // TODO: assume error
         });
     }
 
