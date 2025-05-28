@@ -159,6 +159,12 @@ namespace madbfs
                 };
             }
         }
+
+        template <typename T, typename C>
+        auto proj(T C::* mem)
+        {
+            return [mem]<typename CC>(CC&& c) { return std::forward<CC>(c).*mem; };
+        }
     }
 
     inline namespace literals
