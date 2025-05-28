@@ -17,7 +17,7 @@ namespace madbfs::connection
          * @param port Port the server will be listening on.
          * @return A newly created ServerConnection class.
          */
-        static AExpect<ServerConnection> prepare_and_create(u16 port);
+        static AExpect<Uniq<ServerConnection>> prepare_and_create(u16 port);
 
         ~ServerConnection();
 

@@ -27,7 +27,7 @@ namespace madbfs::connection
 {
     using namespace std::string_view_literals;
 
-    AExpect<ServerConnection> ServerConnection::prepare_and_create(u16 port)
+    AExpect<Uniq<ServerConnection>> ServerConnection::prepare_and_create(u16 port)
     {
         log_d({ "{}: aaaaaaaaaaaaaaaaaaaaaaaa" }, __func__);
         namespace bp = boost::process::v2;
@@ -111,15 +111,23 @@ namespace madbfs::connection
 
         co_await proc.async_wait();
 
-        log_d({ "{}: successfully create ServerConnection" }, __func__);
+        log_d({ "{}: successfully created ServerConnection" }, __func__);
 
-        co_return ServerConnection{ port, std::move(proc), std::move(out), std::move(err) };
+        co_return Uniq<ServerConnection>{ new ServerConnection{
+            port,
+            std::move(proc),
+            std::move(out),
+            std::move(err),
+        } };
     }
 
     ServerConnection::~ServerConnection()
     {
-        if (m_server_proc.running()) {
-            auto ec = error_code{};
+        auto ec      = error_code{};
+        auto running = m_server_proc.running(ec);
+        if (ec) {
+            log_w({ "{}: error terminating server: {}" }, __func__, ec.message());
+        } else if (running) {
             m_server_proc.terminate(ec);
             log_w({ "{}: error terminating server: {}" }, __func__, ec.message());
         }
@@ -136,16 +144,7 @@ namespace madbfs::connection
         auto client = rpc::Client{ *socket, buffer };
         auto req    = rpc::req::Listdir{ .path = path.fullpath() };
 
-        auto proc = co_await client.send_req(req);
-        if (not proc) {
-            co_return Unexpect{ proc.error() };
-        }
-
-        auto resp = co_await client.recv_resp(*proc);
-        if (not resp) {
-            co_return Unexpect{ resp.error() };
-        } else if (not std::holds_alternative<rpc::resp::Listdir>(*resp)) {
-            log_c({ "{}: response mismatch! got {}" }, __func__, resp->index() + 1);
+        if (auto resp = co_await client.send_req_listdir(req); not resp) {
             co_return Unexpect{ resp.error() };
         }
 
@@ -209,30 +208,18 @@ namespace madbfs::connection
         auto client = rpc::Client{ *socket, buffer };
         auto req    = rpc::req::Stat{ .path = path.fullpath() };
 
-        auto proc = co_await client.send_req(req);
-        if (not proc) {
-            co_return Unexpect{ proc.error() };
-        }
-
-        auto resp = co_await client.recv_resp(*proc);
-        if (not resp) {
-            co_return Unexpect{ resp.error() };
-        } else if (not std::holds_alternative<rpc::resp::Stat>(*resp)) {
-            log_c({ "{}: response mismatch! got {}" }, __func__, resp->index() + 1);
-            co_return Unexpect{ resp.error() };
-        }
-
-        auto stat = std::get<rpc::resp::Stat>(*resp);
-        co_return data::Stat{
-            .links = stat.links,
-            .size  = stat.size,
-            .mtime = stat.mtime,
-            .atime = stat.atime,
-            .ctime = stat.ctime,
-            .mode  = stat.mode,
-            .uid   = stat.uid,
-            .gid   = stat.gid,
-        };
+        co_return (co_await client.send_req_stat(req)).transform([](rpc::resp::Stat resp) {
+            return data::Stat{
+                .links = resp.links,
+                .size  = resp.size,
+                .mtime = resp.mtime,
+                .atime = resp.atime,
+                .ctime = resp.ctime,
+                .mode  = resp.mode,
+                .uid   = resp.uid,
+                .gid   = resp.gid,
+            };
+        });
     }
 
     AExpect<path::PathBuf> ServerConnection::readlink(path::Path path)
@@ -246,21 +233,9 @@ namespace madbfs::connection
         auto client = rpc::Client{ *socket, buffer };
         auto req    = rpc::req::Readlink{ .path = path.fullpath() };
 
-        auto proc = co_await client.send_req(req);
-        if (not proc) {
-            co_return Unexpect{ proc.error() };
-        }
-
-        auto resp = co_await client.recv_resp(*proc);
-        if (not resp) {
-            co_return Unexpect{ resp.error() };
-        } else if (not std::holds_alternative<rpc::resp::Readlink>(*resp)) {
-            log_c({ "{}: response mismatch! got {}" }, __func__, resp->index() + 1);
-            co_return Unexpect{ resp.error() };
-        }
-
-        auto target = std::get<rpc::resp::Readlink>(*resp).target;
-        co_return path::create(target).value().into_buf();
+        co_return (co_await client.send_req_readlink(req)).transform([](rpc::resp::Readlink resp) {
+            return path::create(resp.target).value().into_buf();
+        });
     }
 
     AExpect<void> ServerConnection::mknod(path::Path path)
@@ -274,20 +249,7 @@ namespace madbfs::connection
         auto client = rpc::Client{ *socket, buffer };
         auto req    = rpc::req::Mknod{ .path = path.fullpath() };
 
-        auto proc = co_await client.send_req(req);
-        if (not proc) {
-            co_return Unexpect{ proc.error() };
-        }
-
-        auto resp = co_await client.recv_resp(*proc);
-        if (not resp) {
-            co_return Unexpect{ resp.error() };
-        } else if (not std::holds_alternative<rpc::resp::Mknod>(*resp)) {
-            log_c({ "{}: response mismatch! got {}" }, __func__, resp->index() + 1);
-            co_return Unexpect{ resp.error() };
-        }
-
-        co_return Expect<void>{};
+        co_return (co_await client.send_req_mknod(req)).transform(sink_void);
     }
 
     AExpect<void> ServerConnection::mkdir(path::Path path)
@@ -301,20 +263,7 @@ namespace madbfs::connection
         auto client = rpc::Client{ *socket, buffer };
         auto req    = rpc::req::Mkdir{ .path = path.fullpath() };
 
-        auto proc = co_await client.send_req(req);
-        if (not proc) {
-            co_return Unexpect{ proc.error() };
-        }
-
-        auto resp = co_await client.recv_resp(*proc);
-        if (not resp) {
-            co_return Unexpect{ resp.error() };
-        } else if (not std::holds_alternative<rpc::resp::Mkdir>(*resp)) {
-            log_c({ "{}: response mismatch! got {}" }, __func__, resp->index() + 1);
-            co_return Unexpect{ resp.error() };
-        }
-
-        co_return Expect<void>{};
+        co_return (co_await client.send_req_mkdir(req)).transform(sink_void);
     }
 
     AExpect<void> ServerConnection::unlink(path::Path path)
@@ -328,20 +277,7 @@ namespace madbfs::connection
         auto client = rpc::Client{ *socket, buffer };
         auto req    = rpc::req::Unlink{ .path = path.fullpath() };
 
-        auto proc = co_await client.send_req(req);
-        if (not proc) {
-            co_return Unexpect{ proc.error() };
-        }
-
-        auto resp = co_await client.recv_resp(*proc);
-        if (not resp) {
-            co_return Unexpect{ resp.error() };
-        } else if (not std::holds_alternative<rpc::resp::Unlink>(*resp)) {
-            log_c({ "{}: response mismatch! got {}" }, __func__, resp->index() + 1);
-            co_return Unexpect{ resp.error() };
-        }
-
-        co_return Expect<void>{};
+        co_return (co_await client.send_req_unlink(req)).transform(sink_void);
     }
 
     AExpect<void> ServerConnection::rmdir(path::Path path)
@@ -355,20 +291,7 @@ namespace madbfs::connection
         auto client = rpc::Client{ *socket, buffer };
         auto req    = rpc::req::Rmdir{ .path = path.fullpath() };
 
-        auto proc = co_await client.send_req(req);
-        if (not proc) {
-            co_return Unexpect{ proc.error() };
-        }
-
-        auto resp = co_await client.recv_resp(*proc);
-        if (not resp) {
-            co_return Unexpect{ resp.error() };
-        } else if (not std::holds_alternative<rpc::resp::Rmdir>(*resp)) {
-            log_c({ "{}: response mismatch! got {}" }, __func__, resp->index() + 1);
-            co_return Unexpect{ resp.error() };
-        }
-
-        co_return Expect<void>{};
+        co_return (co_await client.send_req_rmdir(req)).transform(sink_void);
     }
 
     AExpect<void> ServerConnection::rename(path::Path from, path::Path to)
@@ -382,20 +305,7 @@ namespace madbfs::connection
         auto client = rpc::Client{ *socket, buffer };
         auto req    = rpc::req::Rename{ .from = from.fullpath(), .to = to.fullpath() };
 
-        auto proc = co_await client.send_req(req);
-        if (not proc) {
-            co_return Unexpect{ proc.error() };
-        }
-
-        auto resp = co_await client.recv_resp(*proc);
-        if (not resp) {
-            co_return Unexpect{ resp.error() };
-        } else if (not std::holds_alternative<rpc::resp::Rename>(*resp)) {
-            log_c({ "{}: response mismatch! got {}" }, __func__, resp->index() + 1);
-            co_return Unexpect{ resp.error() };
-        }
-
-        co_return Expect<void>{};
+        co_return (co_await client.send_req_rename(req)).transform(sink_void);
     }
 
     AExpect<void> ServerConnection::truncate(path::Path path, off_t size)
@@ -409,20 +319,7 @@ namespace madbfs::connection
         auto client = rpc::Client{ *socket, buffer };
         auto req    = rpc::req::Truncate{ .path = path.fullpath(), .size = size };
 
-        auto proc = co_await client.send_req(req);
-        if (not proc) {
-            co_return Unexpect{ proc.error() };
-        }
-
-        auto resp = co_await client.recv_resp(*proc);
-        if (not resp) {
-            co_return Unexpect{ resp.error() };
-        } else if (not std::holds_alternative<rpc::resp::Truncate>(*resp)) {
-            log_c({ "{}: response mismatch! got {}" }, __func__, resp->index() + 1);
-            co_return Unexpect{ resp.error() };
-        }
-
-        co_return Expect<void>{};
+        co_return (co_await client.send_req_truncate(req)).transform(sink_void);
     }
 
     AExpect<usize> ServerConnection::read(path::Path path, Span<char> out, off_t offset)
@@ -436,24 +333,11 @@ namespace madbfs::connection
         auto client = rpc::Client{ *socket, buffer };
         auto req    = rpc::req::Read{ .path = path.fullpath(), .offset = offset, .size = out.size() };
 
-        auto proc = co_await client.send_req(req);
-        if (not proc) {
-            co_return Unexpect{ proc.error() };
-        }
-
-        auto resp = co_await client.recv_resp(*proc);
-        if (not resp) {
-            co_return Unexpect{ resp.error() };
-        } else if (not std::holds_alternative<rpc::resp::Read>(*resp)) {
-            log_c({ "{}: response mismatch! got {}" }, __func__, resp->index() + 1);
-            co_return Unexpect{ resp.error() };
-        }
-
-        auto read = std::get<rpc::resp::Read>(*resp).read;
-        auto size = std::min(read.size(), out.size());
-
-        std::copy_n(read.begin(), size, out.begin());
-        co_return size;
+        co_return (co_await client.send_req_read(req)).transform([&](rpc::resp::Read resp) {
+            auto size = std::min(resp.read.size(), out.size());
+            std::copy_n(resp.read.begin(), size, out.begin());
+            return size;
+        });
     }
 
     AExpect<usize> ServerConnection::write(path::Path path, Span<const char> in, off_t offset)
@@ -469,20 +353,7 @@ namespace madbfs::connection
         auto in_bytes = Span{ reinterpret_cast<const u8*>(in.data()), in.size() };
         auto req      = rpc::req::Write{ .path = path.fullpath(), .offset = offset, .in = in_bytes };
 
-        auto proc = co_await client.send_req(req);
-        if (not proc) {
-            co_return Unexpect{ proc.error() };
-        }
-
-        auto resp = co_await client.recv_resp(*proc);
-        if (not resp) {
-            co_return Unexpect{ resp.error() };
-        } else if (not std::holds_alternative<rpc::resp::Write>(*resp)) {
-            log_c({ "{}: response mismatch! got {}" }, __func__, resp->index() + 1);
-            co_return Unexpect{ resp.error() };
-        }
-
-        co_return std::get<rpc::resp::Write>(*resp).size;
+        co_return (co_await client.send_req_write(req)).transform(proj(&rpc::resp::Write::size));
     }
 
     AExpect<void> ServerConnection::utimens(path::Path path, timespec atime, timespec mtime)
@@ -496,20 +367,7 @@ namespace madbfs::connection
         auto client = rpc::Client{ *socket, buffer };
         auto req    = rpc::req::Utimens{ .path = path.fullpath(), .atime = atime, .mtime = mtime };
 
-        auto proc = co_await client.send_req(req);
-        if (not proc) {
-            co_return Unexpect{ proc.error() };
-        }
-
-        auto resp = co_await client.recv_resp(*proc);
-        if (not resp) {
-            co_return Unexpect{ resp.error() };
-        } else if (not std::holds_alternative<rpc::resp::Utimens>(*resp)) {
-            log_c({ "{}: response mismatch! got {}" }, __func__, resp->index() + 1);
-            co_return Unexpect{ resp.error() };
-        }
-
-        co_return Expect<void>{};
+        co_return (co_await client.send_req_utimens(req)).transform(sink_void);
     }
 
     AExpect<usize> ServerConnection::copy_file_range(
@@ -536,19 +394,7 @@ namespace madbfs::connection
             .size       = size,
         };
 
-        auto proc = co_await client.send_req(req);
-        if (not proc) {
-            co_return Unexpect{ proc.error() };
-        }
-
-        auto resp = co_await client.recv_resp(*proc);
-        if (not resp) {
-            co_return Unexpect{ resp.error() };
-        } else if (not std::holds_alternative<rpc::resp::CopyFileRange>(*resp)) {
-            log_c({ "{}: response mismatch! got {}" }, __func__, resp->index() + 1);
-            co_return Unexpect{ resp.error() };
-        }
-
-        co_return std::get<rpc::resp::CopyFileRange>(*resp).size;
+        auto resp = co_await client.send_req_copy_file_range(req);
+        co_return resp.transform(proj(&rpc::resp::CopyFileRange::size));
     }
 }
