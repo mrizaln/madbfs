@@ -1,3 +1,4 @@
+#include "madbfs-common/rpc.hpp"
 #include "madbfs-server/server.hpp"
 
 #include <fmt/core.h>
@@ -67,6 +68,8 @@ try {
 
     madbfs::async::spawn(context, server.run(), madbfs::async::detached);
     auto thread = std::thread{ [&] { context.run(); } };
+
+    fmt::println(madbfs::rpc::server_ready_string);
 
     g_interrupt.wait(false);
 
