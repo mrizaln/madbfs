@@ -1,5 +1,7 @@
 #include "madbfs/path/path.hpp"
 
+#include "madbfs-common/util/split.hpp"
+
 #include <cassert>
 
 namespace
@@ -131,5 +133,37 @@ namespace madbfs::path
         pathbuf.m_basename_offset = static_cast<usize>(path->filename().begin() - path->parent().begin());
 
         return std::move(pathbuf);
+    }
+
+    madbfs::String resolve(madbfs::path::Path parent, madbfs::Str path)
+    {
+        auto parents = madbfs::Vec<madbfs::Str>{};
+        if (path.front() != '/') {
+            parents = madbfs::util::split(parent.fullpath(), '/');
+        }
+
+        madbfs::util::StringSplitter{ path, '/' }.while_next([&](madbfs::Str str) {
+            if (str == ".") {
+                return;
+            } else if (str == "..") {
+                if (not parents.empty()) {
+                    parents.pop_back();
+                }
+                return;
+            }
+            parents.push_back(str);
+        });
+
+        if (parents.empty()) {
+            return "/";
+        }
+
+        auto resolved = madbfs::String{};
+        for (auto path : parents) {
+            resolved += '/';
+            resolved += path;
+        }
+
+        return resolved;
     }
 }

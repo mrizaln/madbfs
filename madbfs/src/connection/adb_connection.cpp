@@ -57,39 +57,6 @@ namespace
         });
     }
 
-    // resolve relative path
-    madbfs::String resolve_path(madbfs::path::Path parent, madbfs::Str path)
-    {
-        auto parents = madbfs::Vec<madbfs::Str>{};
-        if (path.front() != '/') {
-            parents = madbfs::util::split(parent.fullpath(), '/');
-        }
-
-        madbfs::util::StringSplitter{ path, '/' }.while_next([&](madbfs::Str str) {
-            if (str == ".") {
-                return;
-            } else if (str == "..") {
-                if (not parents.empty()) {
-                    parents.pop_back();
-                }
-                return;
-            }
-            parents.push_back(str);
-        });
-
-        if (parents.empty()) {
-            return "/";
-        }
-
-        auto resolved = madbfs::String{};
-        for (auto path : parents) {
-            resolved += '/';
-            resolved += path;
-        }
-
-        return resolved;
-    }
-
     // NOTE: somehow adb shell needs double escaping
     madbfs::String quoted(madbfs::path::Path path)
     {
@@ -156,8 +123,8 @@ namespace madbfs::connection
         auto res = co_await exec_async("adb", args, "", true);
 
         co_return res.transform([&](String target) {
-            auto target_path = resolve_path(path.parent_path(), util::strip(target));
-            return path::create_buf(std::move(target_path)).value();
+            auto target_path = path::resolve(path.parent_path(), util::strip(target));
+            return path::create_buf(std::move(target_path)).value();    // TODO: assume error
         });
     }
 

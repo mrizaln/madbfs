@@ -198,6 +198,15 @@ namespace madbfs::path
      * @param path_str The path to create from.
      */
     Opt<PathBuf> create_buf(String&& path_str);
+
+    /**
+     * @brief Resolve path relative to parent.
+     *
+     * @param parent Reference path.
+     * @param path Path to be resolved.
+     */
+    madbfs::String resolve(madbfs::path::Path parent, madbfs::Str path);
+
 }
 
 namespace madbfs::path::inline literals
