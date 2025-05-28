@@ -29,6 +29,7 @@ namespace madbfs::rpc
 
     using Socket = async::tcp::Socket;
 
+    // NOTE: if you decided to add/remove one or more entries, do update domain check in peek_req
     enum class Procedure : u8
     {
         Listdir = 1,
@@ -161,8 +162,21 @@ namespace madbfs::rpc
         {
         }
 
-        AExpect<Procedure> send_req(Request request);
-        AExpect<Response>  recv_resp(Procedure procedure);
+        // clang-format off
+        AExpect<resp::Listdir>       send_req_listdir        (req::Listdir       req);
+        AExpect<resp::Stat>          send_req_stat           (req::Stat          req);
+        AExpect<resp::Readlink>      send_req_readlink       (req::Readlink      req);
+        AExpect<resp::Mknod>         send_req_mknod          (req::Mknod         req);
+        AExpect<resp::Mkdir>         send_req_mkdir          (req::Mkdir         req);
+        AExpect<resp::Unlink>        send_req_unlink         (req::Unlink        req);
+        AExpect<resp::Rmdir>         send_req_rmdir          (req::Rmdir         req);
+        AExpect<resp::Rename>        send_req_rename         (req::Rename        req);
+        AExpect<resp::Truncate>      send_req_truncate       (req::Truncate      req);
+        AExpect<resp::Read>          send_req_read           (req::Read          req);
+        AExpect<resp::Write>         send_req_write          (req::Write         req);
+        AExpect<resp::Utimens>       send_req_utimens        (req::Utimens       req);
+        AExpect<resp::CopyFileRange> send_req_copy_file_range(req::CopyFileRange req);
+        // clang-format on
 
     private:
         Socket& m_socket;
@@ -178,8 +192,22 @@ namespace madbfs::rpc
         {
         }
 
-        AExpect<Request> recv_req();
-        AExpect<void>    send_resp(Var<Status, Response> response);
+        AExpect<Procedure> peek_req();
+        AExpect<void>      send_resp(Var<Status, Response> response);
+
+        AExpect<req::Listdir>       recv_req_listdir();
+        AExpect<req::Stat>          recv_req_stat();
+        AExpect<req::Readlink>      recv_req_readlink();
+        AExpect<req::Mknod>         recv_req_mknod();
+        AExpect<req::Mkdir>         recv_req_mkdir();
+        AExpect<req::Unlink>        recv_req_unlink();
+        AExpect<req::Rmdir>         recv_req_rmdir();
+        AExpect<req::Rename>        recv_req_rename();
+        AExpect<req::Truncate>      recv_req_truncate();
+        AExpect<req::Read>          recv_req_read();
+        AExpect<req::Write>         recv_req_write();
+        AExpect<req::Utimens>       recv_req_utimens();
+        AExpect<req::CopyFileRange> recv_req_copy_file_range();
 
     private:
         Socket& m_socket;

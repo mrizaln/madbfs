@@ -3,11 +3,23 @@
 #include "madbfs-common/util/overload.hpp"
 
 // TODO: add log
-#define HANDLE_ERROR(ec, size, want)                                                                         \
-    if (ec) {                                                                                                \
-        co_return madbfs::Unexpect{ madbfs::async::to_generic_err(ec) };                                     \
-    } else if (size != want) {                                                                               \
+#define HANDLE_ERROR(Ec, Size, Want)                                                                         \
+    if (Ec) {                                                                                                \
+        co_return madbfs::Unexpect{ madbfs::async::to_generic_err(Ec) };                                     \
+    } else if (Size != Want) {                                                                               \
         co_return madbfs::Unexpect{ madbfs::Errc::broken_pipe };                                             \
+    }
+
+// NOTE: if only C++ has '?' a la rust... this is the most I can think of for C++
+#define TRY_SCOPED(Stmt)                                                                                     \
+    if (auto res = Stmt; not res) {                                                                          \
+        co_return Unexpect{ res.error() };                                                                   \
+    }
+
+#define TRY(Name, Stmt)                                                                                      \
+    auto Name = Stmt;                                                                                        \
+    if (not Name) {                                                                                          \
+        co_return Unexpect{ Name.error() };                                                                  \
     }
 
 namespace
@@ -80,11 +92,19 @@ namespace
         co_return Expect<void>{};
     }
 
+    AExpect<void> write_procedure(Socket& sock, Procedure procedure)
+    {
+        return write_int<u8>(sock, static_cast<u8>(procedure));
+    }
+
+    AExpect<void> write_status(Socket& sock, Status status)
+    {
+        return write_int<u8>(sock, static_cast<u8>(status));
+    }
+
     AExpect<void> write_bytes(Socket& sock, Span<const u8> bytes)
     {
-        if (auto res = co_await write_int<u64>(sock, bytes.size()); not res) {
-            co_return Unexpect{ res.error() };
-        }
+        TRY_SCOPED(co_await write_int<u64>(sock, bytes.size()));
         auto [ec, size] = co_await madbfs::async::write_exact<u8>(sock, bytes);
         HANDLE_ERROR(ec, size, bytes.size());
         co_return Expect<void>{};
@@ -92,9 +112,7 @@ namespace
 
     AExpect<void> write_path(Socket& sock, Str path)
     {
-        if (auto res = co_await write_int<u64>(sock, path.size()); not res) {
-            co_return Unexpect{ res.error() };
-        }
+        TRY_SCOPED(co_await write_int<u64>(sock, path.size()));
         auto [ec_path, n_path] = co_await madbfs::async::write_exact<char>(sock, path);
         HANDLE_ERROR(ec_path, n_path, path.size());
 
@@ -110,12 +128,40 @@ namespace
         co_return from_net_bytes<I>(buf);
     }
 
+    AExpect<Procedure> read_procedure(Socket& sock)
+    {
+        TRY(byte, co_await read_int<u8>(sock));
+        auto proc = static_cast<Procedure>(*byte);
+
+        switch (proc) {
+        case Procedure::Listdir:
+        case Procedure::Stat:
+        case Procedure::Readlink:
+        case Procedure::Mknod:
+        case Procedure::Mkdir:
+        case Procedure::Unlink:
+        case Procedure::Rmdir:
+        case Procedure::Rename:
+        case Procedure::Truncate:
+        case Procedure::Read:
+        case Procedure::Write:
+        case Procedure::Utimens:
+        case Procedure::CopyFileRange: co_return proc;
+        }
+
+        co_return Unexpect{ Errc::invalid_argument };
+    }
+
+    AExpect<void> read_status(Socket& sock)
+    {
+        TRY(status, co_await read_int<u8>(sock));
+        co_return status == 0 ? Expect<void>{} : Unexpect{ static_cast<Errc>(*status) };
+    }
+
     AExpect<Slice> read_bytes(Socket& sock, Vec<u8>& buf)
     {
-        auto size = co_await read_int<u64>(sock);
-        if (not size) {
-            co_return Unexpect{ size.error() };
-        }
+        TRY(size, co_await read_int<u64>(sock));
+
         auto off = static_cast<isize>(buf.size());
         buf.resize(buf.size() + *size);
         auto out = Span{ buf.begin() + off, *size };
@@ -131,171 +177,32 @@ namespace madbfs::rpc
     // client send request
     // -------------------
 
-    AExpect<void> write_req_listdir(Socket& sock, const req::Listdir& req)
+    AExpect<resp::Listdir> Client::send_req_listdir(req::Listdir req)
     {
-        return write_path(sock, req.path);
+        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Listdir));
+        TRY_SCOPED(co_await write_path(m_socket, req.path));
+        TRY_SCOPED(co_await read_status(m_socket));
+        co_return resp::Listdir{};
     }
 
-    AExpect<void> write_req_stat(Socket& sock, const req::Stat& req)
+    AExpect<resp::Stat> Client::send_req_stat(req::Stat req)
     {
-        return write_path(sock, req.path);
-    }
+        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Stat));
+        TRY_SCOPED(co_await write_path(m_socket, req.path));
+        TRY_SCOPED(co_await read_status(m_socket));
+        TRY(size, co_await read_int<i64>(m_socket));
+        TRY(links, co_await read_int<u64>(m_socket));
+        TRY(mtime_sec, co_await read_int<i64>(m_socket));
+        TRY(mtime_nsec, co_await read_int<i64>(m_socket));
+        TRY(atime_sec, co_await read_int<i64>(m_socket));
+        TRY(atime_nsec, co_await read_int<i64>(m_socket));
+        TRY(ctime_sec, co_await read_int<i64>(m_socket));
+        TRY(ctime_nsec, co_await read_int<i64>(m_socket));
+        TRY(mode, co_await read_int<u32>(m_socket));
+        TRY(uid, co_await read_int<u32>(m_socket));
+        TRY(gid, co_await read_int<u32>(m_socket));
 
-    AExpect<void> write_req_readlink(Socket& sock, const req::Readlink& req)
-    {
-        return write_path(sock, req.path);
-    }
-
-    AExpect<void> write_req_mknod(Socket& sock, const req::Mknod& req)
-    {
-        return write_path(sock, req.path);
-    }
-
-    AExpect<void> write_req_mkdir(Socket& sock, const req::Mkdir& req)
-    {
-        return write_path(sock, req.path);
-    }
-
-    AExpect<void> write_req_unlink(Socket& sock, const req::Unlink& req)
-    {
-        return write_path(sock, req.path);
-    }
-
-    AExpect<void> write_req_rmdir(Socket& sock, const req::Rmdir& req)
-    {
-        return write_path(sock, req.path);
-    }
-
-    AExpect<void> write_req_rename(Socket& sock, const req::Rename& req)
-    {
-        if (auto res = co_await write_path(sock, req.from); not res) {
-            co_return res;
-        }
-        co_return co_await write_path(sock, req.to);
-    }
-
-    AExpect<void> write_req_truncate(Socket& sock, const req::Truncate& req)
-    {
-        if (auto res = co_await write_path(sock, req.path); not res) {
-            co_return res;
-        }
-        co_return co_await write_int<i64>(sock, req.size);
-    }
-
-    AExpect<void> write_req_read(Socket& sock, const req::Read& req)
-    {
-        if (auto res = co_await write_path(sock, req.path); not res) {
-            co_return res;
-        }
-        if (auto res = co_await write_int<i64>(sock, req.offset); not res) {
-            co_return res;
-        }
-        co_return co_await write_int<u64>(sock, req.size);
-    }
-
-    AExpect<void> write_req_write(Socket& sock, const req::Write& req)
-    {
-        if (auto res = co_await write_path(sock, req.path); not res) {
-            co_return res;
-        }
-        if (auto res = co_await write_int<i64>(sock, req.offset); not res) {
-            co_return res;
-        }
-        co_return co_await write_bytes(sock, req.in);
-    }
-
-    AExpect<void> write_req_utimens(Socket& sock, const req::Utimens& req)
-    {
-        if (auto res = co_await write_path(sock, req.path); not res) {
-            co_return res;
-        }
-        if (auto res = co_await write_int<i64>(sock, req.atime.tv_sec); not res) {
-            co_return res;
-        }
-        if (auto res = co_await write_int<i64>(sock, req.atime.tv_nsec); not res) {
-            co_return res;
-        }
-        if (auto res = co_await write_int<i64>(sock, req.mtime.tv_sec); not res) {
-            co_return res;
-        }
-        co_return co_await write_int<i64>(sock, req.mtime.tv_nsec);
-    }
-
-    AExpect<void> write_req_copy_file_range(Socket& sock, const req::CopyFileRange& req)
-    {
-        if (auto res = co_await write_path(sock, req.in_path); not res) {
-            co_return res;
-        }
-        if (auto res = co_await write_int<i64>(sock, req.in_offset); not res) {
-            co_return res;
-        }
-        if (auto res = co_await write_path(sock, req.out_path); not res) {
-            co_return res;
-        }
-        if (auto res = co_await write_int<i64>(sock, req.out_offset); not res) {
-            co_return res;
-        }
-        co_return co_await write_int<u64>(sock, req.size);
-    }
-
-    // -------------------
-
-    // client read response
-    // --------------------
-
-    AExpect<Response> read_resp_listdir(Socket&, Vec<u8>&)
-    {
-        co_return Response{ resp::Listdir{} };
-    }
-
-    AExpect<Response> read_resp_stat(Socket& sock, Vec<u8>& buf)
-    {
-        auto size = co_await read_int<i64>(sock);
-        if (not size) {
-            co_return Unexpect{ size.error() };
-        }
-        auto links = co_await read_int<u64>(sock);
-        if (not links) {
-            co_return Unexpect{ links.error() };
-        }
-        auto mtime_sec = co_await read_int<i64>(sock);
-        if (not mtime_sec) {
-            co_return Unexpect{ mtime_sec.error() };
-        }
-        auto mtime_nsec = co_await read_int<i64>(sock);
-        if (not mtime_nsec) {
-            co_return Unexpect{ mtime_nsec.error() };
-        }
-        auto atime_sec = co_await read_int<i64>(sock);
-        if (not atime_sec) {
-            co_return Unexpect{ atime_sec.error() };
-        }
-        auto atime_nsec = co_await read_int<i64>(sock);
-        if (not atime_nsec) {
-            co_return Unexpect{ atime_nsec.error() };
-        }
-        auto ctime_sec = co_await read_int<i64>(sock);
-        if (not ctime_sec) {
-            co_return Unexpect{ ctime_sec.error() };
-        }
-        auto ctime_nsec = co_await read_int<i64>(sock);
-        if (not ctime_nsec) {
-            co_return Unexpect{ ctime_nsec.error() };
-        }
-        auto mode = co_await read_int<u32>(sock);
-        if (not mode) {
-            co_return Unexpect{ mode.error() };
-        }
-        auto uid = co_await read_int<u32>(sock);
-        if (not uid) {
-            co_return Unexpect{ uid.error() };
-        }
-        auto gid = co_await read_int<u32>(sock);
-        if (not gid) {
-            co_return Unexpect{ gid.error() };
-        }
-
-        co_return Response{ resp::Stat{
+        co_return resp::Stat{
             .size  = *size,
             .links = static_cast<nlink_t>(*links),
             .mtime = { .tv_sec = *mtime_sec, .tv_nsec = *mtime_nsec },
@@ -304,132 +211,113 @@ namespace madbfs::rpc
             .mode  = *mode,
             .uid   = *uid,
             .gid   = *gid,
-        } };
-    }
-
-    AExpect<Response> read_resp_readlink(Socket& sock, Vec<u8>& buf)
-    {
-        co_return (co_await read_bytes(sock, buf)).transform([&](Slice slice) {
-            return Response{ resp::Readlink{ .target = slice_as_str(buf, slice) } };
-        });
-    }
-
-    AExpect<Response> read_resp_mknod(Socket&, Vec<u8>&)
-    {
-        co_return Response{ resp::Mknod{} };
-    }
-
-    AExpect<Response> read_resp_mkdir(Socket&, Vec<u8>&)
-    {
-        co_return Response{ resp::Mkdir{} };
-    }
-
-    AExpect<Response> read_resp_unlink(Socket&, Vec<u8>&)
-    {
-        co_return Response{ resp::Unlink{} };
-    }
-
-    AExpect<Response> read_resp_rmdir(Socket&, Vec<u8>&)
-    {
-        co_return Response{ resp::Rmdir{} };
-    }
-
-    AExpect<Response> read_resp_rename(Socket&, Vec<u8>&)
-    {
-        co_return Response{ resp::Rename{} };
-    }
-
-    AExpect<Response> read_resp_truncate(Socket&, Vec<u8>&)
-    {
-        co_return Response{ resp::Truncate{} };
-    }
-
-    AExpect<Response> read_resp_read(Socket& sock, Vec<u8>& buf)
-    {
-        co_return (co_await read_bytes(sock, buf)).transform([&](Slice slice) {
-            return Response{ resp::Read{ .read = slice_bytes(buf, slice) } };
-        });
-    }
-
-    AExpect<Response> read_resp_write(Socket& sock, Vec<u8>&)
-    {
-        co_return (co_await read_int<u64>(sock)).transform([&](u64 size) {
-            return Response{ resp::Write{ .size = size } };
-        });
-    }
-
-    AExpect<Response> read_resp_utimens(Socket&, Vec<u8>&)
-    {
-        co_return Response{ resp::Utimens{} };
-    }
-
-    AExpect<Response> read_resp_copy_file_range(Socket& sock, Vec<u8>&)
-    {
-        co_return (co_await read_int<u64>(sock)).transform([&](u64 size) {
-            return Response{ resp::CopyFileRange{ .size = size } };
-        });
-    }
-
-    // --------------------
-
-    AExpect<Procedure> Client::send_req(Request request)
-    {
-        // NOTE: using the index() requires the Procedure enum to be listed in the same order as Request
-        auto res = co_await write_int<u8>(m_socket, static_cast<u8>(request.index() + 1));
-        if (not res) {
-            co_return Unexpect{ res.error() };
-        }
-
-        auto overload = util::Overload{
-            // clang-format off
-            [&](const req::Listdir&       req) { return write_req_listdir        (m_socket, req); },
-            [&](const req::Stat&          req) { return write_req_stat           (m_socket, req); },
-            [&](const req::Readlink&      req) { return write_req_readlink       (m_socket, req); },
-            [&](const req::Mknod&         req) { return write_req_mknod          (m_socket, req); },
-            [&](const req::Mkdir&         req) { return write_req_mkdir          (m_socket, req); },
-            [&](const req::Unlink&        req) { return write_req_unlink         (m_socket, req); },
-            [&](const req::Rmdir&         req) { return write_req_rmdir          (m_socket, req); },
-            [&](const req::Rename&        req) { return write_req_rename         (m_socket, req); },
-            [&](const req::Truncate&      req) { return write_req_truncate       (m_socket, req); },
-            [&](const req::Read&          req) { return write_req_read           (m_socket, req); },
-            [&](const req::Write&         req) { return write_req_write          (m_socket, req); },
-            [&](const req::Utimens&       req) { return write_req_utimens        (m_socket, req); },
-            [&](const req::CopyFileRange& req) { return write_req_copy_file_range(m_socket, req); },
-            // clang-format on
         };
-
-        co_await std::visit(std::move(overload), request);
-        co_return static_cast<Procedure>(request.index() + 1);
     }
 
-    AExpect<Response> Client::recv_resp(Procedure procedure)
+    AExpect<resp::Readlink> Client::send_req_readlink(req::Readlink req)
     {
-        auto status = co_await read_int<u8>(m_socket);
-        if (not status) {
-            co_return Unexpect{ status.error() };
-        } else if (*status != 0) {
-            co_return Unexpect{ static_cast<Errc>(*status) };
-        }
+        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Readlink));
+        TRY_SCOPED(co_await write_path(m_socket, req.path));
+        TRY_SCOPED(co_await read_status(m_socket));
+        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        co_return resp::Readlink{ .target = slice_as_str(m_buffer, *slice) };
+    }
 
-        // clang-format off
-        switch (procedure) {
-        case Procedure::Listdir:       co_return co_await read_resp_listdir        (m_socket, m_buffer);
-        case Procedure::Stat:          co_return co_await read_resp_stat           (m_socket, m_buffer);
-        case Procedure::Readlink:      co_return co_await read_resp_readlink       (m_socket, m_buffer);
-        case Procedure::Mknod:         co_return co_await read_resp_mknod          (m_socket, m_buffer);
-        case Procedure::Mkdir:         co_return co_await read_resp_mkdir          (m_socket, m_buffer);
-        case Procedure::Unlink:        co_return co_await read_resp_unlink         (m_socket, m_buffer);
-        case Procedure::Rmdir:         co_return co_await read_resp_rmdir          (m_socket, m_buffer);
-        case Procedure::Rename:        co_return co_await read_resp_rename         (m_socket, m_buffer);
-        case Procedure::Truncate:      co_return co_await read_resp_truncate       (m_socket, m_buffer);
-        case Procedure::Read:          co_return co_await read_resp_read           (m_socket, m_buffer);
-        case Procedure::Write:         co_return co_await read_resp_write          (m_socket, m_buffer);
-        case Procedure::Utimens:       co_return co_await read_resp_utimens        (m_socket, m_buffer);
-        case Procedure::CopyFileRange: co_return co_await read_resp_copy_file_range(m_socket, m_buffer);
-        }
-        // clang-format on
+    AExpect<resp::Mknod> Client::send_req_mknod(req::Mknod req)
+    {
+        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Mknod));
+        TRY_SCOPED(co_await write_path(m_socket, req.path));
+        TRY_SCOPED(co_await read_status(m_socket));
+        co_return resp::Mknod{};
+    }
 
-        co_return Unexpect{ Errc::invalid_argument };
+    AExpect<resp::Mkdir> Client::send_req_mkdir(req::Mkdir req)
+    {
+        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Mkdir));
+        TRY_SCOPED(co_await write_path(m_socket, req.path));
+        TRY_SCOPED(co_await read_status(m_socket));
+        co_return resp::Mkdir{};
+    }
+
+    AExpect<resp::Unlink> Client::send_req_unlink(req::Unlink req)
+    {
+        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Unlink));
+        TRY_SCOPED(co_await write_path(m_socket, req.path));
+        TRY_SCOPED(co_await read_status(m_socket));
+        co_return resp::Unlink{};
+    }
+
+    AExpect<resp::Rmdir> Client::send_req_rmdir(req::Rmdir req)
+    {
+        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Rmdir));
+        TRY_SCOPED(co_await write_path(m_socket, req.path));
+        TRY_SCOPED(co_await read_status(m_socket));
+        co_return resp::Rmdir{};
+    }
+
+    AExpect<resp::Rename> Client::send_req_rename(req::Rename req)
+    {
+        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Rename));
+        TRY_SCOPED(co_await write_path(m_socket, req.from));
+        TRY_SCOPED(co_await write_path(m_socket, req.to));
+        TRY_SCOPED(co_await read_status(m_socket));
+        co_return resp::Rename{};
+    }
+
+    AExpect<resp::Truncate> Client::send_req_truncate(req::Truncate req)
+    {
+        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Truncate));
+        TRY_SCOPED(co_await write_path(m_socket, req.path));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, req.size));
+        TRY_SCOPED(co_await read_status(m_socket));
+        co_return resp::Truncate{};
+    }
+
+    AExpect<resp::Read> Client::send_req_read(req::Read req)
+    {
+        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Read));
+        TRY_SCOPED(co_await write_path(m_socket, req.path));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, req.offset));
+        TRY_SCOPED(co_await write_int<u64>(m_socket, req.size));
+        TRY_SCOPED(co_await read_status(m_socket));
+        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        co_return resp::Read{ .read = slice_bytes(m_buffer, *slice) };
+    }
+
+    AExpect<resp::Write> Client::send_req_write(req::Write req)
+    {
+        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Write));
+        TRY_SCOPED(co_await write_path(m_socket, req.path));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, req.offset));
+        TRY_SCOPED(co_await write_bytes(m_socket, req.in));
+        TRY_SCOPED(co_await read_status(m_socket));
+        TRY(size, co_await read_int<u64>(m_socket));
+        co_return resp::Write{ .size = *size };
+    }
+
+    AExpect<resp::Utimens> Client::send_req_utimens(req::Utimens req)
+    {
+        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Utimens));
+        TRY_SCOPED(co_await write_path(m_socket, req.path));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, req.atime.tv_sec));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, req.atime.tv_nsec));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, req.mtime.tv_sec));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, req.mtime.tv_nsec));
+        TRY_SCOPED(co_await read_status(m_socket));
+        co_return resp::Utimens{};
+    }
+
+    AExpect<resp::CopyFileRange> Client::send_req_copy_file_range(req::CopyFileRange req)
+    {
+        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::CopyFileRange));
+        TRY_SCOPED(co_await write_path(m_socket, req.in_path));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, req.in_offset));
+        TRY_SCOPED(co_await write_path(m_socket, req.out_path));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, req.out_offset));
+        TRY_SCOPED(co_await write_int<u64>(m_socket, req.size));
+        TRY_SCOPED(co_await read_status(m_socket));
+        TRY(size, co_await read_int<u64>(m_socket));
+        co_return resp::CopyFileRange{ .size = *size };
     }
 }
 
@@ -438,191 +326,126 @@ namespace madbfs::rpc
     // server read request
     // -------------------
 
-    AExpect<Request> read_req_listdir(Socket& sock, Vec<u8>& buf)
+    AExpect<req::Listdir> Server::recv_req_listdir()
     {
-        co_return (co_await read_bytes(sock, buf)).transform([&](Slice slice) {
-            return Request{ req::Listdir{ .path = slice_as_str(buf, slice) } };
-        });
+        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        co_return req::Listdir{ .path = slice_as_str(m_buffer, *slice) };
     }
 
-    AExpect<Request> read_req_stat(Socket& sock, Vec<u8>& buf)
+    AExpect<req::Stat> Server::recv_req_stat()
     {
-        co_return (co_await read_bytes(sock, buf)).transform([&](Slice slice) {
-            return Request{ req::Stat{ .path = slice_as_str(buf, slice) } };
-        });
+        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        co_return req::Stat{ .path = slice_as_str(m_buffer, *slice) };
     }
 
-    AExpect<Request> read_req_readlink(Socket& sock, Vec<u8>& buf)
+    AExpect<req::Readlink> Server::recv_req_readlink()
     {
-        co_return (co_await read_bytes(sock, buf)).transform([&](Slice slice) {
-            return Request{ req::Readlink{ .path = slice_as_str(buf, slice) } };
-        });
+        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        co_return req::Readlink{ .path = slice_as_str(m_buffer, *slice) };
     }
 
-    AExpect<Request> read_req_mknod(Socket& sock, Vec<u8>& buf)
+    AExpect<req::Mknod> Server::recv_req_mknod()
     {
-        co_return (co_await read_bytes(sock, buf)).transform([&](Slice slice) {
-            return Request{ req::Mknod{ .path = slice_as_str(buf, slice) } };
-        });
+        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        co_return req::Mknod{ .path = slice_as_str(m_buffer, *slice) };
     }
 
-    AExpect<Request> read_req_mkdir(Socket& sock, Vec<u8>& buf)
+    AExpect<req::Mkdir> Server::recv_req_mkdir()
     {
-        co_return (co_await read_bytes(sock, buf)).transform([&](Slice slice) {
-            return Request{ req::Mkdir{ .path = slice_as_str(buf, slice) } };
-        });
+        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        co_return req::Mkdir{ .path = slice_as_str(m_buffer, *slice) };
     }
 
-    AExpect<Request> read_req_unlink(Socket& sock, Vec<u8>& buf)
+    AExpect<req::Unlink> Server::recv_req_unlink()
     {
-        co_return (co_await read_bytes(sock, buf)).transform([&](Slice slice) {
-            return Request{ req::Unlink{ .path = slice_as_str(buf, slice) } };
-        });
+        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        co_return req::Unlink{ .path = slice_as_str(m_buffer, *slice) };
     }
 
-    AExpect<Request> read_req_rmdir(Socket& sock, Vec<u8>& buf)
+    AExpect<req::Rmdir> Server::recv_req_rmdir()
     {
-        co_return (co_await read_bytes(sock, buf)).transform([&](Slice slice) {
-            return Request{ req::Rmdir{ .path = slice_as_str(buf, slice) } };
-        });
+        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        co_return req::Rmdir{ .path = slice_as_str(m_buffer, *slice) };
     }
 
-    AExpect<Request> read_req_rename(Socket& sock, Vec<u8>& buf)
+    AExpect<req::Rename> Server::recv_req_rename()
     {
-        auto from_slice = co_await read_bytes(sock, buf);
-        if (not from_slice) {
-            co_return Unexpect{ from_slice.error() };
-        }
-        auto to_slice = co_await read_bytes(sock, buf);
-        if (not to_slice) {
-            co_return Unexpect{ to_slice.error() };
-        }
+        TRY(from_slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(to_slice, co_await read_bytes(m_socket, m_buffer));
 
-        auto from = slice_as_str(buf, *from_slice);
-        auto to   = slice_as_str(buf, *to_slice);
-
-        co_return Request{ req::Rename{ .from = from, .to = to } };
+        co_return req::Rename{
+            .from = slice_as_str(m_buffer, *from_slice),
+            .to   = slice_as_str(m_buffer, *to_slice),
+        };
     }
 
-    AExpect<Request> read_req_truncate(Socket& sock, Vec<u8>& buf)
+    AExpect<req::Truncate> Server::recv_req_truncate()
     {
-        auto path_slice = co_await read_bytes(sock, buf);
-        if (not path_slice) {
-            co_return Unexpect{ path_slice.error() };
-        }
-        auto size = co_await read_int<i64>(sock);
-        if (not size) {
-            co_return Unexpect{ size.error() };
-        }
+        TRY(path_slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(size, co_await read_int<i64>(m_socket));
 
-        auto path_str = slice_as_str(buf, *path_slice);
-        co_return Request{ req::Truncate{ .path = path_str, .size = *size } };
+        co_return req::Truncate{
+            .path = slice_as_str(m_buffer, *path_slice),
+            .size = *size,
+        };
     }
 
-    AExpect<Request> read_req_read(Socket& sock, Vec<u8>& buf)
+    AExpect<req::Read> Server::recv_req_read()
     {
-        auto path_slice = co_await read_bytes(sock, buf);
-        if (not path_slice) {
-            co_return Unexpect{ path_slice.error() };
-        }
-        auto offset = co_await read_int<i64>(sock);
-        if (not offset) {
-            co_return Unexpect{ offset.error() };
-        }
-        auto size = co_await read_int<u64>(sock);
-        if (not size) {
-            co_return Unexpect{ size.error() };
-        }
+        TRY(path_slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(offset, co_await read_int<i64>(m_socket));
+        TRY(size, co_await read_int<u64>(m_socket));
 
-        auto path = slice_as_str(buf, *path_slice);
-        co_return Request{ req::Read{ .path = path, .offset = *offset, .size = *size } };
+        co_return req::Read{
+            .path   = slice_as_str(m_buffer, *path_slice),
+            .offset = *offset,
+            .size   = *size,
+        };
     }
 
-    AExpect<Request> read_req_write(Socket& sock, Vec<u8>& buf)
+    AExpect<req::Write> Server::recv_req_write()
     {
-        auto path_slice = co_await read_bytes(sock, buf);
-        if (not path_slice) {
-            co_return Unexpect{ path_slice.error() };
-        }
-        auto offset = co_await read_int<i64>(sock);
-        if (not offset) {
-            co_return Unexpect{ offset.error() };
-        }
-        auto bytes_slice = co_await read_bytes(sock, buf);
-        if (not bytes_slice) {
-            co_return Unexpect{ bytes_slice.error() };
-        }
+        TRY(path_slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(offset, co_await read_int<i64>(m_socket));
+        TRY(bytes_slice, co_await read_bytes(m_socket, m_buffer));
 
-        auto path  = slice_as_str(buf, *path_slice);
-        auto bytes = slice_bytes(buf, *bytes_slice);
-
-        co_return Request{ req::Write{ .path = path, .offset = *offset, .in = bytes } };
+        co_return req::Write{
+            .path   = slice_as_str(m_buffer, *path_slice),
+            .offset = *offset,
+            .in     = slice_bytes(m_buffer, *bytes_slice),
+        };
     }
 
-    AExpect<Request> read_req_utimens(Socket& sock, Vec<u8>& buf)
+    AExpect<req::Utimens> Server::recv_req_utimens()
     {
-        auto path_slice = co_await read_bytes(sock, buf);
-        if (not path_slice) {
-            co_return Unexpect{ path_slice.error() };
-        }
-        auto atime_sec_slice = co_await read_int<i64>(sock);
-        if (not atime_sec_slice) {
-            co_return Unexpect{ atime_sec_slice.error() };
-        }
-        auto atime_nsec_slice = co_await read_int<i64>(sock);
-        if (not atime_nsec_slice) {
-            co_return Unexpect{ atime_nsec_slice.error() };
-        }
-        auto mtime_sec_slice = co_await read_int<i64>(sock);
-        if (not mtime_sec_slice) {
-            co_return Unexpect{ mtime_sec_slice.error() };
-        }
-        auto mtime_nsec_slice = co_await read_int<i64>(sock);
-        if (not mtime_nsec_slice) {
-            co_return Unexpect{ mtime_nsec_slice.error() };
-        }
+        TRY(path_slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(atime_sec_slice, co_await read_int<i64>(m_socket));
+        TRY(atime_nsec_slice, co_await read_int<i64>(m_socket));
+        TRY(mtime_sec_slice, co_await read_int<i64>(m_socket));
+        TRY(mtime_nsec_slice, co_await read_int<i64>(m_socket));
 
-        auto path = slice_as_str(buf, *path_slice);
-        co_return Request{ req::Utimens{
-            .path  = path,
+        co_return req::Utimens{
+            .path  = slice_as_str(m_buffer, *path_slice),
             .atime = { .tv_sec = *atime_sec_slice, .tv_nsec = *atime_nsec_slice },
             .mtime = { .tv_sec = *mtime_sec_slice, .tv_nsec = *mtime_nsec_slice },
-        } };
+        };
     }
 
-    AExpect<Request> read_req_copy_file_range(Socket& sock, Vec<u8>& buf)
+    AExpect<req::CopyFileRange> Server::recv_req_copy_file_range()
     {
-        auto in_slice = co_await read_bytes(sock, buf);
-        if (not in_slice) {
-            co_return Unexpect{ in_slice.error() };
-        }
-        auto in_offset = co_await read_int<i64>(sock);
-        if (not in_offset) {
-            co_return Unexpect{ in_offset.error() };
-        }
-        auto out_slice = co_await read_bytes(sock, buf);
-        if (not out_slice) {
-            co_return Unexpect{ out_slice.error() };
-        }
-        auto out_offset = co_await read_int<i64>(sock);
-        if (not out_offset) {
-            co_return Unexpect{ out_offset.error() };
-        }
-        auto size = co_await read_int<u64>(sock);
-        if (not size) {
-            co_return Unexpect{ size.error() };
-        }
+        TRY(in_slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(in_offset, co_await read_int<i64>(m_socket));
+        TRY(out_slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(out_offset, co_await read_int<i64>(m_socket));
+        TRY(size, co_await read_int<u64>(m_socket));
 
-        auto in  = slice_as_str(buf, *in_slice);
-        auto out = slice_as_str(buf, *out_slice);
-
-        co_return Request{ req::CopyFileRange{
-            .in_path    = in,
+        co_return req::CopyFileRange{
+            .in_path    = slice_as_str(m_buffer, *in_slice),
             .in_offset  = *in_offset,
-            .out_path   = out,
+            .out_path   = slice_as_str(m_buffer, *out_slice),
             .out_offset = *out_offset,
             .size       = *size,
-        } };
+        };
     }
 
     // -------------------
@@ -630,79 +453,24 @@ namespace madbfs::rpc
     // server send response
     // --------------------
 
-    AExpect<void> write_resp_listdir(Socket& sock, const resp::Listdir& resp)
-    {
-        co_return Expect<void>{};
-    }
-
     AExpect<void> write_resp_stat(Socket& sock, const resp::Stat& resp)
     {
-        if (auto res = co_await write_int<i64>(sock, resp.size); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<u64>(sock, resp.links); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<i64>(sock, resp.mtime.tv_sec); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<i64>(sock, resp.mtime.tv_nsec); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<i64>(sock, resp.atime.tv_sec); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<i64>(sock, resp.atime.tv_nsec); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<i64>(sock, resp.ctime.tv_sec); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<i64>(sock, resp.ctime.tv_nsec); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<u32>(sock, resp.mode); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<u32>(sock, resp.uid); not res) {
-            co_return Unexpect{ res.error() };
-        }
+        TRY_SCOPED(co_await write_int<i64>(sock, resp.size));
+        TRY_SCOPED(co_await write_int<u64>(sock, resp.links));
+        TRY_SCOPED(co_await write_int<i64>(sock, resp.mtime.tv_sec));
+        TRY_SCOPED(co_await write_int<i64>(sock, resp.mtime.tv_nsec));
+        TRY_SCOPED(co_await write_int<i64>(sock, resp.atime.tv_sec));
+        TRY_SCOPED(co_await write_int<i64>(sock, resp.atime.tv_nsec));
+        TRY_SCOPED(co_await write_int<i64>(sock, resp.ctime.tv_sec));
+        TRY_SCOPED(co_await write_int<i64>(sock, resp.ctime.tv_nsec));
+        TRY_SCOPED(co_await write_int<u32>(sock, resp.mode));
+        TRY_SCOPED(co_await write_int<u32>(sock, resp.uid));
         co_return co_await write_int<u32>(sock, resp.gid);
     }
 
     AExpect<void> write_resp_readlink(Socket& sock, const resp::Readlink& resp)
     {
         return write_path(sock, resp.target);
-    }
-
-    AExpect<void> write_resp_mknod(Socket& sock, const resp::Mknod&)
-    {
-        co_return Expect<void>{};
-    }
-
-    AExpect<void> write_resp_mkdir(Socket& sock, const resp::Mkdir&)
-    {
-        co_return Expect<void>{};
-    }
-
-    AExpect<void> write_resp_unlink(Socket& sock, const resp::Unlink&)
-    {
-        co_return Expect<void>{};
-    }
-
-    AExpect<void> write_resp_rmdir(Socket& sock, const resp::Rmdir&)
-    {
-        co_return Expect<void>{};
-    }
-
-    AExpect<void> write_resp_rename(Socket& sock, const resp::Rename&)
-    {
-        co_return Expect<void>{};
-    }
-
-    AExpect<void> write_resp_truncate(Socket& sock, const resp::Truncate&)
-    {
-        co_return Expect<void>{};
     }
 
     AExpect<void> write_resp_read(Socket& sock, const resp::Read& resp)
@@ -715,11 +483,6 @@ namespace madbfs::rpc
         return write_int<u64>(sock, resp.size);
     }
 
-    AExpect<void> write_resp_utimens(Socket& sock, const resp::Utimens&)
-    {
-        co_return Expect<void>{};
-    }
-
     AExpect<void> write_resp_copy_file_range(Socket& sock, const resp::CopyFileRange& resp)
     {
         return write_int<u64>(sock, resp.size);
@@ -727,64 +490,40 @@ namespace madbfs::rpc
 
     // --------------------
 
-    AExpect<Request> Server::recv_req()
+    AExpect<Procedure> Server::peek_req()
     {
-        auto byte = co_await read_int<u8>(m_socket);
-        if (not byte) {
-            co_return Unexpect{ byte.error() };
-        }
-        auto procedure = static_cast<Procedure>(*byte);
-
-        // clang-format off
-        switch (procedure) {
-        case Procedure::Listdir:       co_return co_await read_req_listdir        (m_socket, m_buffer);
-        case Procedure::Stat:          co_return co_await read_req_stat           (m_socket, m_buffer);
-        case Procedure::Readlink:      co_return co_await read_req_readlink       (m_socket, m_buffer);
-        case Procedure::Mknod:         co_return co_await read_req_mknod          (m_socket, m_buffer);
-        case Procedure::Mkdir:         co_return co_await read_req_mkdir          (m_socket, m_buffer);
-        case Procedure::Unlink:        co_return co_await read_req_unlink         (m_socket, m_buffer);
-        case Procedure::Rmdir:         co_return co_await read_req_rmdir          (m_socket, m_buffer);
-        case Procedure::Rename:        co_return co_await read_req_rename         (m_socket, m_buffer);
-        case Procedure::Truncate:      co_return co_await read_req_truncate       (m_socket, m_buffer);
-        case Procedure::Read:          co_return co_await read_req_read           (m_socket, m_buffer);
-        case Procedure::Write:         co_return co_await read_req_write          (m_socket, m_buffer);
-        case Procedure::Utimens:       co_return co_await read_req_utimens        (m_socket, m_buffer);
-        case Procedure::CopyFileRange: co_return co_await read_req_copy_file_range(m_socket, m_buffer);
-        }
-        // clang-format on
-
-        co_return Unexpect{ Errc::invalid_argument };
+        return read_procedure(m_socket);
     }
 
     AExpect<void> Server::send_resp(Var<Status, Response> response)
     {
-        auto status = static_cast<u8>(Status::Success);
+        auto status = Status::Success;
         if (auto err = std::get_if<Status>(&response); err) {
-            status = static_cast<u8>(*err);
+            status = *err;
         }
 
-        if (auto res = co_await write_int<u8>(m_socket, status)) {
-            co_return Unexpect{ res.error() };
-        }
+        TRY_SCOPED(co_await write_status(m_socket, status));
 
-        if (status != 0) {
+        if (status != Status::Success) {
             co_return Expect<void>{};
         }
 
+        auto empty_response = [&] -> AExpect<void> { co_return Expect<void>{}; };
+
         auto overload = util::Overload{
             // clang-format off
-            [&](const resp::Listdir&       resp) { return write_resp_listdir        (m_socket, resp); },
+            [&](const resp::Listdir&           ) { return empty_response();                           },
             [&](const resp::Stat&          resp) { return write_resp_stat           (m_socket, resp); },
             [&](const resp::Readlink&      resp) { return write_resp_readlink       (m_socket, resp); },
-            [&](const resp::Mknod&         resp) { return write_resp_mknod          (m_socket, resp); },
-            [&](const resp::Mkdir&         resp) { return write_resp_mkdir          (m_socket, resp); },
-            [&](const resp::Unlink&        resp) { return write_resp_unlink         (m_socket, resp); },
-            [&](const resp::Rmdir&         resp) { return write_resp_rmdir          (m_socket, resp); },
-            [&](const resp::Rename&        resp) { return write_resp_rename         (m_socket, resp); },
-            [&](const resp::Truncate&      resp) { return write_resp_truncate       (m_socket, resp); },
+            [&](const resp::Mknod&             ) { return empty_response();                           },
+            [&](const resp::Mkdir&             ) { return empty_response();                           },
+            [&](const resp::Unlink&            ) { return empty_response();                           },
+            [&](const resp::Rmdir&             ) { return empty_response();                           },
+            [&](const resp::Rename&            ) { return empty_response();                           },
+            [&](const resp::Truncate&          ) { return empty_response();                           },
             [&](const resp::Read&          resp) { return write_resp_read           (m_socket, resp); },
             [&](const resp::Write&         resp) { return write_resp_write          (m_socket, resp); },
-            [&](const resp::Utimens&       resp) { return write_resp_utimens        (m_socket, resp); },
+            [&](const resp::Utimens&           ) { return empty_response();                           },
             [&](const resp::CopyFileRange& resp) { return write_resp_copy_file_range(m_socket, resp); },
             // clang-format on
         };
@@ -800,108 +539,42 @@ namespace madbfs::rpc::listdir_channel
 
     AExpect<void> Sender::send_next(Opt<Dirent> dirent)
     {
-        if (not dirent) {
-            co_return co_await write_int<u8>(m_socket, end_of_stream);
-        }
+        auto status = dirent ? stream_continue : end_of_stream;
+        TRY_SCOPED(co_await write_int<u8>(m_socket, status));
 
-        if (auto res = co_await write_int<u8>(m_socket, stream_continue); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_path(m_socket, dirent->name); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<u64>(m_socket, dirent->links); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<i64>(m_socket, dirent->size); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<i64>(m_socket, dirent->mtime.tv_sec); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<i64>(m_socket, dirent->mtime.tv_nsec); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<i64>(m_socket, dirent->atime.tv_sec); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<i64>(m_socket, dirent->atime.tv_nsec); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<i64>(m_socket, dirent->ctime.tv_sec); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<i64>(m_socket, dirent->ctime.tv_nsec); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<u32>(m_socket, dirent->mode); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        if (auto res = co_await write_int<u32>(m_socket, dirent->uid); not res) {
-            co_return Unexpect{ res.error() };
-        }
+        TRY_SCOPED(co_await write_path(m_socket, dirent->name));
+        TRY_SCOPED(co_await write_int<u64>(m_socket, dirent->links));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, dirent->size));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, dirent->mtime.tv_sec));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, dirent->mtime.tv_nsec));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, dirent->atime.tv_sec));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, dirent->atime.tv_nsec));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, dirent->ctime.tv_sec));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, dirent->ctime.tv_nsec));
+        TRY_SCOPED(co_await write_int<u32>(m_socket, dirent->mode));
+        TRY_SCOPED(co_await write_int<u32>(m_socket, dirent->uid));
         co_return co_await write_int<u32>(m_socket, dirent->gid);
     }
 
     AExpect<Opt<Dirent>> Receiver::recv_next()
     {
-        auto status = co_await read_int<u8>(m_socket);
-        if (not status) {
-            co_return Unexpect{ status.error() };
-        }
-
+        TRY(status, co_await read_int<u8>(m_socket));
         if (status != stream_continue) {
             co_return std::nullopt;
         }
 
-        auto name_slice = co_await read_bytes(m_socket, m_buffer);
-        if (not name_slice) {
-            co_return Unexpect{ name_slice.error() };
-        }
-        auto links = co_await read_int<u64>(m_socket);
-        if (not links) {
-            co_return Unexpect{ links.error() };
-        }
-        auto size = co_await read_int<i64>(m_socket);
-        if (not size) {
-            co_return Unexpect{ size.error() };
-        }
-        auto mtime_sec = co_await read_int<i64>(m_socket);
-        if (not mtime_sec) {
-            co_return Unexpect{ mtime_sec.error() };
-        }
-        auto mtime_nsec = co_await read_int<i64>(m_socket);
-        if (not mtime_nsec) {
-            co_return Unexpect{ mtime_nsec.error() };
-        }
-        auto atime_sec = co_await read_int<i64>(m_socket);
-        if (not atime_sec) {
-            co_return Unexpect{ atime_sec.error() };
-        }
-        auto atime_nsec = co_await read_int<i64>(m_socket);
-        if (not atime_nsec) {
-            co_return Unexpect{ atime_nsec.error() };
-        }
-        auto ctime_sec = co_await read_int<i64>(m_socket);
-        if (not ctime_sec) {
-            co_return Unexpect{ ctime_sec.error() };
-        }
-        auto ctime_nsec = co_await read_int<i64>(m_socket);
-        if (not ctime_nsec) {
-            co_return Unexpect{ ctime_nsec.error() };
-        }
-        auto mode = co_await read_int<u32>(m_socket);
-        if (not mode) {
-            co_return Unexpect{ mode.error() };
-        }
-        auto uid = co_await read_int<u32>(m_socket);
-        if (not uid) {
-            co_return Unexpect{ uid.error() };
-        }
-        auto gid = co_await read_int<u32>(m_socket);
-        if (not gid) {
-            co_return Unexpect{ gid.error() };
-        }
+        TRY(name_slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(links, co_await read_int<u64>(m_socket));
+        TRY(size, co_await read_int<i64>(m_socket));
+        TRY(mtime_sec, co_await read_int<i64>(m_socket));
+        TRY(mtime_nsec, co_await read_int<i64>(m_socket));
+        TRY(atime_sec, co_await read_int<i64>(m_socket));
+        TRY(atime_nsec, co_await read_int<i64>(m_socket));
+        TRY(ctime_sec, co_await read_int<i64>(m_socket));
+        TRY(ctime_nsec, co_await read_int<i64>(m_socket));
+        TRY(mode, co_await read_int<u32>(m_socket));
+        TRY(uid, co_await read_int<u32>(m_socket));
+        TRY(gid, co_await read_int<u32>(m_socket));
 
         co_return Dirent{
             .name  = slice_as_str(m_buffer, *name_slice),
