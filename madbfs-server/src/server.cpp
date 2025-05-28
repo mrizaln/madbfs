@@ -64,22 +64,16 @@ namespace madbfs::server
         }
         spdlog::info("{}: new connection from {}:{}", __func__, peer.address().to_string(), peer.port());
 
-        auto rpc_server = rpc::Server{ sock };
+        auto buffer     = Vec<u8>{};
+        auto rpc_server = rpc::Server{ sock, buffer };
 
-        auto procedure = co_await rpc_server.recv_req_procedure();
-        if (not procedure) {
-            spdlog::error("{}: failed to get procedure {}", __func__, err_msg(procedure.error()));
+        auto request = co_await rpc_server.recv_req();
+        if (not request) {
+            spdlog::error("{}: failed to get param for procedure {}", __func__, err_msg(request.error()));
             co_return Expect<void>{};
         }
 
-        auto param = co_await rpc_server.recv_req_param(*procedure);
-        if (not param) {
-            spdlog::error("{}: failed to get param for procedure {}", __func__, err_msg(param.error()));
-        }
-
-        spdlog::debug(
-            "{}: accepted procedure {} with param {}", __func__, static_cast<u8>(*procedure), param->index()
-        );
+        spdlog::debug("{}: accepted procedure {}", __func__, request->index() + 1);
 
         co_return Expect<void>{};
 
@@ -101,6 +95,6 @@ namespace madbfs::server
             // clang-format on
         };
 
-        co_return co_await std::visit(std::move(overload), *param);
+        co_return co_await std::visit(std::move(overload), *request);
     }
 }
