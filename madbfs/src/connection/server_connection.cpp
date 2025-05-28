@@ -1,6 +1,7 @@
 #include "madbfs/connection/server_connection.hpp"
 
 #include "madbfs-common/rpc.hpp"
+#include "madbfs/connection/connection.hpp"
 #include "madbfs/log.hpp"
 #include "madbfs/path/path.hpp"
 
@@ -140,73 +141,35 @@ namespace madbfs::connection
             co_return Unexpect{ socket.error() };
         }
 
+        // to prevent buffer from moving thus invalidating Str
         auto buffer = Vec<u8>{};
         auto client = rpc::Client{ *socket, buffer };
         auto req    = rpc::req::Listdir{ .path = path.fullpath() };
 
-        if (auto resp = co_await client.send_req_listdir(req); not resp) {
+        auto resp = co_await client.send_req_listdir(req);
+        if (not resp) {
             co_return Unexpect{ resp.error() };
         }
 
-        // this invalidates everything produced from client
-        buffer.clear();
-        auto listdir = rpc::listdir_channel::Receiver{ *socket, buffer };
-
-        struct Slice
-        {
-            isize offset;
-            usize size;
-        };
-
-        // TODO: use asynchronous generator so collecting is not necessary
-        auto stats       = Vec<Pair<data::Stat, Slice>>{};
-        auto name_buffer = Vec<char>{};
-
-        while (true) {
-            auto dirent = co_await listdir.recv_next();
-            if (not dirent) {
-                co_return Unexpect{ dirent.error() };
-            }
-
-            if (dirent->index() == 2) {
-                break;
-            } else if (dirent->index() == 1) {
-                log_w({ "{}: failed to stat file entry {:?}: {}" }, __func__, path.fullpath(), stats.size());
-                continue;
-            }
-
-            auto entry = std::get<rpc::listdir_channel::Dirent>(*dirent);
-            if (entry.name == "." or entry.name == "..") {
-                log_w({ "{}: skipping {:?}" }, __func__, entry.name);
-                continue;
-            }
-
-            auto slice = Slice{ static_cast<isize>(name_buffer.size()), entry.name.size() };
-            name_buffer.insert(name_buffer.end(), entry.name.begin(), entry.name.end());
-
-            auto stat = data::Stat{
-                .links = entry.links,
-                .size  = entry.size,
-                .mtime = entry.mtime,
-                .atime = entry.atime,
-                .ctime = entry.ctime,
-                .mode  = entry.mode,
-                .uid   = entry.uid,
-                .gid   = entry.gid,
-            };
-
-            stats.emplace_back(std::move(stat), slice);
-        }
-
-        log_d({ "{}: name buffer: {:?s}" }, __func__, name_buffer);
-
-        auto generator = [](Vec<char> buf, Vec<Pair<data::Stat, Slice>> stats) -> Gen<ParsedStat> {
-            for (auto&& [stat, slice] : stats) {
-                co_yield ParsedStat{ stat, Str{ buf.data() + slice.offset, slice.size } };
+        auto generator = [](Vec<u8> buf, Vec<Pair<Str, rpc::resp::Stat>> entries) -> Gen<ParsedStat> {
+            for (const auto& [name, stat] : entries) {
+                co_yield ParsedStat{
+                    .stat = data::Stat {
+                        .links = stat.links,
+                        .size  = stat.size,
+                        .mtime = stat.mtime,
+                        .atime = stat.atime,
+                        .ctime = stat.ctime,
+                        .mode  = stat.mode,
+                        .uid   = stat.uid,
+                        .gid   = stat.gid,
+                    },
+                    .path = name,       // names are stored in buf
+                };
             }
         };
 
-        co_return generator(std::move(name_buffer), std::move(stats));
+        co_return generator(std::move(buffer), std::move(resp).value().entries);
     }
 
     AExpect<data::Stat> ServerConnection::stat(path::Path path)

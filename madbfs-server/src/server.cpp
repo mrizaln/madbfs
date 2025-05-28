@@ -135,39 +135,59 @@ namespace madbfs::server
             co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
         }
 
-        if (auto res = co_await serv.send_resp(rpc::resp::Listdir{}); not res) {
-            co_return Unexpect{ res.error() };
-        }
+        struct Slice
+        {
+            isize offset;
+            usize size;
+        };
 
-        auto channel = rpc::listdir_channel::Sender{ serv.sock() };
-        auto dirfd   = ::dirfd(dir);
+        auto& buf = serv.buf();
+        buf.clear();
+
+        auto slices = Vec<Pair<Slice, rpc::resp::Stat>>{};
+        auto dirfd  = ::dirfd(dir);
 
         while (auto entry = ::readdir(dir)) {
-            struct stat filestat = {};
-            if (auto res = ::fstatat(dirfd, entry->d_name, &filestat, AT_SYMLINK_NOFOLLOW); res < 0) {
-                auto err = log_status_from_errno(__func__, entry->d_name, "failed to stat file");
-                if (auto res = co_await channel.send_next(static_cast<rpc::Status>(err)); not res) {
-                    co_return Unexpect{ res.error() };
-                }
+            auto name = Str{ entry->d_name };
+            if (name == "." or name == "..") {
                 continue;
             }
-            auto res = co_await channel.send_next(rpc::listdir_channel::Dirent{
-                .name  = entry->d_name,
-                .links = filestat.st_nlink,
-                .size  = filestat.st_size,
-                .mtime = filestat.st_mtim,
-                .atime = filestat.st_atim,
-                .ctime = filestat.st_ctim,
-                .mode  = filestat.st_mode,
-                .uid   = filestat.st_uid,
-                .gid   = filestat.st_gid,
-            });
-            if (not res) {
-                co_return Unexpect{ res.error() };
+
+            struct stat filestat = {};
+            if (auto res = ::fstatat(dirfd, entry->d_name, &filestat, AT_SYMLINK_NOFOLLOW); res < 0) {
+                log_status_from_errno(__func__, name, "failed to stat file");
+                continue;
             }
+
+            auto name_u8 = reinterpret_cast<const u8*>(name.data());
+            auto off     = buf.size();
+
+            buf.insert(buf.end(), name_u8, name_u8 + name.size());
+
+            auto slice = Slice{ static_cast<isize>(off), name.size() };
+            auto stat  = rpc::resp::Stat{
+                 .size  = filestat.st_size,
+                 .links = filestat.st_nlink,
+                 .mtime = filestat.st_mtim,
+                 .atime = filestat.st_atim,
+                 .ctime = filestat.st_ctim,
+                 .mode  = filestat.st_mode,
+                 .uid   = filestat.st_uid,
+                 .gid   = filestat.st_gid,
+            };
+
+            slices.emplace_back(std::move(slice), std::move(stat));
         }
 
-        co_return co_await channel.send_next(Unit{});
+        auto entries = Vec<Pair<Str, rpc::resp::Stat>>{};
+        entries.reserve(slices.size());
+
+        for (auto&& [slice, stat] : slices) {
+            auto name = Str{ reinterpret_cast<const char*>(buf.data()) + slice.offset, slice.size };
+            entries.emplace_back(std::move(name), std::move(stat));
+        }
+
+        co_return co_await serv.send_resp(rpc::resp::Listdir{ .entries = std::move(entries) });
     }
 
     AExpect<void> Server::handle_req_stat(rpc::Server& serv)
