@@ -170,6 +170,21 @@ namespace
         HANDLE_ERROR(ec, n, size);
         co_return Slice{ off, n };
     }
+
+    AExpect<Slice> read_path(Socket& sock, Vec<u8>& buf)
+    {
+        TRY(size, co_await read_int<u64>(sock));
+
+        auto off = static_cast<isize>(buf.size());
+        buf.resize(buf.size() + *size + 1);    // null terminator
+        auto out = Span{ buf.begin() + off, *size };
+
+        auto [ec, n] = co_await async::read_exact<u8>(sock, out);
+        HANDLE_ERROR(ec, n, size);
+
+        buf.push_back('\0');    // null terminator
+        co_return Slice{ off, n };
+    }
 }
 
 namespace madbfs::rpc
@@ -328,50 +343,50 @@ namespace madbfs::rpc
 
     AExpect<req::Listdir> Server::recv_req_listdir()
     {
-        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(slice, co_await read_path(m_socket, m_buffer));
         co_return req::Listdir{ .path = slice_as_str(m_buffer, *slice) };
     }
 
     AExpect<req::Stat> Server::recv_req_stat()
     {
-        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(slice, co_await read_path(m_socket, m_buffer));
         co_return req::Stat{ .path = slice_as_str(m_buffer, *slice) };
     }
 
     AExpect<req::Readlink> Server::recv_req_readlink()
     {
-        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(slice, co_await read_path(m_socket, m_buffer));
         co_return req::Readlink{ .path = slice_as_str(m_buffer, *slice) };
     }
 
     AExpect<req::Mknod> Server::recv_req_mknod()
     {
-        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(slice, co_await read_path(m_socket, m_buffer));
         co_return req::Mknod{ .path = slice_as_str(m_buffer, *slice) };
     }
 
     AExpect<req::Mkdir> Server::recv_req_mkdir()
     {
-        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(slice, co_await read_path(m_socket, m_buffer));
         co_return req::Mkdir{ .path = slice_as_str(m_buffer, *slice) };
     }
 
     AExpect<req::Unlink> Server::recv_req_unlink()
     {
-        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(slice, co_await read_path(m_socket, m_buffer));
         co_return req::Unlink{ .path = slice_as_str(m_buffer, *slice) };
     }
 
     AExpect<req::Rmdir> Server::recv_req_rmdir()
     {
-        TRY(slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(slice, co_await read_path(m_socket, m_buffer));
         co_return req::Rmdir{ .path = slice_as_str(m_buffer, *slice) };
     }
 
     AExpect<req::Rename> Server::recv_req_rename()
     {
-        TRY(from_slice, co_await read_bytes(m_socket, m_buffer));
-        TRY(to_slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(from_slice, co_await read_path(m_socket, m_buffer));
+        TRY(to_slice, co_await read_path(m_socket, m_buffer));
 
         co_return req::Rename{
             .from = slice_as_str(m_buffer, *from_slice),
@@ -381,7 +396,7 @@ namespace madbfs::rpc
 
     AExpect<req::Truncate> Server::recv_req_truncate()
     {
-        TRY(path_slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(path_slice, co_await read_path(m_socket, m_buffer));
         TRY(size, co_await read_int<i64>(m_socket));
 
         co_return req::Truncate{
@@ -392,7 +407,7 @@ namespace madbfs::rpc
 
     AExpect<req::Read> Server::recv_req_read()
     {
-        TRY(path_slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(path_slice, co_await read_path(m_socket, m_buffer));
         TRY(offset, co_await read_int<i64>(m_socket));
         TRY(size, co_await read_int<u64>(m_socket));
 
@@ -405,7 +420,7 @@ namespace madbfs::rpc
 
     AExpect<req::Write> Server::recv_req_write()
     {
-        TRY(path_slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(path_slice, co_await read_path(m_socket, m_buffer));
         TRY(offset, co_await read_int<i64>(m_socket));
         TRY(bytes_slice, co_await read_bytes(m_socket, m_buffer));
 
@@ -418,7 +433,7 @@ namespace madbfs::rpc
 
     AExpect<req::Utimens> Server::recv_req_utimens()
     {
-        TRY(path_slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(path_slice, co_await read_path(m_socket, m_buffer));
         TRY(atime_sec_slice, co_await read_int<i64>(m_socket));
         TRY(atime_nsec_slice, co_await read_int<i64>(m_socket));
         TRY(mtime_sec_slice, co_await read_int<i64>(m_socket));
@@ -433,9 +448,9 @@ namespace madbfs::rpc
 
     AExpect<req::CopyFileRange> Server::recv_req_copy_file_range()
     {
-        TRY(in_slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(in_slice, co_await read_path(m_socket, m_buffer));
         TRY(in_offset, co_await read_int<i64>(m_socket));
-        TRY(out_slice, co_await read_bytes(m_socket, m_buffer));
+        TRY(out_slice, co_await read_path(m_socket, m_buffer));
         TRY(out_offset, co_await read_int<i64>(m_socket));
         TRY(size, co_await read_int<u64>(m_socket));
 
@@ -537,30 +552,45 @@ namespace madbfs::rpc::listdir_channel
     static constexpr auto end_of_stream   = u8{ 0xff };
     static constexpr auto stream_continue = u8{ 0x00 };
 
-    AExpect<void> Sender::send_next(Opt<Dirent> dirent)
+    AExpect<void> Sender::send_next(Var<Dirent, Status, Unit> dirent)
     {
-        auto status = dirent ? stream_continue : end_of_stream;
-        TRY_SCOPED(co_await write_int<u8>(m_socket, status));
+        if (dirent.index() == 2) {
+            TRY_SCOPED(co_await write_int<u8>(m_socket, end_of_stream));
+        }
+        TRY_SCOPED(co_await write_int<u8>(m_socket, stream_continue));
 
-        TRY_SCOPED(co_await write_path(m_socket, dirent->name));
-        TRY_SCOPED(co_await write_int<u64>(m_socket, dirent->links));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, dirent->size));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, dirent->mtime.tv_sec));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, dirent->mtime.tv_nsec));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, dirent->atime.tv_sec));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, dirent->atime.tv_nsec));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, dirent->ctime.tv_sec));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, dirent->ctime.tv_nsec));
-        TRY_SCOPED(co_await write_int<u32>(m_socket, dirent->mode));
-        TRY_SCOPED(co_await write_int<u32>(m_socket, dirent->uid));
-        co_return co_await write_int<u32>(m_socket, dirent->gid);
+        if (dirent.index() == 1) {
+            co_return co_await write_status(m_socket, std::get<Status>(dirent));
+        }
+
+        auto entry = std::get<Dirent>(dirent);
+        TRY_SCOPED(co_await write_status(m_socket, Status::Success));
+
+        TRY_SCOPED(co_await write_path(m_socket, entry.name));
+        TRY_SCOPED(co_await write_int<u64>(m_socket, entry.links));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, entry.size));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, entry.mtime.tv_sec));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, entry.mtime.tv_nsec));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, entry.atime.tv_sec));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, entry.atime.tv_nsec));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, entry.ctime.tv_sec));
+        TRY_SCOPED(co_await write_int<i64>(m_socket, entry.ctime.tv_nsec));
+        TRY_SCOPED(co_await write_int<u32>(m_socket, entry.mode));
+        TRY_SCOPED(co_await write_int<u32>(m_socket, entry.uid));
+        co_return co_await write_int<u32>(m_socket, entry.gid);
     }
 
-    AExpect<Opt<Dirent>> Receiver::recv_next()
+    AExpect<Var<Dirent, Status, Unit>> Receiver::recv_next()
     {
-        TRY(status, co_await read_int<u8>(m_socket));
-        if (status != stream_continue) {
-            co_return std::nullopt;
+        TRY(stream_status, co_await read_int<u8>(m_socket));
+        if (stream_status != stream_continue) {
+            co_return Unit{};
+        }
+
+        // NOTE: I want to differentiate the status here
+        TRY(status_int, co_await read_int<u8>(m_socket));
+        if (auto status = static_cast<Status>(*status_int); status != Status::Success) {
+            co_return status;
         }
 
         TRY(name_slice, co_await read_bytes(m_socket, m_buffer));
@@ -592,19 +622,37 @@ namespace madbfs::rpc::listdir_channel
 
 namespace madbfs::rpc
 {
-    static constexpr auto ready_signal = Array<u8, 4>{ 0xff, 0xff, 0xff, 0xff };
-
-    AExpect<void> send_ready_signal(Socket& socket)
+    Str to_string(Procedure procedure)
     {
-        auto [ec, n] = co_await async::write_exact<u8>(socket, ready_signal);
-        HANDLE_ERROR(ec, n, ready_signal.size());
-        co_return Expect<void>{};
+        switch (procedure) {
+
+        case Procedure::Listdir: return "Listdir";
+        case Procedure::Stat: return "Stat";
+        case Procedure::Readlink: return "Readlink";
+        case Procedure::Mknod: return "Mknod";
+        case Procedure::Mkdir: return "Mkdir";
+        case Procedure::Unlink: return "Unlink";
+        case Procedure::Rmdir: return "Rmdir";
+        case Procedure::Rename: return "Rename";
+        case Procedure::Truncate: return "Truncate";
+        case Procedure::Read: return "Read";
+        case Procedure::Write: return "Write";
+        case Procedure::Utimens: return "Utimens";
+        case Procedure::CopyFileRange: return "CopyFileRange";
+        }
+
+        return "Unknown";
     }
 
-    AExpect<void> recv_ready_signal(Socket& socket)
+    Str to_string(Request request)
     {
-        auto [ec, n] = co_await async::write_exact<u8>(socket, ready_signal);
-        HANDLE_ERROR(ec, n, ready_signal.size());
-        co_return Expect<void>{};
+        auto index = request.index() + 1;
+        return to_string(static_cast<Procedure>(index));
+    }
+
+    Str to_string(Response response)
+    {
+        auto index = response.index() + 1;
+        return to_string(static_cast<Procedure>(index));
     }
 }

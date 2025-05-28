@@ -162,6 +162,9 @@ namespace madbfs::rpc
         {
         }
 
+        Socket&  sock() noexcept { return m_socket; }
+        Vec<u8>& buf() noexcept { return m_buffer; }
+
         // clang-format off
         AExpect<resp::Listdir>       send_req_listdir        (req::Listdir       req);
         AExpect<resp::Stat>          send_req_stat           (req::Stat          req);
@@ -191,6 +194,9 @@ namespace madbfs::rpc
             , m_buffer{ buffer }
         {
         }
+
+        Socket&  sock() noexcept { return m_socket; }
+        Vec<u8>& buf() noexcept { return m_buffer; }
 
         AExpect<Procedure> peek_req();
         AExpect<void>      send_resp(Var<Status, Response> response);
@@ -238,7 +244,7 @@ namespace madbfs::rpc
             }
 
             // std::nullopt if stream ends
-            AExpect<void> send_next(Opt<Dirent> dirent);
+            AExpect<void> send_next(Var<Dirent, Status, Unit> dirent);
 
         private:
             Socket& m_socket;
@@ -254,7 +260,7 @@ namespace madbfs::rpc
             }
 
             // std::nullopt if stream ends
-            AExpect<Opt<Dirent>> recv_next();
+            AExpect<Var<Dirent, Status, Unit>> recv_next();
 
         private:
             Socket&  m_socket;
@@ -263,4 +269,25 @@ namespace madbfs::rpc
     }
 
     static constexpr Str server_ready_string = "SERVER_IS_READY";
+
+    /**
+     * @brief Return string representation of enum Procedure.
+     *
+     * The string lifetime is static.
+     */
+    Str to_string(Procedure procedure);
+
+    /**
+     * @brief Return the type name of the contained Request variant.
+     *
+     * The string lifetime is static.
+     */
+    Str to_string(Request request);
+
+    /**
+     * @brief Return the type name of the contained Response variant.
+     *
+     * The string lifetime is static.
+     */
+    Str to_string(Response response);
 }
