@@ -179,7 +179,7 @@ namespace madbfs::rpc
         if (auto res = co_await write_path(sock, req.path); not res) {
             co_return res;
         }
-        co_return co_await write_int<i64>(sock, req.offset);
+        co_return co_await write_int<i64>(sock, req.size);
     }
 
     AExpect<void> write_req_read(Socket& sock, const req::Read& req)
@@ -510,13 +510,13 @@ namespace madbfs::rpc
         if (not path_slice) {
             co_return Unexpect{ path_slice.error() };
         }
-        auto offset = co_await read_int<i64>(sock);
-        if (not offset) {
-            co_return Unexpect{ offset.error() };
+        auto size = co_await read_int<i64>(sock);
+        if (not size) {
+            co_return Unexpect{ size.error() };
         }
 
         auto path_str = slice_as_str(buf, *path_slice);
-        co_return Request{ req::Truncate{ .path = path_str, .offset = *offset } };
+        co_return Request{ req::Truncate{ .path = path_str, .size = *size } };
     }
 
     AExpect<Request> read_req_read(Socket& sock, Vec<u8>& buf)
@@ -795,46 +795,65 @@ namespace madbfs::rpc
 
 namespace madbfs::rpc::listdir_channel
 {
-    AExpect<void> Sender::send_next(Dirent dirent)
+    static constexpr auto end_of_stream   = u8{ 0xff };
+    static constexpr auto stream_continue = u8{ 0x00 };
+
+    AExpect<void> Sender::send_next(Opt<Dirent> dirent)
     {
-        if (auto res = co_await write_path(m_socket, dirent.name); not res) {
+        if (not dirent) {
+            co_return co_await write_int<u8>(m_socket, end_of_stream);
+        }
+
+        if (auto res = co_await write_int<u8>(m_socket, stream_continue); not res) {
             co_return Unexpect{ res.error() };
         }
-        if (auto res = co_await write_int<u64>(m_socket, dirent.links); not res) {
+        if (auto res = co_await write_path(m_socket, dirent->name); not res) {
             co_return Unexpect{ res.error() };
         }
-        if (auto res = co_await write_int<i64>(m_socket, dirent.size); not res) {
+        if (auto res = co_await write_int<u64>(m_socket, dirent->links); not res) {
             co_return Unexpect{ res.error() };
         }
-        if (auto res = co_await write_int<i64>(m_socket, dirent.mtime.tv_sec); not res) {
+        if (auto res = co_await write_int<i64>(m_socket, dirent->size); not res) {
             co_return Unexpect{ res.error() };
         }
-        if (auto res = co_await write_int<i64>(m_socket, dirent.mtime.tv_nsec); not res) {
+        if (auto res = co_await write_int<i64>(m_socket, dirent->mtime.tv_sec); not res) {
             co_return Unexpect{ res.error() };
         }
-        if (auto res = co_await write_int<i64>(m_socket, dirent.atime.tv_sec); not res) {
+        if (auto res = co_await write_int<i64>(m_socket, dirent->mtime.tv_nsec); not res) {
             co_return Unexpect{ res.error() };
         }
-        if (auto res = co_await write_int<i64>(m_socket, dirent.atime.tv_nsec); not res) {
+        if (auto res = co_await write_int<i64>(m_socket, dirent->atime.tv_sec); not res) {
             co_return Unexpect{ res.error() };
         }
-        if (auto res = co_await write_int<i64>(m_socket, dirent.ctime.tv_sec); not res) {
+        if (auto res = co_await write_int<i64>(m_socket, dirent->atime.tv_nsec); not res) {
             co_return Unexpect{ res.error() };
         }
-        if (auto res = co_await write_int<i64>(m_socket, dirent.ctime.tv_nsec); not res) {
+        if (auto res = co_await write_int<i64>(m_socket, dirent->ctime.tv_sec); not res) {
             co_return Unexpect{ res.error() };
         }
-        if (auto res = co_await write_int<u32>(m_socket, dirent.mode); not res) {
+        if (auto res = co_await write_int<i64>(m_socket, dirent->ctime.tv_nsec); not res) {
             co_return Unexpect{ res.error() };
         }
-        if (auto res = co_await write_int<u32>(m_socket, dirent.uid); not res) {
+        if (auto res = co_await write_int<u32>(m_socket, dirent->mode); not res) {
             co_return Unexpect{ res.error() };
         }
-        co_return co_await write_int<u32>(m_socket, dirent.gid);
+        if (auto res = co_await write_int<u32>(m_socket, dirent->uid); not res) {
+            co_return Unexpect{ res.error() };
+        }
+        co_return co_await write_int<u32>(m_socket, dirent->gid);
     }
 
-    AExpect<Dirent> Receiver::recv_next()
+    AExpect<Opt<Dirent>> Receiver::recv_next()
     {
+        auto status = co_await read_int<u8>(m_socket);
+        if (not status) {
+            co_return Unexpect{ status.error() };
+        }
+
+        if (status != stream_continue) {
+            co_return std::nullopt;
+        }
+
         auto name_slice = co_await read_bytes(m_socket, m_buffer);
         if (not name_slice) {
             co_return Unexpect{ name_slice.error() };
@@ -895,5 +914,24 @@ namespace madbfs::rpc::listdir_channel
             .uid   = *uid,
             .gid   = *gid,
         };
+    }
+}
+
+namespace madbfs::rpc
+{
+    static constexpr auto ready_signal = Array<u8, 4>{ 0xff, 0xff, 0xff, 0xff };
+
+    AExpect<void> send_ready_signal(Socket& socket)
+    {
+        auto [ec, n] = co_await async::write_exact<u8>(socket, ready_signal);
+        HANDLE_ERROR(ec, n, ready_signal.size());
+        co_return Expect<void>{};
+    }
+
+    AExpect<void> recv_ready_signal(Socket& socket)
+    {
+        auto [ec, n] = co_await async::write_exact<u8>(socket, ready_signal);
+        HANDLE_ERROR(ec, n, ready_signal.size());
+        co_return Expect<void>{};
     }
 }

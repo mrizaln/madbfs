@@ -60,7 +60,7 @@ namespace madbfs::rpc
         DirectoryNotEmpty     = ENOTEMPTY,
     };
 
-    // Corresponds to `madbfs::data::Connection` calls
+    // Corresponds to `madbfs::connection::Connection` calls
     namespace req
     {
         // NOTE: server after receiving this request must immediately use `listdir_channel::Sender` and send
@@ -78,7 +78,7 @@ namespace madbfs::rpc
         struct Unlink        { Str path; };
         struct Rmdir         { Str path; };
         struct Rename        { Str from; Str to; };
-        struct Truncate      { Str path; i64 offset; };
+        struct Truncate      { Str path; i64 size; };
         struct Read          { Str path; i64 offset; u64 size; };
         struct Write         { Str path; i64 offset; Span<const u8> in; };
         struct Utimens       { Str path; timespec atime; timespec mtime; };
@@ -155,8 +155,9 @@ namespace madbfs::rpc
     class Client
     {
     public:
-        Client(Socket& socket)
+        Client(Socket& socket, Vec<u8>& buffer)
             : m_socket{ socket }
+            , m_buffer{ buffer }
         {
         }
 
@@ -171,8 +172,9 @@ namespace madbfs::rpc
     class Server
     {
     public:
-        Server(Socket& socket)
+        Server(Socket& socket, Vec<u8>& buffer)
             : m_socket{ socket }
+            , m_buffer{ buffer }
         {
         }
 
@@ -207,7 +209,8 @@ namespace madbfs::rpc
             {
             }
 
-            AExpect<void> send_next(Dirent dirent);
+            // std::nullopt if stream ends
+            AExpect<void> send_next(Opt<Dirent> dirent);
 
         private:
             Socket& m_socket;
@@ -222,16 +225,14 @@ namespace madbfs::rpc
             {
             }
 
-            /**
-             * @brief Receive next directory entry.
-             *
-             * The  return value will be Errc::end_of_file if
-             */
-            AExpect<Dirent> recv_next();
+            // std::nullopt if stream ends
+            AExpect<Opt<Dirent>> recv_next();
 
         private:
             Socket&  m_socket;
             Vec<u8>& m_buffer;
         };
     }
+
+    static constexpr Str server_ready_string = "SERVER_IS_READY";
 }
