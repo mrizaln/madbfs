@@ -36,7 +36,8 @@ namespace
     {
         constexpr auto size = sizeof(I);
 
-        if constexpr (std::endian::native == std::endian::big) {
+        // if constexpr (std::endian::native == std::endian::big) {
+        if constexpr (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) {
             return std::bit_cast<std::array<u8, size>>(value);
         } else {
             auto array = std::bit_cast<std::array<u8, size>>(value);
@@ -52,7 +53,8 @@ namespace
     {
         constexpr auto size = sizeof(I);
 
-        if constexpr (std::endian::native == std::endian::big) {
+        // if constexpr (std::endian::native == std::endian::big) {
+        if constexpr (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) {
             return std::bit_cast<I>(bytes);
         } else {
             for (auto i = 0u; i < size / 2; ++i) {
@@ -295,7 +297,7 @@ namespace madbfs::rpc
 
         co_return Response{ resp::Stat{
             .size  = *size,
-            .links = *links,
+            .links = static_cast<nlink_t>(*links),
             .mtime = { .tv_sec = *mtime_sec, .tv_nsec = *mtime_nsec },
             .atime = { .tv_sec = *atime_sec, .tv_nsec = *atime_nsec },
             .ctime = { .tv_sec = *ctime_sec, .tv_nsec = *ctime_nsec },
@@ -745,6 +747,9 @@ namespace madbfs::rpc
         case Procedure::CopyFileRange: return read_req_copy_file_range(m_socket, m_buffer);
         }
         // clang-format on
+
+        printf("procedure integral value: %d", static_cast<int>(procedure));
+        assert(false and "invalid procedure");
     }
 
     AExpect<void> Server::send_resp_procedure(Var<Status, Response> response)
@@ -877,7 +882,7 @@ namespace madbfs::rpc::listdir_channel
 
         co_return Dirent{
             .name  = slice_as_str(m_buffer, *name_slice),
-            .links = *links,
+            .links = static_cast<nlink_t>(*links),
             .size  = *size,
             .mtime = { .tv_sec = *mtime_sec, .tv_nsec = *mtime_nsec },
             .atime = { .tv_sec = *atime_sec, .tv_nsec = *atime_nsec },
