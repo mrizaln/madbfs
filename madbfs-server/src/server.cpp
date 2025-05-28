@@ -218,42 +218,79 @@ namespace madbfs::server
 
     AExpect<void> Server::handle_req_mknod(rpc::Server& serv)
     {
+        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
     }
 
     AExpect<void> Server::handle_req_mkdir(rpc::Server& serv)
     {
+        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
     }
 
     AExpect<void> Server::handle_req_unlink(rpc::Server& serv)
     {
+        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
     }
 
     AExpect<void> Server::handle_req_rmdir(rpc::Server& serv)
     {
+        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
     }
 
     AExpect<void> Server::handle_req_rename(rpc::Server& serv)
     {
+        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
     }
 
     AExpect<void> Server::handle_req_truncate(rpc::Server& serv)
     {
+        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
     }
 
     AExpect<void> Server::handle_req_read(rpc::Server& serv)
     {
+        auto read = co_await serv.recv_req_read();
+        if (not read) {
+            co_return Unexpect{ read.error() };
+        }
+        spdlog::debug("{}: path={:?} size={}", __func__, read->path.data(), read->size);
+
+        auto fd = ::open(read->path.data(), O_RDONLY);
+        if (fd < 0) {
+            auto err = log_status_from_errno(__func__, read->path, "failed to open file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        if (::lseek(fd, read->offset, SEEK_SET) < 0) {
+            auto err = log_status_from_errno(__func__, read->path, "failed to seek file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        auto& buf = serv.buf();
+        buf.resize(read->size);
+
+        auto len = ::read(fd, buf.data(), buf.size());
+        if (len < 0) {
+            auto err = log_status_from_errno(__func__, read->path, "failed to read file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        co_return co_await serv.send_resp(rpc::resp::Read{
+            .read = Span{ buf.begin(), static_cast<usize>(len) },
+        });
     }
 
     AExpect<void> Server::handle_req_write(rpc::Server& serv)
     {
+        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
     }
 
     AExpect<void> Server::handle_req_utimens(rpc::Server& serv)
     {
+        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
     }
 
     AExpect<void> Server::handle_req_copy_file_range(rpc::Server& serv)
     {
+        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
     }
-
 }
