@@ -1,11 +1,8 @@
 #pragma once
 
-#include <rapidhash.h>
-
 #include <chrono>
 #include <cstdint>
 #include <expected>
-#include <generator>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -13,6 +10,11 @@
 #include <string_view>
 #include <variant>
 #include <vector>
+#include <version>
+
+#ifdef __cpp_lib_generator
+#    include <generator>
+#endif
 
 namespace madbfs
 {
@@ -73,8 +75,10 @@ namespace madbfs
         using Clock     = std::chrono::system_clock;
         using Timestamp = Clock::time_point;
 
+#ifdef __cpp_lib_generator
         template <typename T>
         using Gen = std::generator<T>;
+#endif
 
         using Errc = std::errc;
 
@@ -179,10 +183,18 @@ namespace madbfs
     }
 }
 
+#ifndef MADBFS_RAPIDHASH_ENABLED
+#    define MADBFS_RAPIDHASH_ENABLED 0
+#endif
+
+#if MADBFS_RAPIDHASH_ENABLED
+#    include <rapidhash.h>
+
 // enable hashing for any type that has unique object representation
 template <typename T>
-    requires std::has_unique_object_representations_v<T>
+    requires std::has_unique_object_representations<T>::value
 struct std::hash<T>
 {
     std::size_t operator()(const T& value) const noexcept { return rapidhash(&value, sizeof(T)); }
 };
+#endif
