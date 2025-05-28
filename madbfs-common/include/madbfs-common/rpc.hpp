@@ -46,6 +46,8 @@ namespace madbfs::rpc
         CopyFileRange,
     };
 
+    // NOTE: network error won't overlap with procedure error. procedure error are only limited to the
+    // integral values defined by Status
     enum class Status : u8
     {
         Success               = 0,
@@ -158,12 +160,8 @@ namespace madbfs::rpc
         {
         }
 
-        AExpect<void> send_req_procedure(Procedure procedure);
-        AExpect<void> send_req_param(Request request);
-
-        // NOTE: network error won't overlap with procedure error. procedure error are only limited to the
-        // integral values defined by Status
-        AExpect<Response> recv_resp_procedure(Procedure procedure);
+        AExpect<Procedure> send_req(Request request);
+        AExpect<Response>  recv_resp(Procedure procedure);
 
     private:
         Socket& m_socket;
@@ -178,10 +176,8 @@ namespace madbfs::rpc
         {
         }
 
-        AExpect<Procedure> recv_req_procedure();
-        AExpect<Request>   recv_req_param(Procedure procedure);
-
-        AExpect<void> send_resp_procedure(Var<Status, Response> response);
+        AExpect<Request> recv_req();
+        AExpect<void>    send_resp(Var<Status, Response> response);
 
     private:
         Socket& m_socket;

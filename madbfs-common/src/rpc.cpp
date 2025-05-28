@@ -372,13 +372,14 @@ namespace madbfs::rpc
 
     // --------------------
 
-    AExpect<void> Client::send_req_procedure(Procedure procedure)
+    AExpect<Procedure> Client::send_req(Request request)
     {
-        return write_int<u8>(m_socket, static_cast<u8>(procedure));
-    }
+        // NOTE: using the index() requires the Procedure enum to be listed in the same order as Request
+        auto res = co_await write_int<u8>(m_socket, static_cast<u8>(request.index() + 1));
+        if (not res) {
+            co_return Unexpect{ res.error() };
+        }
 
-    AExpect<void> Client::send_req_param(Request request)
-    {
         auto overload = util::Overload{
             // clang-format off
             [&](const req::Listdir&       req) { return write_req_listdir        (m_socket, req); },
@@ -396,10 +397,12 @@ namespace madbfs::rpc
             [&](const req::CopyFileRange& req) { return write_req_copy_file_range(m_socket, req); },
             // clang-format on
         };
-        return std::visit(std::move(overload), std::move(request));
+
+        co_await std::visit(std::move(overload), request);
+        co_return static_cast<Procedure>(request.index() + 1);
     }
 
-    AExpect<Response> Client::recv_resp_procedure(Procedure procedure)
+    AExpect<Response> Client::recv_resp(Procedure procedure)
     {
         auto status = co_await read_int<u8>(m_socket);
         if (not status) {
@@ -425,6 +428,8 @@ namespace madbfs::rpc
         case Procedure::CopyFileRange: co_return co_await read_resp_copy_file_range(m_socket, m_buffer);
         }
         // clang-format on
+
+        co_return Unexpect{ Errc::invalid_argument };
     }
 }
 
@@ -722,37 +727,36 @@ namespace madbfs::rpc
 
     // --------------------
 
-    AExpect<Procedure> Server::recv_req_procedure()
+    AExpect<Request> Server::recv_req()
     {
         auto byte = co_await read_int<u8>(m_socket);
-        co_return byte.transform([](u8 b) { return static_cast<Procedure>(b); });
-    }
+        if (not byte) {
+            co_return Unexpect{ byte.error() };
+        }
+        auto procedure = static_cast<Procedure>(*byte);
 
-    AExpect<Request> Server::recv_req_param(Procedure procedure)
-    {
         // clang-format off
         switch (procedure) {
-        case Procedure::Listdir:       return read_req_listdir        (m_socket, m_buffer);
-        case Procedure::Stat:          return read_req_stat           (m_socket, m_buffer);
-        case Procedure::Readlink:      return read_req_readlink       (m_socket, m_buffer);
-        case Procedure::Mknod:         return read_req_mknod          (m_socket, m_buffer);
-        case Procedure::Mkdir:         return read_req_mkdir          (m_socket, m_buffer);
-        case Procedure::Unlink:        return read_req_unlink         (m_socket, m_buffer);
-        case Procedure::Rmdir:         return read_req_rmdir          (m_socket, m_buffer);
-        case Procedure::Rename:        return read_req_rename         (m_socket, m_buffer);
-        case Procedure::Truncate:      return read_req_truncate       (m_socket, m_buffer);
-        case Procedure::Read:          return read_req_read           (m_socket, m_buffer);
-        case Procedure::Write:         return read_req_write          (m_socket, m_buffer);
-        case Procedure::Utimens:       return read_req_utimens        (m_socket, m_buffer);
-        case Procedure::CopyFileRange: return read_req_copy_file_range(m_socket, m_buffer);
+        case Procedure::Listdir:       co_return co_await read_req_listdir        (m_socket, m_buffer);
+        case Procedure::Stat:          co_return co_await read_req_stat           (m_socket, m_buffer);
+        case Procedure::Readlink:      co_return co_await read_req_readlink       (m_socket, m_buffer);
+        case Procedure::Mknod:         co_return co_await read_req_mknod          (m_socket, m_buffer);
+        case Procedure::Mkdir:         co_return co_await read_req_mkdir          (m_socket, m_buffer);
+        case Procedure::Unlink:        co_return co_await read_req_unlink         (m_socket, m_buffer);
+        case Procedure::Rmdir:         co_return co_await read_req_rmdir          (m_socket, m_buffer);
+        case Procedure::Rename:        co_return co_await read_req_rename         (m_socket, m_buffer);
+        case Procedure::Truncate:      co_return co_await read_req_truncate       (m_socket, m_buffer);
+        case Procedure::Read:          co_return co_await read_req_read           (m_socket, m_buffer);
+        case Procedure::Write:         co_return co_await read_req_write          (m_socket, m_buffer);
+        case Procedure::Utimens:       co_return co_await read_req_utimens        (m_socket, m_buffer);
+        case Procedure::CopyFileRange: co_return co_await read_req_copy_file_range(m_socket, m_buffer);
         }
         // clang-format on
 
-        printf("procedure integral value: %d", static_cast<int>(procedure));
-        assert(false and "invalid procedure");
+        co_return Unexpect{ Errc::invalid_argument };
     }
 
-    AExpect<void> Server::send_resp_procedure(Var<Status, Response> response)
+    AExpect<void> Server::send_resp(Var<Status, Response> response)
     {
         auto status = static_cast<u8>(Status::Success);
         if (auto err = std::get_if<Status>(&response); err) {
