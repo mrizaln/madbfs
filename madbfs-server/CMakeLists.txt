@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(asio REQUIRED)
+find_package(spdlog REQUIRED)
 
 # https://stackoverflow.com/a/8349410/16506263
 set(MADBFS_USE_NON_BOOST_ASIO ON CACHE BOOL "use non-boost asio")
@@ -20,7 +21,7 @@ add_subdirectory(
 
 add_library(madbfs-server-lib STATIC src/server.cpp)
 target_include_directories(madbfs-server-lib PUBLIC include)
-target_link_libraries(madbfs-server-lib PUBLIC madbfs-common)
+target_link_libraries(madbfs-server-lib PUBLIC madbfs-common spdlog::spdlog)
 
 add_executable(madbfs-server src/main.cpp)
 target_include_directories(madbfs-server PRIVATE src)

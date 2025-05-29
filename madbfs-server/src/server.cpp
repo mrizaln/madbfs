@@ -3,10 +3,11 @@
 #include <madbfs-common/rpc.hpp>
 #include <madbfs-common/util/overload.hpp>
 
+#include <spdlog/spdlog.h>
+
 #include <dirent.h>
 #include <sys/stat.h>
-
-#include <print>
+#include <unistd.h>
 
 namespace
 {
@@ -18,7 +19,7 @@ namespace
     madbfs::rpc::Status log_status_from_errno(madbfs::Str name, madbfs::Str path, madbfs::Str msg)
     {
         auto err = errno;
-        std::println("{}: {} {:?}: {}", name, msg, path, strerror(err));
+        spdlog::error("{}: {} {:?}: {}", name, msg, path, strerror(err));
         auto status = static_cast<madbfs::rpc::Status>(err);
 
         switch (status) {
@@ -55,13 +56,13 @@ namespace madbfs::server
 
     AExpect<void> Server::run()
     {
-        std::println("{}: launching tcp server on port: {}", __func__, m_acceptor.local_endpoint().port());
+        spdlog::info("{}: launching tcp server on port: {}", __func__, m_acceptor.local_endpoint().port());
         m_running = true;
 
         while (m_running) {
             auto sock = co_await m_acceptor.async_accept();
             if (not sock) {
-                std::println("{}: failed to accept connection: {}", __func__, sock.error().message());
+                spdlog::error("{}: failed to accept connection: {}", __func__, sock.error().message());
                 break;
             }
 
@@ -84,19 +85,19 @@ namespace madbfs::server
         auto ec   = std::error_code{};
         auto peer = sock.remote_endpoint(ec);
         if (ec) {
-            std::println("{}: failed to get endpoint: {}", __func__, ec.message());
+            spdlog::error("{}: failed to get endpoint: {}", __func__, ec.message());
         }
-        std::println("{}: new connection from {}:{}", __func__, peer.address().to_string(), peer.port());
+        spdlog::debug("{}: new connection from {}:{}", __func__, peer.address().to_string(), peer.port());
 
         auto buffer     = Vec<u8>{};
         auto rpc_server = rpc::Server{ sock, buffer };
 
         auto procedure = co_await rpc_server.peek_req();
         if (not procedure) {
-            std::println("{}: failed to get param for procedure {}", __func__, err_msg(procedure.error()));
+            spdlog::error("{}: failed to get param for procedure {}", __func__, err_msg(procedure.error()));
             co_return Expect<void>{};
         }
-        std::println("{}: accepted procedure [{}]", __func__, to_string(*procedure));
+        spdlog::info("{}: accepted procedure [{}]", __func__, to_string(*procedure));
 
         // clang-format off
         switch (*procedure) {
@@ -116,7 +117,7 @@ namespace madbfs::server
         }
         // clang-format on
 
-        std::println("{}: invalid procedure with integral value {}", __func__, static_cast<u8>(*procedure));
+        spdlog::error("{}: invalid procedure with integral value {}", __func__, static_cast<u8>(*procedure));
 
         co_return Expect<void>{};
     }
@@ -127,7 +128,7 @@ namespace madbfs::server
         if (not listdir) {
             co_return Unexpect{ listdir.error() };
         }
-        std::println("{}: path={:?}", __func__, listdir->path.data());
+        spdlog::debug("{}: path={:?}", __func__, listdir->path.data());
 
         auto dir = ::opendir(listdir->path.data());
         if (dir == nullptr) {
@@ -196,7 +197,7 @@ namespace madbfs::server
         if (not stat) {
             co_return Unexpect{ stat.error() };
         }
-        std::println("{}: path={:?}", __func__, stat->path.data());
+        spdlog::debug("{}: path={:?}", __func__, stat->path.data());
 
         struct stat filestat = {};
         if (auto res = ::lstat(stat->path.data(), &filestat); res < 0) {
@@ -222,7 +223,7 @@ namespace madbfs::server
         if (not readlink) {
             co_return Unexpect{ readlink.error() };
         }
-        std::println("{}: path={:?}", __func__, readlink->path.data());
+        spdlog::debug("{}: path={:?}", __func__, readlink->path.data());
 
         auto buffer = Array<char, 1024>{};
         auto len    = ::readlink(readlink->path.data(), buffer.data(), buffer.size());
@@ -238,32 +239,100 @@ namespace madbfs::server
 
     AExpect<void> Server::handle_req_mknod(rpc::Server& serv)
     {
-        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
+        auto mknod = co_await serv.recv_req_mknod();
+        if (not mknod) {
+            co_return Unexpect{ mknod.error() };
+        }
+        spdlog::debug("{}: path={:?}", __func__, mknod->path.data());
+
+        if (::mknod(mknod->path.data(), S_IFREG, 0) < 0) {
+            auto err = log_status_from_errno(__func__, mknod->path, "failed to create file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        co_return co_await serv.send_resp(rpc::resp::Mknod{});
     }
 
     AExpect<void> Server::handle_req_mkdir(rpc::Server& serv)
     {
-        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
+        constexpr mode_t default_directory_mode = 040770;
+
+        auto mkdir = co_await serv.recv_req_mkdir();
+        if (not mkdir) {
+            co_return Unexpect{ mkdir.error() };
+        }
+        spdlog::debug("{}: path={:?}", __func__, mkdir->path.data());
+
+        if (::mkdir(mkdir->path.data(), default_directory_mode) < 0) {
+            auto err = log_status_from_errno(__func__, mkdir->path, "failed to create directory");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        co_return co_await serv.send_resp(rpc::resp::Mkdir{});
     }
 
     AExpect<void> Server::handle_req_unlink(rpc::Server& serv)
     {
-        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
+        auto unlink = co_await serv.recv_req_unlink();
+        if (not unlink) {
+            co_return Unexpect{ unlink.error() };
+        }
+        spdlog::debug("{}: path={:?}", __func__, unlink->path.data());
+
+        if (::unlink(unlink->path.data()) < 0) {
+            auto err = log_status_from_errno(__func__, unlink->path, "failed to remove file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        co_return co_await serv.send_resp(rpc::resp::Unlink{});
     }
 
     AExpect<void> Server::handle_req_rmdir(rpc::Server& serv)
     {
-        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
+        auto rmdir = co_await serv.recv_req_rmdir();
+        if (not rmdir) {
+            co_return Unexpect{ rmdir.error() };
+        }
+        spdlog::debug("{}: path={:?}", __func__, rmdir->path.data());
+
+        if (::rmdir(rmdir->path.data()) < 0) {
+            auto err = log_status_from_errno(__func__, rmdir->path, "failed to remove directory");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        co_return co_await serv.send_resp(rpc::resp::Rmdir{});
     }
 
     AExpect<void> Server::handle_req_rename(rpc::Server& serv)
     {
-        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
+        auto rename = co_await serv.recv_req_rename();
+        if (not rename) {
+            co_return Unexpect{ rename.error() };
+        }
+        spdlog::debug("{}: from={:?} -> to={:?}", __func__, rename->from.data(), rename->to.data());
+
+        if (::rename(rename->from.data(), rename->to.data()) < 0) {
+            auto err = log_status_from_errno(__func__, rename->from, "failed to rename file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        co_return co_await serv.send_resp(rpc::resp::Rename{});
     }
 
     AExpect<void> Server::handle_req_truncate(rpc::Server& serv)
     {
-        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
+        auto truncate = co_await serv.recv_req_truncate();
+        if (not truncate) {
+            co_return Unexpect{ truncate.error() };
+        }
+        spdlog::debug("{}: path={:?}", __func__, truncate->path.data());
+
+        if (::truncate(truncate->path.data(), truncate->size) < 0) {
+            auto err = log_status_from_errno(__func__, truncate->path, "failed to truncate file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        co_return co_await serv.send_resp(rpc::resp::Truncate{});
     }
 
     AExpect<void> Server::handle_req_read(rpc::Server& serv)
@@ -272,7 +341,7 @@ namespace madbfs::server
         if (not read) {
             co_return Unexpect{ read.error() };
         }
-        std::println("{}: path={:?} size={}", __func__, read->path.data(), read->size);
+        spdlog::debug("{}: path={:?} size={}", __func__, read->path.data(), read->size);
 
         auto fd = ::open(read->path.data(), O_RDONLY);
         if (fd < 0) {
@@ -301,16 +370,101 @@ namespace madbfs::server
 
     AExpect<void> Server::handle_req_write(rpc::Server& serv)
     {
-        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
+        auto write = co_await serv.recv_req_write();
+        if (not write) {
+            co_return Unexpect{ write.error() };
+        }
+        spdlog::debug("{}: path={:?} size={}", __func__, write->path.data(), write->in.size());
+
+        auto fd = ::open(write->path.data(), O_WRONLY | O_CREAT, S_IWUSR);
+        if (fd < 0) {
+            auto err = log_status_from_errno(__func__, write->path, "failed to open file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        if (::lseek(fd, write->offset, SEEK_SET) < 0) {
+            auto err = log_status_from_errno(__func__, write->path, "failed to seek file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        auto len = ::write(fd, write->in.data(), write->in.size());
+        if (len < 0) {
+            auto err = log_status_from_errno(__func__, write->path, "failed to write file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        co_return co_await serv.send_resp(rpc::resp::Write{ .size = static_cast<usize>(len) });
     }
 
     AExpect<void> Server::handle_req_utimens(rpc::Server& serv)
     {
-        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
+        auto utimens = co_await serv.recv_req_utimens();
+        if (not utimens) {
+            co_return Unexpect{ utimens.error() };
+        }
+        spdlog::debug("{}: path={:?}", __func__, utimens->path.data());
+
+        auto times = Array{ utimens->atime, utimens->mtime };
+        if (::utimensat(0, utimens->path.data(), times.data(), AT_SYMLINK_NOFOLLOW) < 0) {
+            auto err = log_status_from_errno(__func__, utimens->path, "failed to utimens file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        co_return co_await serv.send_resp(rpc::resp::Utimens{});
     }
 
     AExpect<void> Server::handle_req_copy_file_range(rpc::Server& serv)
     {
-        co_return co_await serv.send_resp(rpc::Status::PermissionDenied);
+        auto copy_file_range = co_await serv.recv_req_copy_file_range();
+        if (not copy_file_range) {
+            co_return Unexpect{ copy_file_range.error() };
+        }
+
+        auto [in, in_off, out, out_off, size] = *copy_file_range;
+        spdlog::debug("{}: from={:?} -> to={:?}", __func__, in.data(), out.data());
+
+        auto in_fd = ::open(in.data(), O_RDONLY);
+        if (in_fd < 0) {
+            auto err = log_status_from_errno(__func__, in, "failed to open file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        if (::lseek(in_fd, in_off, SEEK_SET) < 0) {
+            auto err = log_status_from_errno(__func__, in, "failed to seek file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        auto out_fd = ::open(out.data(), O_RDONLY);
+        if (out_fd < 0) {
+            auto err = log_status_from_errno(__func__, out, "failed to open file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        if (::lseek(out_fd, out_off, SEEK_SET) < 0) {
+            auto err = log_status_from_errno(__func__, out, "failed to seek file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        auto buffer = String(256 * 1024, '\0');
+
+        auto copied = 0_i64;
+        auto len    = 0_i64;
+
+        while (len > 0) {
+            if (len = ::read(in_fd, buffer.data(), buffer.size()); len <= 0) {
+                break;
+            }
+            if (len = ::write(out_fd, buffer.data(), static_cast<usize>(len)); len < 0) {
+                break;
+            }
+            copied += len;
+        }
+
+        if (len < 0) {
+            auto err = log_status_from_errno(__func__, out, "failed to seek file");
+            co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        co_return co_await serv.send_resp(rpc::resp::CopyFileRange{ .size = static_cast<usize>(copied) });
     }
 }
