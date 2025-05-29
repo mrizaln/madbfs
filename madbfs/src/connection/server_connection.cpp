@@ -63,30 +63,30 @@ namespace madbfs::connection
             };
 
             // check if already running
-            if (auto res = co_await dummy_connect(); res) {
-                log_i({ "{}: server is already running, continue normally" }, __func__);
-                co_return Uniq<ServerConnection>{ new ServerConnection{ port } };
-            }
-
-            log_i({ "{}: server is not running" }, __func__);
-        } else {
-            log_i({ "{}: server path set to {}, pushing server normally" }, __func__, server->fullpath());
-
-            // push server executable to device
-            auto push_args = Array<Str, 3>{ "push", server->fullpath(), serv_file };
-            if (auto res = co_await exec_async("adb", push_args, "", true, false); not res) {
-                auto msg = std::make_error_code(res.error()).message();
-                log_e({ "{}: failed to push 'madbfs-server' to device: {}" }, __func__, msg);
+            if (auto res = co_await dummy_connect(); not res) {
                 co_return Unexpect{ res.error() };
             }
 
-            // update execute permission
-            auto chmod_args = Array<Str, 4>{ "shell", "chmod", "+x", serv_file };
-            if (auto res = co_await exec_async("adb", chmod_args, "", true, false); not res) {
-                auto msg = std::make_error_code(res.error()).message();
-                log_e({ "{}: failed to update 'madbfs-server' permission: {}" }, __func__, msg);
-                co_return Unexpect{ res.error() };
-            }
+            log_i({ "{}: server is already running, continue normally" }, __func__);
+            co_return Uniq<ServerConnection>{ new ServerConnection{ port } };
+        }
+
+        log_i({ "{}: server path set to {}, pushing server normally" }, __func__, server->fullpath());
+
+        // push server executable to device
+        auto push_args = Array<Str, 3>{ "push", server->fullpath(), serv_file };
+        if (auto res = co_await exec_async("adb", push_args, "", true, false); not res) {
+            auto msg = std::make_error_code(res.error()).message();
+            log_e({ "{}: failed to push 'madbfs-server' to device: {}" }, __func__, msg);
+            co_return Unexpect{ res.error() };
+        }
+
+        // update execute permission
+        auto chmod_args = Array<Str, 4>{ "shell", "chmod", "+x", serv_file };
+        if (auto res = co_await exec_async("adb", chmod_args, "", true, false); not res) {
+            auto msg = std::make_error_code(res.error()).message();
+            log_e({ "{}: failed to update 'madbfs-server' permission: {}" }, __func__, msg);
+            co_return Unexpect{ res.error() };
         }
 
         log_i({ "{}: trying to run server" }, __func__);
@@ -153,9 +153,15 @@ namespace madbfs::connection
         auto running = m_server_proc->running(ec);
         if (ec) {
             log_w({ "{}: error terminating server: {}" }, __func__, ec.message());
-        } else if (running) {
+            return;
+        }
+
+        if (running) {
             m_server_proc->terminate(ec);
-            log_w({ "{}: error terminating server: {}" }, __func__, ec.message());
+            if (ec) {
+                log_w({ "{}: error terminating server: {}" }, __func__, ec.message());
+            }
+            log_i({ "{}: successfully terminating server" }, __func__);
         }
     }
 
