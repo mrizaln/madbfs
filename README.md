@@ -333,4 +333,5 @@ The `<value>` then will be different depending on the operation performed:
 - [ ] Implement versioning on each node that expires every certain period of time. When a node expires it needs to query the files from the device again.
 - [ ] Periodic cache invalidation. Current implementation only look at the size of current cache and only invalidate oldest entry when newest entry is added and the size exceed the `cache-size` limit.
 - [x] Eliminate copying data to and from memory when transferring/copying files within the filesystem.
-- [ ] Use multiple threads backing the async runtime
+- [ ] Use multiple threads backing the async runtime.
+- [ ] Rewrite the server app in Kotlin, using the Android runtime instead as native binary.
