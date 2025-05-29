@@ -3,6 +3,7 @@
 #include "madbfs-common/util/overload.hpp"
 #include "madbfs/args.hpp"
 #include "madbfs/connection/adb_connection.hpp"
+#include "madbfs/connection/server_connection.hpp"
 #include "madbfs/data/ipc.hpp"
 #include "madbfs/log.hpp"
 
@@ -93,31 +94,61 @@ namespace
 
 namespace madbfs
 {
-    Madbfs::Madbfs(usize page_size, usize max_pages)
-        : m_work_guard{ m_async_ctx.get_executor() }
-        , m_connection{ std::make_unique<connection::AdbConnection>() }
-        , m_cache{ page_size, max_pages }
-        , m_tree{ *m_connection, m_cache }
+    Uniq<connection::Connection> Madbfs::prepare_connection(Opt<path::Path> server, u16 port)
     {
-        m_work_thread = std::jthread{ [this] {
-            log_i({ "Madbfs: io_context running..." });
-            auto num_handlers = m_async_ctx.run();
-            log_i({ "Madbfs: io_context stopped with {} handlers executed" }, num_handlers);
-        } };
+        auto coro = [=] -> Await<Uniq<connection::Connection>> {
+            auto result = co_await connection::ServerConnection::prepare_and_create(server, port);
+            if (not result) {
+                auto msg = std::make_error_code(result.error()).message();
+                log_c({ "prepare_connection: failed to construct ServerConnection: {}" }, msg);
+                log_i({ "prepare_connection: falling back to AdbConnection" });
+                co_return std::make_unique<connection::AdbConnection>();
+            }
+            log_d({ "prepare_connection: successfully created ServerConnection" });
+            co_return std::move(*result);
+        };
 
+        auto fut = async::spawn(m_async_ctx, coro(), async::use_future);
+        return fut.get();
+    }
+
+    Uniq<data::Ipc> Madbfs::create_and_launch_ipc()
+    {
         auto ipc = data::Ipc::create(m_async_ctx);
         if (not ipc.has_value()) {
             const auto msg = std::make_error_code(ipc.error()).message();
             log_e({ "Madbfs: failed to initialize ipc: {}" }, msg);
-            return;
+            return nullptr;
         }
 
-        const auto path = (*ipc)->path();
-        log_i({ "Madbfs: succesfully created ipc: {}" }, path.fullpath());
-        m_ipc = std::move(*ipc);
+        log_i({ "Madbfs: succesfully created ipc: {}" }, (*ipc)->path().fullpath());
 
-        auto coro = m_ipc->launch([this](data::ipc::Op op) { return ipc_handler(op); });
+        auto coro = (*ipc)->launch([this](data::ipc::Op op) { return ipc_handler(op); });
         async::spawn(m_async_ctx, std::move(coro), async::detached);
+
+        return std::move(*ipc);
+    }
+
+    void Madbfs::work_thread_function()
+    {
+        try {
+            log_i({ "Madbfs: io_context running..." });
+            auto num_handlers = m_async_ctx.run();
+            log_i({ "Madbfs: io_context stopped with {} handlers executed" }, num_handlers);
+        } catch (std::exception& e) {
+            log_w({ "Madbfs: io_context stopped with an exception: {}" }, e.what());
+        }
+    }
+
+    Madbfs::Madbfs(Opt<path::Path> server, u16 port, usize page_size, usize max_pages)
+        : m_async_ctx{}
+        , m_work_guard{ m_async_ctx.get_executor() }
+        , m_work_thread{ [this] { work_thread_function(); } }
+        , m_connection{ prepare_connection(server, port) }
+        , m_cache{ page_size, max_pages }
+        , m_tree{ *m_connection, m_cache }
+        , m_ipc{ create_and_launch_ipc() }
+    {
     }
 
     Madbfs::~Madbfs()
@@ -196,11 +227,18 @@ namespace madbfs
         auto* args = static_cast<args::ParsedOpt*>(::fuse_get_context()->private_data);
         assert(args != nullptr and "data should not be empty!");
 
+        if (args->server and not args->server->is_absolute()) {
+            log_c({ "{}: server path is not absolute when it should! ignoring" }, __func__);
+            args->server.reset();
+        }
+
         auto cache_size = args->cachesize * 1024 * 1024;
         auto page_size  = args->pagesize * 1024;
         auto max_pages  = cache_size / page_size;
+        auto port       = args->port;
+        auto server     = args->server.and_then([](auto& p) { return path::create(p.c_str()); });
 
-        return new Madbfs{ page_size, max_pages };
+        return new Madbfs{ server, port, page_size, max_pages };
     }
 
     void destroy(void* private_data)
