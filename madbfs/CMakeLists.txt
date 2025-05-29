@@ -1,7 +1,6 @@
 include(cmake/prelude.cmake)
 
 find_package(Boost REQUIRED)
-find_package(fmt REQUIRED)
 find_package(libfuse REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(unordered_dense REQUIRED)
@@ -30,7 +29,6 @@ target_link_libraries(
         fetch::linr
         fetch::saf
         boost::boost
-        fmt::fmt
         libfuse::libfuse
         spdlog::spdlog
         unordered_dense::unordered_dense
