@@ -17,7 +17,7 @@ namespace madbfs::connection
          * @param port Port the server will be listening on.
          * @return A newly created ServerConnection class.
          */
-        static AExpect<Uniq<ServerConnection>> prepare_and_create(u16 port);
+        static AExpect<Uniq<ServerConnection>> prepare_and_create(Opt<path::Path> server, u16 port);
 
         ~ServerConnection();
 
@@ -40,6 +40,10 @@ namespace madbfs::connection
             override;
 
     private:
+        ServerConnection(u16 port)
+            : m_port{ port }
+        {
+        }
         ServerConnection(u16 port, Process proc, Pipe out, Pipe err)
             : m_port{ port }
             , m_server_proc{ std::move(proc) }
@@ -48,9 +52,9 @@ namespace madbfs::connection
         {
         }
 
-        u16     m_port;
-        Process m_server_proc;    // server process handle
-        Pipe    m_server_out;     // server's stdout
-        Pipe    m_server_err;     // server's stderr
+        u16          m_port        = 0;
+        Opt<Process> m_server_proc = {};    // server process handle
+        Opt<Pipe>    m_server_out  = {};    // server's stdout
+        Opt<Pipe>    m_server_err  = {};    // server's stderr
     };
 }
