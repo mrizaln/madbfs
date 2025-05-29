@@ -376,7 +376,7 @@ namespace madbfs::server
         }
         spdlog::debug("{}: path={:?} size={}", __func__, write->path.data(), write->in.size());
 
-        auto fd = ::open(write->path.data(), O_WRONLY | O_CREAT, S_IWUSR);
+        auto fd = ::open(write->path.data(), O_WRONLY);
         if (fd < 0) {
             auto err = log_status_from_errno(__func__, write->path, "failed to open file");
             co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
