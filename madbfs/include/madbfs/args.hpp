@@ -8,27 +8,35 @@
 #include <linr/read.hpp>
 #include <spdlog/spdlog.h>
 
+#include <filesystem>
+#include <limits>
+
 namespace madbfs::args
 {
     // NOTE: don't set default value here for string, set them in the parse() function
     struct MadbfsOpt
     {
         const char* serial     = nullptr;
+        const char* server     = nullptr;
         const char* log_level  = nullptr;
         const char* log_file   = nullptr;
         int         cache_size = 512;    // in MiB
         int         page_size  = 128;    // in KiB
+        int         port       = 12345;
+        int         no_server  = false;
         int         help       = false;
         int         full_help  = false;
     };
 
     struct ParsedOpt
     {
-        String                    serial;
-        spdlog::level::level_enum log_level;
-        String                    log_file;
-        usize                     cachesize;
-        usize                     pagesize;
+        String                     serial;
+        Opt<std::filesystem::path> server;
+        spdlog::level::level_enum  log_level;
+        String                     log_file;
+        usize                      cachesize;
+        usize                      pagesize;
+        u16                        port;
     };
 
     struct ParseResult
@@ -37,7 +45,7 @@ namespace madbfs::args
         struct Opt  { ParsedOpt opt; fuse_args args; };
         struct Exit { int status; };
 
-        ParseResult() : result{ Exit{ 0}} {}
+        ParseResult() : result{ Exit{ 0} } {}
         ParseResult(Opt opt)    : result{ std::move(opt) } {}
         ParseResult(int status) : result{ Exit{ status } } {}
 
@@ -51,13 +59,16 @@ namespace madbfs::args
         // clang-format on
     };
 
-    static constexpr auto madbfs_opt_spec = Array<fuse_opt, 9>{ {
+    static constexpr auto madbfs_opt_spec = Array<fuse_opt, 12>{ {
         // clang-format off
         { "--serial=%s",     offsetof(MadbfsOpt, serial),     true },
+        { "--server=%s",     offsetof(MadbfsOpt, server),     true },
         { "--log-level=%s",  offsetof(MadbfsOpt, log_level),  true },
         { "--log-file=%s",   offsetof(MadbfsOpt, log_file),   true },
+        { "--port=%d",       offsetof(MadbfsOpt, port),       true },
         { "--cache-size=%d", offsetof(MadbfsOpt, cache_size), true },
         { "--page-size=%d",  offsetof(MadbfsOpt, page_size),  true },
+        { "--no-server",     offsetof(MadbfsOpt, no_server),  true },
         { "-h",              offsetof(MadbfsOpt, help),       true },
         { "--help",          offsetof(MadbfsOpt, help),       true },
         { "--full-help",     offsetof(MadbfsOpt, full_help),  true },
@@ -75,6 +86,9 @@ namespace madbfs::args
             "    --serial=<s>         serial number of the device to mount\n"
             "                           (you can omit this [detection is similar to adb])\n"
             "                           (will prompt if more than one device exists)\n"
+            "    --server             path to server file\n"
+            "                           (if omitted will search the file automatically)\n"
+            "                           (must have the same arch as your phone)\n"
             "    --log-level=<l>      log level to use (default: warn)\n"
             "    --log-file=<f>       log file to write to (default: - for stdout)\n"
             "    --cache-size=<n>     maximum size of the cache in MiB\n"
@@ -85,6 +99,12 @@ namespace madbfs::args
             "                           (default: 128)\n"
             "                           (minimum: 64)\n"
             "                           (value will be rounded to the next power of 2)\n"
+            "    --port=<n>           set port the server listens on\n"
+            "                           (default: 12345)\n"
+            "    --no-server          don't launch server\n"
+            "                           (will still attempt to connect to specified port)\n"
+            "                           (fall back to adb shell calls if connection failed)\n"
+            "                           (useful for debugging the server)\n"
             "    -h   --help          show this help message\n"
             "    --full-help          show full help message (includes libfuse options)\n"
         );
@@ -153,6 +173,42 @@ namespace madbfs::args
         fmt::println("[madbfs] using serial '{}'", devices[choice - 1].serial);
 
         co_return devices[choice - 1].serial;
+    }
+
+    inline Opt<std::filesystem::path> get_server_path(std::filesystem::path exec_path)
+    {
+        namespace fs = std::filesystem;
+
+        auto path = fs::current_path() / "madbfs-server";
+        if (fs::exists(path) and fs::is_regular_file(path)) {
+            return path;
+        }
+        fmt::println("[madbfs] no server in current working directory {}", path.c_str());
+
+        path = exec_path / "madbfs-server";
+        if (fs::exists(path) and fs::is_regular_file(path)) {
+            return path;
+        }
+        fmt::println("[madbfs] no server in executable parent directory {}", path.c_str());
+
+        if (not fs::is_symlink(exec_path)) {
+            return std::nullopt;
+        }
+
+        path = fs::read_symlink(exec_path);
+        fmt::println("[madbfs] executable is a symlink to {}", path.c_str());
+
+        if (not path.has_parent_path()) {
+            return std::nullopt;
+        }
+
+        path = path.parent_path() / "madbfs-server";
+        if (fs::exists(path) and fs::is_regular_file(path)) {
+            return path;
+        }
+        fmt::println("[madbfs] no server in executable parent directory (real) {}", path.c_str());
+
+        return std::nullopt;
     }
 
     /**
@@ -237,13 +293,45 @@ namespace madbfs::args
             co_return ParseResult{ 1 };
         }
 
+        auto server = Opt<std::filesystem::path>{};
+        if (madbfs_opt.no_server) {
+            if (madbfs_opt.server != nullptr) {
+                ::free((void*)madbfs_opt.server);
+                madbfs_opt.server = nullptr;
+            }
+            fmt::println("[madbfs] no-server flag specified, won't launch server");
+        } else if (madbfs_opt.server == nullptr) {
+            fmt::println("[madbfs] server is not specified, attempting to search...");
+            auto exec_path = std::filesystem::path{ argv[0] == nullptr ? "." : argv[0] };
+            exec_path      = std::filesystem::absolute(exec_path);
+            server         = get_server_path(exec_path);
+            if (server) {
+                fmt::println("[madbfs] server is found: {}", server->c_str());
+            } else {
+                fmt::println("[madbfs] can't find server, might need to fall back to adb shell calls");
+            }
+        } else {
+            fmt::println("[madbfs] server path is set to {}", madbfs_opt.server);
+            server = std::filesystem::absolute(madbfs_opt.server);
+        }
+
+        auto port = 12345_u16;
+        if (madbfs_opt.port > std::numeric_limits<u16>::max()) {
+            fmt::println("[madbfs] invalid port {}", madbfs_opt.port);
+            co_return ParseResult{ 1 };
+        } else {
+            port = static_cast<u16>(madbfs_opt.port);
+        }
+
         co_return ParseResult::Opt{
             .opt = {
                 .serial    = madbfs_opt.serial,
+                .server    = server,
                 .log_level = log_level.value(),
                 .log_file  = madbfs_opt.log_file,
                 .cachesize = std::bit_ceil(std::max(static_cast<usize>(madbfs_opt.cache_size), 128uz)),
                 .pagesize  = std::bit_ceil(std::max(static_cast<usize>(madbfs_opt.page_size), 64uz)),
+                .port      = port,
             },
             .args = args,
         };
