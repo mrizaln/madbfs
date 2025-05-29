@@ -3,10 +3,10 @@
 #include <madbfs-common/rpc.hpp>
 #include <madbfs-common/util/overload.hpp>
 
-#include <spdlog/spdlog.h>
-
 #include <dirent.h>
 #include <sys/stat.h>
+
+#include <print>
 
 namespace
 {
@@ -18,7 +18,7 @@ namespace
     madbfs::rpc::Status log_status_from_errno(madbfs::Str name, madbfs::Str path, madbfs::Str msg)
     {
         auto err = errno;
-        spdlog::debug("{}: {} {:?}: {}", name, msg, path, strerror(err));
+        std::println("{}: {} {:?}: {}", name, msg, path, strerror(err));
         auto status = static_cast<madbfs::rpc::Status>(err);
 
         switch (status) {
@@ -55,13 +55,13 @@ namespace madbfs::server
 
     AExpect<void> Server::run()
     {
-        spdlog::info("{}: launching tcp server on port: {}", __func__, m_acceptor.local_endpoint().port());
+        std::println("{}: launching tcp server on port: {}", __func__, m_acceptor.local_endpoint().port());
         m_running = true;
 
         while (m_running) {
             auto sock = co_await m_acceptor.async_accept();
             if (not sock) {
-                spdlog::error("{}: failed to accept connection: {}", __func__, sock.error().message());
+                std::println("{}: failed to accept connection: {}", __func__, sock.error().message());
                 break;
             }
 
@@ -84,19 +84,19 @@ namespace madbfs::server
         auto ec   = std::error_code{};
         auto peer = sock.remote_endpoint(ec);
         if (ec) {
-            spdlog::error("{}: failed to get endpoint: {}", __func__, ec.message());
+            std::println("{}: failed to get endpoint: {}", __func__, ec.message());
         }
-        spdlog::debug("{}: new connection from {}:{}", __func__, peer.address().to_string(), peer.port());
+        std::println("{}: new connection from {}:{}", __func__, peer.address().to_string(), peer.port());
 
         auto buffer     = Vec<u8>{};
         auto rpc_server = rpc::Server{ sock, buffer };
 
         auto procedure = co_await rpc_server.peek_req();
         if (not procedure) {
-            spdlog::error("{}: failed to get param for procedure {}", __func__, err_msg(procedure.error()));
+            std::println("{}: failed to get param for procedure {}", __func__, err_msg(procedure.error()));
             co_return Expect<void>{};
         }
-        spdlog::debug("{}: accepted procedure [{}]", __func__, to_string(*procedure));
+        std::println("{}: accepted procedure [{}]", __func__, to_string(*procedure));
 
         // clang-format off
         switch (*procedure) {
@@ -116,7 +116,7 @@ namespace madbfs::server
         }
         // clang-format on
 
-        spdlog::error("{}: invalid procedure with integral value {}", __func__, static_cast<u8>(*procedure));
+        std::println("{}: invalid procedure with integral value {}", __func__, static_cast<u8>(*procedure));
 
         co_return Expect<void>{};
     }
@@ -127,7 +127,7 @@ namespace madbfs::server
         if (not listdir) {
             co_return Unexpect{ listdir.error() };
         }
-        spdlog::debug("{}: path={:?}", __func__, listdir->path.data());
+        std::println("{}: path={:?}", __func__, listdir->path.data());
 
         auto dir = ::opendir(listdir->path.data());
         if (dir == nullptr) {
@@ -196,7 +196,7 @@ namespace madbfs::server
         if (not stat) {
             co_return Unexpect{ stat.error() };
         }
-        spdlog::debug("{}: path={:?}", __func__, stat->path.data());
+        std::println("{}: path={:?}", __func__, stat->path.data());
 
         struct stat filestat = {};
         if (auto res = ::lstat(stat->path.data(), &filestat); res < 0) {
@@ -222,7 +222,7 @@ namespace madbfs::server
         if (not readlink) {
             co_return Unexpect{ readlink.error() };
         }
-        spdlog::debug("{}: path={:?}", __func__, readlink->path.data());
+        std::println("{}: path={:?}", __func__, readlink->path.data());
 
         auto buffer = Array<char, 1024>{};
         auto len    = ::readlink(readlink->path.data(), buffer.data(), buffer.size());
@@ -272,7 +272,7 @@ namespace madbfs::server
         if (not read) {
             co_return Unexpect{ read.error() };
         }
-        spdlog::debug("{}: path={:?} size={}", __func__, read->path.data(), read->size);
+        std::println("{}: path={:?} size={}", __func__, read->path.data(), read->size);
 
         auto fd = ::open(read->path.data(), O_RDONLY);
         if (fd < 0) {
