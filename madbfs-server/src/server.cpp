@@ -188,6 +188,10 @@ namespace madbfs::server
             entries.emplace_back(std::move(name), std::move(stat));
         }
 
+        if (::closedir(dir) < 0) {
+            log_status_from_errno(__func__, listdir->path, "failed to close dir");
+        }
+
         co_return co_await serv.send_resp(rpc::resp::Listdir{ .entries = std::move(entries) });
     }
 
@@ -363,6 +367,10 @@ namespace madbfs::server
             co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
         }
 
+        if (::close(fd) < 0) {
+            log_status_from_errno(__func__, read->path, "failed to close file");
+        }
+
         co_return co_await serv.send_resp(rpc::resp::Read{
             .read = Span{ buf.begin(), static_cast<usize>(len) },
         });
@@ -391,6 +399,10 @@ namespace madbfs::server
         if (len < 0) {
             auto err = log_status_from_errno(__func__, write->path, "failed to write file");
             co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
+        }
+
+        if (::close(fd) < 0) {
+            log_status_from_errno(__func__, write->path, "failed to close file");
         }
 
         co_return co_await serv.send_resp(rpc::resp::Write{ .size = static_cast<usize>(len) });
@@ -458,6 +470,14 @@ namespace madbfs::server
                 break;
             }
             copied += len;
+        }
+
+        if (::close(in_fd) < 0) {
+            log_status_from_errno(__func__, in, "failed to close file");
+        }
+
+        if (::close(out_fd) < 0) {
+            log_status_from_errno(__func__, out, "failed to close file");
         }
 
         if (len < 0) {
