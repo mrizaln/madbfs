@@ -141,42 +141,38 @@ namespace madbfs::tree
             co_return Unexpect{ may_stats.error() };
         }
 
-        auto buf = String{};
+        auto pathbuf = path.extend_copy("dummy").value();
+
         for (auto [stat, name] : may_stats.value()) {
+            auto renamed = pathbuf.rename(name);
+            if (not renamed) {
+                log_w({ "{}: failed to extend {:?} with {:?}" }, __func__, path.fullpath(), name);
+                continue;
+            }
+
             auto built = Opt<Expect<Ref<Node>>>{};
 
             switch (stat.mode & S_IFMT) {
             case S_IFREG: built = base->build(name, stat, RegularFile{}); break;
             case S_IFDIR: built = base->build(name, stat, Directory{}); break;
             case S_IFLNK: {
-                auto target = path.extend_copy(name);
-                if (not target) {
-                    log_w({ "{}: failed to extend {:?} with {:?}" }, __func__, path.fullpath(), name);
-                } else {
-                    auto may_target = co_await m_connection.readlink(target->as_path());
-                    if (not may_stats) {
-                        co_return Unexpect{ may_target.error() };
-                    }
-                    built = (co_await traverse_or_build(may_target->as_path())).and_then([&](Node& node) {
-                        return base->build(name, stat, Link{ &node });
-                    });
+                auto may_target = co_await m_connection.readlink(pathbuf.as_path());
+                if (not may_stats) {
+                    co_return Unexpect{ may_target.error() };
                 }
+                built = (co_await traverse_or_build(may_target->as_path())).and_then([&](Node& node) {
+                    return base->build(name, stat, Link{ &node });
+                });
             } break;
             default: built = base->build(name, stat, Other{}); break;
             }
 
             if (not built.has_value()) {
-                log_e(
-                    { "readdir: {} [{}/{}]" },
-                    std::make_error_code(built->error()).message(),
-                    path.fullpath(),
-                    name
-                );
+                auto msg = std::make_error_code(built->error()).message();
+                log_e({ "readdir: {} [{}/{}]" }, msg, path.fullpath(), name);
             }
 
-            // the underlying data may be not null-terminated
-            buf = name;
-            filler(buf.c_str());
+            filler(pathbuf.as_path().filename().data());
         }
 
         base->set_synced();
