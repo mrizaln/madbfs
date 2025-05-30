@@ -12,20 +12,6 @@ namespace madbfs::tree
     {
     }
 
-    FileTree::~FileTree()
-    {
-        // NOTE: I'm still not sure how to handle this case, to push the changes to the device, this requires
-        // the path to be known, but the cache is not aware of the path, just the Id of it. So pushing the
-        // changes might require traversing the whole tree to find the path of said Id since the Id currently
-        // is stored in each of the nodes. Tree as whole doesn't know the ids that is available let alone the
-        // corresponding path.
-        auto orphaned = m_cache.get_orphan_pages();
-
-        if (not orphaned.empty()) {
-            log_e({ "{}: there are {} pages worth of unwritten data, ignoring" }, __func__, orphaned.size());
-        }
-    }
-
     Expect<Ref<Node>> FileTree::traverse(path::Path path)
     {
         if (path.is_root()) {

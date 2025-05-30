@@ -145,7 +145,7 @@ namespace madbfs
         , m_work_guard{ m_async_ctx.get_executor() }
         , m_work_thread{ [this] { work_thread_function(); } }
         , m_connection{ prepare_connection(server, port) }
-        , m_cache{ page_size, max_pages }
+        , m_cache{ *m_connection, page_size, max_pages }
         , m_tree{ *m_connection, m_cache }
         , m_ipc{ create_and_launch_ipc() }
     {

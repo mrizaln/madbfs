@@ -20,7 +20,7 @@ namespace madbfs::tree
         using Filler = std::function<void(const char* name)>;
 
         FileTree(connection::Connection& connection, data::Cache& cache);
-        ~FileTree();
+        ~FileTree() = default;
 
         FileTree(Node&& root)            = delete;
         FileTree& operator=(Node&& root) = delete;
