@@ -240,8 +240,7 @@ namespace madbfs::connection
         auto req    = rpc::req::Readlink{ .path = path.fullpath() };
 
         co_return (co_await client.send_req_readlink(req)).transform([&](rpc::resp::Readlink resp) {
-            auto target_path = path::resolve(path.parent_path(), resp.target);
-            return path::create(target_path).value().into_buf();    // TODO: assume error
+            return path::resolve(path.parent_path(), resp.target);
         });
     }
 

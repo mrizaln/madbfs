@@ -205,7 +205,7 @@ namespace madbfs::path
      * @param parent Reference path.
      * @param path Path to be resolved.
      */
-    madbfs::String resolve(madbfs::path::Path parent, madbfs::Str path);
+    PathBuf resolve(madbfs::path::Path parent, madbfs::Str path);
 
 }
 

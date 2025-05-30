@@ -135,7 +135,7 @@ namespace madbfs::path
         return std::move(pathbuf);
     }
 
-    madbfs::String resolve(madbfs::path::Path parent, madbfs::Str path)
+    PathBuf resolve(madbfs::path::Path parent, madbfs::Str path)
     {
         auto parents = madbfs::Vec<madbfs::Str>{};
         if (path.front() != '/') {
@@ -155,7 +155,7 @@ namespace madbfs::path
         });
 
         if (parents.empty()) {
-            return "/";
+            return PathBuf::root();
         }
 
         auto resolved = madbfs::String{};
@@ -164,6 +164,6 @@ namespace madbfs::path
             resolved += path;
         }
 
-        return resolved;
+        return create_buf(std::move(resolved)).value();
     }
 }
