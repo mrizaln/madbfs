@@ -66,7 +66,7 @@ try {
     }
 
     auto context = madbfs::async::Context{};
-    auto server  = madbfs::server::Server{ context, port };    // may throw, just terminate
+    auto server  = madbfs::server::Server{ context, port };    // may throw
 
     madbfs::async::spawn(context, server.run(), madbfs::async::detached);
     auto thread = std::thread{ [&] { context.run(); } };

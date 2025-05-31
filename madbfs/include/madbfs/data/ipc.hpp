@@ -34,11 +34,13 @@ namespace madbfs::data
         // Uniq to make it std::movable
         static Expect<Uniq<Ipc>> create(async::Context& context);
 
-        Ipc() = delete;
         ~Ipc();
 
         Ipc(Ipc&&)            = default;
         Ipc& operator=(Ipc&&) = default;
+
+        Ipc(const Ipc&)            = delete;
+        Ipc& operator=(const Ipc&) = delete;
 
         Await<void> launch(OnOp on_op);
         void        stop();

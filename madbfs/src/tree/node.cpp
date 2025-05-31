@@ -1,7 +1,6 @@
 #include "madbfs/tree/node.hpp"
 
 #include "madbfs-common/util/overload.hpp"
-#include "madbfs/log.hpp"
 
 namespace madbfs::tree
 {
@@ -354,6 +353,7 @@ namespace madbfs::tree
         }
         co_return (co_await context.connection.truncate(context.path, size)).transform([&] {
             m_stat.size = size;
+            refresh_stat({ .tv_sec = 0, .tv_nsec = UTIME_OMIT }, { .tv_sec = 0, .tv_nsec = UTIME_NOW });
         });
     }
 
@@ -384,10 +384,9 @@ namespace madbfs::tree
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        co_return co_await context.cache.read(id(), out, offset, [&](Span<char> out, off_t offset) {
-            auto id = this->id().inner();
-            log_d({ "read: [id={}|buf={}|off={}] cache miss, read from device..." }, id, out.size(), offset);
-            return context.connection.read(context.path, out, offset);
+        co_return (co_await context.cache.read(id(), context.path, out, offset)).transform([&](usize ret) {
+            refresh_stat({ .tv_sec = 0, .tv_nsec = UTIME_NOW }, { .tv_sec = 0, .tv_nsec = UTIME_OMIT });
+            return ret;
         });
     }
 
@@ -404,8 +403,12 @@ namespace madbfs::tree
         }
 
         file.set_dirty(true);
-        co_return (co_await context.cache.write(id(), in, offset)).transform([&](usize ret) {
-            m_stat.size += ret;
+        co_return (co_await context.cache.write(id(), context.path, in, offset)).transform([&](usize ret) {
+            // the file size is defined as offset + size from last write if it's higher than previous size
+            // NOTE: this may be different for sparse files but I don't think Android has it
+            auto new_size = offset + static_cast<off_t>(ret);
+            m_stat.size   = std::max(m_stat.size, new_size);
+            refresh_stat({ .tv_sec = 0, .tv_nsec = UTIME_OMIT }, { .tv_sec = 0, .tv_nsec = UTIME_NOW });
             return ret;
         });
     }
@@ -427,10 +430,7 @@ namespace madbfs::tree
 
         file.set_dirty(false);
         auto filesize = static_cast<usize>(stat()->get().size);
-        co_return co_await context.cache.flush(id(), filesize, [&](Span<const char> in, off_t offset) {
-            log_d({ "flush: [id={}|buf={}|off={}] write to device..." }, id().inner(), in.size(), offset);
-            return context.connection.write(context.path, in, offset);
-        });
+        co_return co_await context.cache.flush(id(), filesize);
     }
 
     AExpect<void> Node::release(Context context, u64 fd)
@@ -449,9 +449,7 @@ namespace madbfs::tree
         }
         file.set_dirty(false);
         auto filesize = static_cast<usize>(stat()->get().size);
-        co_return co_await context.cache.flush(id(), filesize, [&](Span<const char> in, off_t offset) {
-            return context.connection.write(context.path, in, offset);
-        });
+        co_return co_await context.cache.flush(id(), filesize);
     }
 
     AExpect<void> Node::utimens(Context context, timespec atime, timespec mtime)

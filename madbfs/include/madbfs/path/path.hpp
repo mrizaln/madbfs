@@ -104,6 +104,19 @@ namespace madbfs::path
         static PathBuf root() { return {}; }
 
         /**
+         * @brief Rename the filename.
+         *
+         * @param name The new name of the file.
+         *
+         * @return True if success.
+         *
+         * This function only rename the filename part of the file file unlike `rename` linux syscall that
+         * basically replace the filepath altoghether. Renaming will fails if the name is empty, is '..' or is
+         * '.', or contains '/'. If the path is root, rename will fail.
+         */
+        bool rename(Str name);
+
+        /**
          * @brief Extend the path with a name.
          *
          * @param name The name to extend with.
@@ -205,7 +218,7 @@ namespace madbfs::path
      * @param parent Reference path.
      * @param path Path to be resolved.
      */
-    madbfs::String resolve(madbfs::path::Path parent, madbfs::Str path);
+    PathBuf resolve(madbfs::path::Path parent, madbfs::Str path);
 
 }
 

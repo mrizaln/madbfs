@@ -123,8 +123,7 @@ namespace madbfs::connection
         auto res = co_await exec_async("adb", args, "", true);
 
         co_return res.transform([&](String target) {
-            auto target_path = path::resolve(path.parent_path(), util::strip(target));
-            return path::create_buf(std::move(target_path)).value();    // TODO: assume error
+            return path::resolve(path.parent_path(), util::strip(target));
         });
     }
 

@@ -195,7 +195,7 @@ int main()
         using madbfs::path::operator""_path;
 
         auto connection = mock::DummyConnection{};
-        auto cache      = madbfs::data::Cache{ 64 * 1024, 1024 };
+        auto cache      = madbfs::data::Cache{ connection, 64 * 1024, 1024 };
         auto counter    = std::atomic<u64>{};
 
         // NOTE: operations like mknod and mkdir only considers filename
@@ -269,7 +269,7 @@ int main()
         using namespace madbfs::tree;
 
         auto connection = mock::DummyConnection{};
-        auto cache      = madbfs::data::Cache{ 64 * 1024, 1024 };
+        auto cache      = madbfs::data::Cache{ connection, 64 * 1024, 1024 };
         auto tree       = FileTree{ connection, cache };
 
         auto io_context = madbfs::async::Context{};

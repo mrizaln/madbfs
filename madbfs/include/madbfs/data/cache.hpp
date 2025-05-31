@@ -2,13 +2,25 @@
 
 #include "madbfs-common/async/async.hpp"
 #include "madbfs/data/stat.hpp"
+#include "madbfs/path/path.hpp"
 
+#include <ankerl/unordered_dense.h>
 #include <saf.hpp>
 
 #include <cassert>
 #include <functional>
 #include <list>
-#include <unordered_map>
+
+namespace madbfs::connection
+{
+    class Connection;
+}
+
+namespace madbfs::path
+{
+    class Path;
+    class PathBuf;
+}
 
 namespace madbfs::data
 {
@@ -27,7 +39,6 @@ namespace madbfs::data
         using WriteFn = std::function<Expect<Span<const char>>()>;
 
         Page(PageKey key, Uniq<char[]> buf, u32 size);
-        ~Page();
 
         usize read(Span<char> out, usize offset);
         usize write(Span<const char> in, usize offset);
@@ -37,7 +48,8 @@ namespace madbfs::data
         bool is_dirty() const;
         void set_dirty(bool set);
 
-        const PageKey& key() { return m_key; }
+        const PageKey&   key() { return m_key; }
+        Span<const char> buf() { return { m_data.get(), size() }; }
 
     private:
         static constexpr auto dirty_bit = 0x10000000_u32;
@@ -50,22 +62,24 @@ namespace madbfs::data
     class Cache
     {
     public:
-        using Lru    = std::list<Page>;
-        using Lookup = std::unordered_map<PageKey, Lru::iterator>;
-        using Queue  = std::unordered_map<PageKey, saf::shared_future<Errc>>;
+        struct PathEntry;
 
-        // NOTE: can't use std::move_only_function in gcc: "atomic constraint depends on itself"
-        using OnMiss  = std::function<AExpect<usize>(Span<char> out, off_t offset)>;
-        using OnFlush = std::function<AExpect<usize>(Span<const char> in, off_t offset)>;
+        using Lru     = std::list<Page>;
+        using Lookup  = ankerl::unordered_dense::map<PageKey, Lru::iterator>;
+        using Queue   = ankerl::unordered_dense::map<PageKey, saf::shared_future<Errc>>;
+        using PathMap = ankerl::unordered_dense::map<Id, PathEntry>;
 
-        Cache(usize page_size, usize max_pages);
+        struct PathEntry
+        {
+            usize         count;
+            path::PathBuf path;
+        };
 
-        AExpect<usize> read(Id id, Span<char> out, off_t offset, OnMiss on_miss);
-        AExpect<usize> write(Id id, Span<const char> in, off_t offset);
-        AExpect<void>  flush(Id id, usize size, OnFlush on_flush);
+        Cache(connection::Connection& connection, usize page_size, usize max_pages);
 
-        Cache::Lru get_orphan_pages();
-        bool       has_orphan_pages() const;
+        AExpect<usize> read(Id id, path::Path path, Span<char> out, off_t offset);
+        AExpect<usize> write(Id id, path::Path path, Span<const char> in, off_t offset);
+        AExpect<void>  flush(Id id, usize size);
 
         void invalidate();
         void set_page_size(usize new_page_size);
@@ -75,10 +89,17 @@ namespace madbfs::data
         usize max_pages() const { return m_max_pages; }
 
     private:
-        Lru    m_lru;         // most recently used is at the front
-        Lookup m_table;       // lookup table for fast page access
-        Queue  m_queue;       // pages that are still pulling data, reader/writer should wait using this
-        Lru    m_orphaned;    // dirty but evicted pages
+        AExpect<usize> on_miss(Id id, Span<char> out, off_t offset);
+        AExpect<usize> on_flush(Id id, Span<const char> in, off_t offset);
+
+        Await<void> evict(usize size);
+
+        connection::Connection& m_connection;
+
+        Lru     m_lru;      // most recently used is at the front
+        Lookup  m_table;    // lookup table for fast page access
+        Queue   m_queue;    // pages that are still pulling data, reader/writer should wait using this
+        PathMap m_path_map;
 
         usize m_page_size = 0;
         usize m_max_pages = 0;

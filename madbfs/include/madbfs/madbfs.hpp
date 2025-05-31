@@ -26,6 +26,12 @@ namespace madbfs
         Madbfs(Opt<path::Path> server, u16 port, usize max_pages, usize page_size);
         ~Madbfs();
 
+        Madbfs(Madbfs&&)            = delete;
+        Madbfs& operator=(Madbfs&&) = delete;
+
+        Madbfs(const Madbfs&)            = delete;
+        Madbfs& operator=(const Madbfs&) = delete;
+
         tree::FileTree&    tree() { return m_tree; }
         async::Context&    async_ctx() { return m_async_ctx; }
         const data::Cache& cache() const { return m_cache; }

@@ -1,4 +1,5 @@
 #include "madbfs-server/server.hpp"
+#include "madbfs-server/defer.hpp"    // DEFER macro
 
 #include <madbfs-common/rpc.hpp>
 #include <madbfs-common/util/overload.hpp>
@@ -135,6 +136,12 @@ namespace madbfs::server
             auto err = log_status_from_errno(__func__, listdir->path, "failed to open dir");
             co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
         }
+
+        DEFER {
+            if (::closedir(dir) < 0) {
+                log_status_from_errno(__func__, listdir->path, "failed to close dir");
+            }
+        };
 
         struct Slice
         {
@@ -349,6 +356,12 @@ namespace madbfs::server
             co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
         }
 
+        DEFER {
+            if (::close(fd) < 0) {
+                log_status_from_errno(__func__, read->path, "failed to close file");
+            }
+        };
+
         if (::lseek(fd, read->offset, SEEK_SET) < 0) {
             auto err = log_status_from_errno(__func__, read->path, "failed to seek file");
             co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
@@ -381,6 +394,12 @@ namespace madbfs::server
             auto err = log_status_from_errno(__func__, write->path, "failed to open file");
             co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
         }
+
+        DEFER {
+            if (::close(fd) < 0) {
+                log_status_from_errno(__func__, write->path, "failed to close file");
+            }
+        };
 
         if (::lseek(fd, write->offset, SEEK_SET) < 0) {
             auto err = log_status_from_errno(__func__, write->path, "failed to seek file");
@@ -428,6 +447,11 @@ namespace madbfs::server
             auto err = log_status_from_errno(__func__, in, "failed to open file");
             co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
         }
+        DEFER {
+            if (::close(in_fd) < 0) {
+                log_status_from_errno(__func__, in, "failed to close file");
+            }
+        };
 
         if (::lseek(in_fd, in_off, SEEK_SET) < 0) {
             auto err = log_status_from_errno(__func__, in, "failed to seek file");
@@ -439,6 +463,12 @@ namespace madbfs::server
             auto err = log_status_from_errno(__func__, out, "failed to open file");
             co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
         }
+
+        DEFER {
+            if (::close(out_fd) < 0) {
+                log_status_from_errno(__func__, out, "failed to close file");
+            }
+        };
 
         if (::lseek(out_fd, out_off, SEEK_SET) < 0) {
             auto err = log_status_from_errno(__func__, out, "failed to seek file");

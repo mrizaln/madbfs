@@ -81,6 +81,24 @@ namespace madbfs::path
 
         return pathbuf;
     }
+}
+
+namespace madbfs::path
+{
+    bool PathBuf::rename(Str name)
+    {
+        if (name.empty() or name.contains('/') or name == "." or name == "..") {
+            return false;
+        } else if (m_buf == "/") {
+            return false;
+        }
+
+        m_buf.resize(m_basename_offset);
+        m_buf           += name;
+        m_basename_size  = name.size();
+
+        return true;
+    }
 
     bool PathBuf::extend(Str name)
     {
@@ -135,7 +153,7 @@ namespace madbfs::path
         return std::move(pathbuf);
     }
 
-    madbfs::String resolve(madbfs::path::Path parent, madbfs::Str path)
+    PathBuf resolve(madbfs::path::Path parent, madbfs::Str path)
     {
         auto parents = madbfs::Vec<madbfs::Str>{};
         if (path.front() != '/') {
@@ -155,7 +173,7 @@ namespace madbfs::path
         });
 
         if (parents.empty()) {
-            return "/";
+            return PathBuf::root();
         }
 
         auto resolved = madbfs::String{};
@@ -164,6 +182,6 @@ namespace madbfs::path
             resolved += path;
         }
 
-        return resolved;
+        return create_buf(std::move(resolved)).value();
     }
 }
