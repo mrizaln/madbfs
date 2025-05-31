@@ -10,6 +10,12 @@ namespace madbfs::server
         Server(async::Context& context, u16 port) noexcept(false);
         ~Server();
 
+        Server(Server&&)            = delete;
+        Server& operator=(Server&&) = delete;
+
+        Server(const Server&)            = delete;
+        Server& operator=(const Server&) = delete;
+
         AExpect<void> run();
         void          stop();
 

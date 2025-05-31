@@ -21,6 +21,12 @@ namespace madbfs::connection
 
         ~ServerConnection();
 
+        ServerConnection(ServerConnection&&)            = delete;
+        ServerConnection& operator=(ServerConnection&&) = delete;
+
+        ServerConnection(const ServerConnection&)            = delete;
+        ServerConnection& operator=(const ServerConnection&) = delete;
+
         AExpect<Gen<ParsedStat>> statdir(path::Path path) override;
         AExpect<data::Stat>      stat(path::Path path) override;
         AExpect<path::PathBuf>   readlink(path::Path path) override;

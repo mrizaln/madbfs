@@ -86,8 +86,6 @@ namespace madbfs::data
                 auto future  = promise.get_future().share();
                 m_queue.emplace(key, std::move(future));
 
-                log_d({ "{}: path map update [id={}]" }, __func__, id.inner());
-
                 auto map_entry = m_path_map.find(id);
                 if (map_entry == m_path_map.end()) {
                     m_path_map.emplace(id, PathEntry{ 1uz, path.into_buf() });
@@ -157,8 +155,6 @@ namespace madbfs::data
                 }
             }
 
-            log_d({ "{}: path map update [id={}]" }, __func__, id.inner());
-
             auto map_entry = m_path_map.find(id);
             if (map_entry == m_path_map.end()) {
                 m_path_map.emplace(id, PathEntry{ 1uz, path.into_buf() });
@@ -203,11 +199,12 @@ namespace madbfs::data
     AExpect<void> Cache::flush(Id id, usize size)
     {
         auto num_pages = size / m_page_size + (size % m_page_size != 0);
-        log_d({ "{}: flush [id={}]" }, __func__, id.inner());
 
         // TODO: use parallel group
 
         for (auto index : sv::iota(0uz, num_pages)) {
+            log_d({ "{}: flush [id={}|idx={}]" }, __func__, id.inner(), index);
+
             auto key = PageKey{ id, index };
 
             auto queued = m_queue.find(key);
