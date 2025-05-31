@@ -58,7 +58,17 @@ This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbf
 
 - Flexible connection method
 
-  Employs `adb` as its transport layer. You can either use USB or wireless connection for the connection method.
+  `madbfs` offers two kinds of transport:
+
+  - `adb` transport
+
+    The simplest transport. It executes all FUSE operations by running `adb shell` commands like `dd`, `stat`, and `touch`. No additional component is required.
+
+  - Proxy transport (optional)
+
+    Communicates with a lightweight TCP server running natively on the Android device via a custom RPC protocol. It requires a server binary compiled for the phone architecture but has better i/o throughput than the `adb` transport.
+
+  Both of the transport can work wired via USB or wireless in your local network. `madbfs` will automatically fall back to `adb` transport if the server is not available.
 
 - Resilient to disconnections
 
@@ -70,18 +80,34 @@ This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbf
 
 ## Dependencies
 
-Build dependencies
+- `madbfs`
 
-- CMake
-- Conan
+  Build dependencies
 
-Library dependencies
+  - CMake
+  - Conan
 
-- Boost (Asio, Process, and JSON component)
-- fmt
-- libfuse
-- rapidhash
-- spdlog
+  Library dependencies
+
+  - Boost (Asio, Process, and JSON component)
+  - fmt
+  - libfuse
+  - rapidhash
+  - spdlog
+
+- `madbfs-server` (optional)
+
+  Build dependencies
+
+  - Android NDK (must support C++20 or above)
+  - CMake
+  - Conan
+
+  Library dependencies
+
+  - Asio (non-Boost variant)
+  - fmt
+  - spdlog
 
 ## Building
 
@@ -89,20 +115,48 @@ Since the dependencies are managed by Conan, you need to make sure it's installe
 
 > don't forget to run `conan profile detect` if you use Conan for the first time
 
-First you install the dependencies
+- `madbfs`
 
-```sh
-conan install . --build=missing -s build_type=Release
-```
+  Navigate to the root of the repository, then you install the dependencies:
 
-Then compile the project
+  ```sh
+  conan install . --build=missing -s build_type=Release
+  ```
 
-```sh
-cmake --preset conan-release
-cmake --build --preset conan-release
-```
+  Then compile the project:
 
-The built binary will be in `build/Release/` directory with the name `madbfs`. You can place this binary anywhere you want (place it in PATH if you want it to be accessible from anywhere).
+  ```sh
+  cmake --preset conan-release
+  cmake --build --preset conan-release
+  ```
+
+  The built binary will be in `build/Release/madbfs/` directory with the name `madbfs`. Since the libraries are statically linked to the binary you can place this binary anywhere you want (place it in PATH if you want it to be accessible from anywhere).
+
+- `madbfs-server`
+
+  > you may skip this process if you don't mind not having proxy transport support
+
+  Navigate to the root of the repository then go to `madbfs-server/` subdirectory. You then can proceed by editing the `conan-android-profile.conf` file. This step is necessary to set the Android native app build system and its paramater to better suit your Android device(s). The parameters that you may change are
+
+  - Android NDK path (`tools.android:ndk_path`),
+  - Android ABI (`arch`),
+  - Android API level (`os.api_level`), and
+  - Compiler version (`compiler.version`).
+
+  The dependencies installation step is similar to previous one with some additional flags to the command like so:
+
+  ```sh
+  conan install . --build missing -s build_type=Release --profile:build default --profile:host conan-android-profile.conf
+  ```
+
+  The compilation process is the same:
+
+  ```sh
+  cmake --preset conan-release
+  cmake --build --preset conan-release
+  ```
+
+  The binary will be in `build/Release/` directory relative to `madbfs-server/` with the name `madbfs-server`. You may want to place `madbfs-server` in the same directory as `madbfs` to allow `madbfs` find it automatically when you run it unless you don't mind running `madbfs` with `--server` flag (explained in the next section).
 
 ## Usage
 
@@ -115,6 +169,9 @@ Options for madbfs:
     --serial=<s>         serial number of the device to mount
                            (you can omit this [detection is similar to adb])
                            (will prompt if more than one device exists)
+    --server             path to server file
+                           (if omitted will search the file automatically)
+                           (must have the same arch as your phone)
     --log-level=<l>      log level to use (default: warn)
     --log-file=<f>       log file to write to (default: - for stdout)
     --cache-size=<n>     maximum size of the cache in MiB
@@ -125,6 +182,12 @@ Options for madbfs:
                            (default: 128)
                            (minimum: 64)
                            (value will be rounded to the next power of 2)
+    --port=<n>           set port the server listens on
+                           (default: 12345)
+    --no-server          don't launch server
+                           (will still attempt to connect to specified port)
+                           (fall back to adb shell calls if connection failed)
+                           (useful for debugging the server)
     -h   --help          show this help message
     --full-help          show full help message (includes libfuse options)
 ```
@@ -149,6 +212,21 @@ $ ANDROID_SERIAL=068832516O101622 ./madbfs
 [madbfs] checking adb availability...
 [madbfs] using serial '068832516O101622' from env variable 'ANDROID_SERIAL'
 ```
+
+### Specifying server and port number
+
+> only relevant if you want proxy transport support
+
+In order to use the proxy transport, `madbfs` needs to be able to find the `madbfs-server` binary. There are three approaches you can do in order for `mabfs` be able to find the server file:
+
+- Place it where you run the `madbfs` program,
+- Place it in the same directory as `madbfs` program, or
+- Specify explicitly the path of the file using `--server` flag.
+
+If you want the filesystem to use `adb` transport instead then you can use `--no-server` flag. This flag prevents `madbfs` from pushing the server into your phone and running it.
+
+The proxy runs communicates with `madbfs` over TCP enabled by port forwarding and by default it will listen on `12345` port number. If you find this port to be not suitable for your use you can always specify it with `--port` flag.
+
 
 ### Cache size
 
