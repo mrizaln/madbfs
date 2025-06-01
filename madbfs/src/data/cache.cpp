@@ -1,7 +1,8 @@
 #include "madbfs/data/cache.hpp"
 
 #include "madbfs/connection/connection.hpp"
-#include "madbfs/log.hpp"
+
+#include <madbfs-common/log.hpp>
 
 namespace madbfs::data
 {

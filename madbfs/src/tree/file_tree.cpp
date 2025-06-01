@@ -1,7 +1,8 @@
 #include "madbfs/tree/file_tree.hpp"
 
-#include "madbfs/log.hpp"
 #include "madbfs/tree/node.hpp"
+
+#include <madbfs-common/log.hpp>
 
 namespace madbfs::tree
 {

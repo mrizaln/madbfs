@@ -1,6 +1,6 @@
 #include "madbfs/data/ipc.hpp"
 
-#include "madbfs/log.hpp"
+#include <madbfs-common/log.hpp>
 
 namespace madbfs::data::ipc::names
 {

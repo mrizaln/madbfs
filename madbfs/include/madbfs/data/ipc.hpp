@@ -1,8 +1,9 @@
 #pragma once
 
-#include "madbfs-common/aliases.hpp"
-#include "madbfs-common/async/async.hpp"
 #include "madbfs/path/path.hpp"
+
+#include <madbfs-common/aliases.hpp>
+#include <madbfs-common/async/async.hpp>
 
 #include <boost/json.hpp>
 
@@ -13,12 +14,12 @@ namespace madbfs::data
     namespace ipc
     {
         // clang-format off
-        struct Help            {};
-        struct InvalidateCache {};
+        struct Help            { };
+        struct InvalidateCache { };
         struct SetPageSize     { usize kib; };
-        struct GetPageSize     {};
+        struct GetPageSize     { };
         struct SetCacheSize    { usize mib; };
-        struct GetCacheSize    {};
+        struct GetCacheSize    { };
         // clang-format on
 
         using Op = Var<Help, InvalidateCache, SetPageSize, GetPageSize, SetCacheSize, GetCacheSize>;

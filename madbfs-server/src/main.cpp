@@ -1,7 +1,6 @@
+#include "madbfs-common/log.hpp"
 #include "madbfs-common/rpc.hpp"
 #include "madbfs-server/server.hpp"
-
-#include <spdlog/spdlog.h>
 
 #include <atomic>
 #include <charconv>
@@ -12,7 +11,7 @@ std::atomic<bool> g_interrupt = false;
 
 void sig_handler(int sig)
 {
-    spdlog::info("signal {} raised!", sig);
+    madbfs::log_i({ "signal {} raised!" }, sig);
 
     g_interrupt = true;
     g_interrupt.notify_all();
@@ -26,8 +25,8 @@ try {
     std::signal(SIGINT, sig_handler);
     std::signal(SIGTERM, sig_handler);
 
-    auto debug = false;
-    auto port  = madbfs::u16{ 12345 };
+    auto log_level = spdlog::level::warn;
+    auto port      = madbfs::u16{ 12345 };
 
     for (auto i = 1; i < argc; ++i) {
         auto arg = madbfs::Str{ argv[i] };
@@ -37,10 +36,12 @@ try {
             fmt::println("  --debug           Enable debug logging.");
             return 0;
         } else if (arg == "--debug") {
-            debug = true;
+            log_level = spdlog::level::debug;
+        } else if (arg == "--verbose") {
+            log_level = spdlog::level::info;
         } else if (arg == "--port") {
             if (i + 1 >= argc) {
-                spdlog::error("expecting port number after '--port' argument");
+                fmt::println(stderr, "expecting port number after '--port' argument");
                 return 1;
             }
 
@@ -49,21 +50,19 @@ try {
             auto [ptr, ec] = std::from_chars(arg.data(), arg.data() + arg.size(), port);
             if (ec != std::errc{}) {
                 auto msg = std::make_error_code(ec).message();
-                spdlog::error("failed to parse port number '{}': {}", arg, msg);
+                fmt::println(stderr, "failed to parse port number '{}': {}", arg, msg);
                 return 1;
             } else if (ptr != arg.data() + arg.size()) {
-                spdlog::error("failed to parse port number '{}': invalid trailing characters", arg);
+                fmt::println(stderr, "failed to parse port number '{}': invalid trailing characters", arg);
                 return 1;
             }
         } else {
-            spdlog::error("unknown argument: {}", arg);
+            fmt::println(stderr, "unknown argument: {}", arg);
             return 1;
         }
     }
 
-    if (debug) {
-        spdlog::set_level(spdlog::level::debug);
-    }
+    madbfs::log::init(log_level, "-");
 
     auto context = madbfs::async::Context{};
     auto server  = madbfs::server::Server{ context, port };    // may throw

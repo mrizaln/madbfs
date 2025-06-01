@@ -1,10 +1,9 @@
 #include "madbfs-server/server.hpp"
 #include "madbfs-server/defer.hpp"    // DEFER macro
 
+#include <madbfs-common/log.hpp>
 #include <madbfs-common/rpc.hpp>
 #include <madbfs-common/util/overload.hpp>
-
-#include <spdlog/spdlog.h>
 
 #include <dirent.h>
 #include <linux/fs.h>
@@ -22,7 +21,7 @@ namespace
     madbfs::rpc::Status status_from_errno(madbfs::Str name, madbfs::Str path, madbfs::Str msg)
     {
         auto err = errno;
-        spdlog::error("{}: {} {:?}: {}", name, msg, path, strerror(err));
+        madbfs::log_e({ "{}: {} {:?}: {}" }, name, msg, path, strerror(err));
         auto status = static_cast<madbfs::rpc::Status>(err);
 
         switch (status) {
@@ -47,10 +46,10 @@ namespace madbfs::server
     {
         auto procedure = co_await m_server.peek_req();
         if (not procedure) {
-            spdlog::error("{}: failed to get param for procedure {}", __func__, err_msg(procedure.error()));
+            log_e({ "{}: failed to get param for procedure {}" }, __func__, err_msg(procedure.error()));
             co_return Expect<void>{};
         }
-        spdlog::info("{}: accepted procedure [{}]", __func__, to_string(*procedure));
+        log_i({ "{}: accepted procedure [{}]" }, __func__, to_string(*procedure));
 
         auto handler = [&]<typename Req>(AExpect<Req> (rpc::Server::*recv)()) mutable -> AExpect<void> {
             auto req = co_await (m_server.*recv)();
@@ -79,7 +78,7 @@ namespace madbfs::server
         }
         // clang-format on
 
-        spdlog::error("{}: invalid procedure with integral value {}", __func__, static_cast<u8>(*procedure));
+        log_e({ "{}: invalid procedure with integral value {}" }, __func__, static_cast<u8>(*procedure));
 
         co_return Expect<void>{};
     }
@@ -87,7 +86,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Listdir req)
     {
         const auto& [path] = req;
-        spdlog::debug("listdir: path={:?}", path.data());
+        log_d({ "listdir: path={:?}" }, path.data());
 
         auto dir = ::opendir(path.data());
         if (dir == nullptr) {
@@ -159,7 +158,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Stat req)
     {
         const auto& [path] = req;
-        spdlog::debug("stat: path={:?}", path.data());
+        log_d({ "stat: path={:?}" }, path.data());
 
         struct stat filestat = {};
         if (auto res = ::lstat(path.data(), &filestat); res < 0) {
@@ -181,7 +180,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Readlink req)
     {
         const auto& [path] = req;
-        spdlog::debug("readlink: path={:?}", path.data());
+        log_d({ "readlink: path={:?}" }, path.data());
 
         // NOTE: can't use server's buffer as destination since using it will invalidate path.
         // PERF: since the buffer won't change anyway, making it static reduces memory usage
@@ -198,7 +197,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Mknod req)
     {
         const auto& [path, mode, dev] = req;
-        spdlog::debug("mknod: path={:?}", path.data());
+        log_d({ "mknod: path={:?}" }, path.data());
 
         if (::mknod(path.data(), mode, dev) < 0) {
             return status_from_errno(__func__, path, "failed to create file");
@@ -210,7 +209,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Mkdir req)
     {
         const auto& [path, mode] = req;
-        spdlog::debug("mkdir: path={:?}", path.data());
+        log_d({ "mkdir: path={:?}" }, path.data());
 
         if (::mkdir(path.data(), mode) < 0) {
             return status_from_errno(__func__, path, "failed to create directory");
@@ -222,7 +221,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Unlink req)
     {
         const auto& [path] = req;
-        spdlog::debug("unlink: path={:?}", path.data());
+        log_d({ "unlink: path={:?}" }, path.data());
 
         if (::unlink(path.data()) < 0) {
             return status_from_errno(__func__, path, "failed to remove file");
@@ -234,7 +233,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Rmdir req)
     {
         const auto& [path] = req;
-        spdlog::debug("rmdir: path={:?}", path.data());
+        log_d({ "rmdir: path={:?}" }, path.data());
 
         if (::rmdir(path.data()) < 0) {
             return status_from_errno(__func__, path, "failed to remove directory");
@@ -246,7 +245,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Rename req)
     {
         const auto& [from, to, flags] = req;
-        spdlog::debug("rename: from={:?} -> to={:?} [flags={}]", from, to, flags);
+        log_d({ "rename: from={:?} -> to={:?} [flags={}]" }, from, to, flags);
 
         // NOTE: renameat2 is not exposed directly by Android's linux kernel apparently (or not supported).
         // workaround: https://stackoverflow.com/a/41655792/16506263 (https://lwn.net/Articles/655028/).
@@ -267,7 +266,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Truncate req)
     {
         const auto& [path, size] = req;
-        spdlog::debug("truncate: path={:?}", path.data());
+        log_d({ "truncate: path={:?}" }, path.data());
 
         if (::truncate(path.data(), size) < 0) {
             return status_from_errno(__func__, path, "failed to truncate file");
@@ -279,7 +278,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Read req)
     {
         const auto& [path, offset, size] = req;
-        spdlog::debug("read: path={:?} size={}", path.data(), size);
+        log_d({ "read: path={:?} size={}" }, path.data(), size);
 
         auto fd = ::open(path.data(), O_RDONLY);
         if (fd < 0) {
@@ -311,7 +310,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Write req)
     {
         const auto& [path, offset, in] = req;
-        spdlog::debug("write: path={:?} size={}", path.data(), in.size());
+        log_d({ "write: path={:?} size={}" }, path.data(), in.size());
 
         auto fd = ::open(path.data(), O_WRONLY);
         if (fd < 0) {
@@ -339,7 +338,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Utimens req)
     {
         const auto& [path, atime, mtime] = req;
-        spdlog::debug("utimens: path={:?}", path.data());
+        log_d({ "utimens: path={:?}" }, path.data());
 
         auto times = Array{ atime, mtime };
         if (::utimensat(0, path.data(), times.data(), AT_SYMLINK_NOFOLLOW) < 0) {
@@ -352,7 +351,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::CopyFileRange req)
     {
         const auto& [in, in_off, out, out_off, size] = req;
-        spdlog::debug("copy_file_range: from={:?} -> to={:?}", in.data(), out.data());
+        log_d({ "copy_file_range: from={:?} -> to={:?}" }, in.data(), out.data());
 
         auto in_fd = ::open(in.data(), O_RDONLY);
         if (in_fd < 0) {
@@ -424,13 +423,13 @@ namespace madbfs::server
 
     AExpect<void> Server::run()
     {
-        spdlog::info("{}: launching tcp server on port: {}", __func__, m_acceptor.local_endpoint().port());
+        log_i({ "{}: launching tcp server on port: {}" }, __func__, m_acceptor.local_endpoint().port());
         m_running = true;
 
         while (m_running) {
             auto sock = co_await m_acceptor.async_accept();
             if (not sock) {
-                spdlog::error("{}: failed to accept connection: {}", __func__, sock.error().message());
+                log_e({ "{}: failed to accept connection: {}" }, __func__, sock.error().message());
                 break;
             }
 
@@ -453,9 +452,9 @@ namespace madbfs::server
         auto ec   = std::error_code{};
         auto peer = sock.remote_endpoint(ec);
         if (ec) {
-            spdlog::error("{}: failed to get endpoint: {}", __func__, ec.message());
+            log_e({ "{}: failed to get endpoint: {}" }, __func__, ec.message());
         }
-        spdlog::debug("{}: new connection from {}:{}", __func__, peer.address().to_string(), peer.port());
+        log_d({ "{}: new connection from {}:{}" }, __func__, peer.address().to_string(), peer.port());
 
         auto handler = RequestHandler{ sock };
         co_return co_await handler.dispatch();
