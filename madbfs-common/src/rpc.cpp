@@ -283,6 +283,8 @@ namespace madbfs::rpc
     {
         TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Mknod));
         TRY_SCOPED(co_await write_path(m_socket, req.path));
+        TRY_SCOPED(co_await write_int<u32>(m_socket, req.mode));
+        TRY_SCOPED(co_await write_int<u64>(m_socket, req.dev));
         TRY_SCOPED(co_await read_status(m_socket));
         co_return resp::Mknod{};
     }
@@ -291,6 +293,7 @@ namespace madbfs::rpc
     {
         TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Mkdir));
         TRY_SCOPED(co_await write_path(m_socket, req.path));
+        TRY_SCOPED(co_await write_int<u32>(m_socket, req.mode));
         TRY_SCOPED(co_await read_status(m_socket));
         co_return resp::Mkdir{};
     }
@@ -316,6 +319,7 @@ namespace madbfs::rpc
         TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Rename));
         TRY_SCOPED(co_await write_path(m_socket, req.from));
         TRY_SCOPED(co_await write_path(m_socket, req.to));
+        TRY_SCOPED(co_await write_int<u32>(m_socket, req.flags));
         TRY_SCOPED(co_await read_status(m_socket));
         co_return resp::Rename{};
     }
@@ -403,13 +407,16 @@ namespace madbfs::rpc
     AExpect<req::Mknod> Server::recv_req_mknod()
     {
         TRY(slice, co_await read_path(m_socket, m_buffer));
-        co_return req::Mknod{ .path = slice_as_str(m_buffer, *slice) };
+        TRY(mode, co_await read_int<u32>(m_socket));
+        TRY(dev, co_await read_int<u64>(m_socket));
+        co_return req::Mknod{ .path = slice_as_str(m_buffer, *slice), .mode = *mode, .dev = *dev };
     }
 
     AExpect<req::Mkdir> Server::recv_req_mkdir()
     {
         TRY(slice, co_await read_path(m_socket, m_buffer));
-        co_return req::Mkdir{ .path = slice_as_str(m_buffer, *slice) };
+        TRY(mode, co_await read_int<u32>(m_socket));
+        co_return req::Mkdir{ .path = slice_as_str(m_buffer, *slice), .mode = *mode };
     }
 
     AExpect<req::Unlink> Server::recv_req_unlink()
@@ -428,10 +435,12 @@ namespace madbfs::rpc
     {
         TRY(from_slice, co_await read_path(m_socket, m_buffer));
         TRY(to_slice, co_await read_path(m_socket, m_buffer));
+        TRY(flags, co_await read_int<u32>(m_socket));
 
         co_return req::Rename{
-            .from = slice_as_str(m_buffer, *from_slice),
-            .to   = slice_as_str(m_buffer, *to_slice),
+            .from  = slice_as_str(m_buffer, *from_slice),
+            .to    = slice_as_str(m_buffer, *to_slice),
+            .flags = *flags,
         };
     }
 

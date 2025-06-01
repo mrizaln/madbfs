@@ -39,11 +39,11 @@ namespace madbfs::tree
         AExpect<Ref<const data::Stat>> getattr(path::Path path);
 
         AExpect<Ref<Node>> readlink(path::Path path);
-        AExpect<Ref<Node>> mknod(path::Path path);
-        AExpect<Ref<Node>> mkdir(path::Path path);
+        AExpect<Ref<Node>> mknod(path::Path path, mode_t mode, dev_t dev);
+        AExpect<Ref<Node>> mkdir(path::Path path, mode_t mode);
         AExpect<void>      unlink(path::Path path);
         AExpect<void>      rmdir(path::Path path);
-        AExpect<void>      rename(path::Path from, path::Path to);
+        AExpect<void>      rename(path::Path from, path::Path to, u32 flags);
 
         AExpect<void>  truncate(path::Path path, off_t size);
         AExpect<u64>   open(path::Path path, int flags);

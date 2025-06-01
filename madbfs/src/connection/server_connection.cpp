@@ -160,8 +160,9 @@ namespace madbfs::connection
             m_server_proc->terminate(ec);
             if (ec) {
                 log_w({ "{}: error terminating server: {}" }, __func__, ec.message());
+            } else {
+                log_i({ "{}: successfully terminating server" }, __func__);
             }
-            log_i({ "{}: successfully terminating server" }, __func__);
         }
     }
 
@@ -244,7 +245,7 @@ namespace madbfs::connection
         });
     }
 
-    AExpect<void> ServerConnection::mknod(path::Path path)
+    AExpect<void> ServerConnection::mknod(path::Path path, mode_t mode, dev_t dev)
     {
         auto socket = co_await connect(m_port);
         if (not socket) {
@@ -253,12 +254,12 @@ namespace madbfs::connection
 
         auto buffer = Vec<u8>{};
         auto client = rpc::Client{ *socket, buffer };
-        auto req    = rpc::req::Mknod{ .path = path.fullpath() };
+        auto req    = rpc::req::Mknod{ .path = path.fullpath(), .mode = mode, .dev = dev };
 
         co_return (co_await client.send_req_mknod(req)).transform(sink_void);
     }
 
-    AExpect<void> ServerConnection::mkdir(path::Path path)
+    AExpect<void> ServerConnection::mkdir(path::Path path, mode_t mode)
     {
         auto socket = co_await connect(m_port);
         if (not socket) {
@@ -267,7 +268,7 @@ namespace madbfs::connection
 
         auto buffer = Vec<u8>{};
         auto client = rpc::Client{ *socket, buffer };
-        auto req    = rpc::req::Mkdir{ .path = path.fullpath() };
+        auto req    = rpc::req::Mkdir{ .path = path.fullpath(), .mode = mode };
 
         co_return (co_await client.send_req_mkdir(req)).transform(sink_void);
     }
@@ -300,7 +301,7 @@ namespace madbfs::connection
         co_return (co_await client.send_req_rmdir(req)).transform(sink_void);
     }
 
-    AExpect<void> ServerConnection::rename(path::Path from, path::Path to)
+    AExpect<void> ServerConnection::rename(path::Path from, path::Path to, u32 flags)
     {
         auto socket = co_await connect(m_port);
         if (not socket) {
@@ -309,7 +310,7 @@ namespace madbfs::connection
 
         auto buffer = Vec<u8>{};
         auto client = rpc::Client{ *socket, buffer };
-        auto req    = rpc::req::Rename{ .from = from.fullpath(), .to = to.fullpath() };
+        auto req    = rpc::req::Rename{ .from = from.fullpath(), .to = to.fullpath(), .flags = flags };
 
         co_return (co_await client.send_req_rename(req)).transform(sink_void);
     }

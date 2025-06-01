@@ -7,7 +7,9 @@
 #include <spdlog/spdlog.h>
 
 #include <dirent.h>
+#include <linux/fs.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 
 namespace
@@ -252,7 +254,7 @@ namespace madbfs::server
         }
         spdlog::debug("{}: path={:?}", __func__, mknod->path.data());
 
-        if (::mknod(mknod->path.data(), S_IFREG, 0) < 0) {
+        if (::mknod(mknod->path.data(), mknod->mode, mknod->dev) < 0) {
             auto err = log_status_from_errno(__func__, mknod->path, "failed to create file");
             co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
         }
@@ -262,15 +264,13 @@ namespace madbfs::server
 
     AExpect<void> Server::handle_req_mkdir(rpc::Server& serv)
     {
-        constexpr mode_t default_directory_mode = 040770;
-
         auto mkdir = co_await serv.recv_req_mkdir();
         if (not mkdir) {
             co_return Unexpect{ mkdir.error() };
         }
         spdlog::debug("{}: path={:?}", __func__, mkdir->path.data());
 
-        if (::mkdir(mkdir->path.data(), default_directory_mode) < 0) {
+        if (::mkdir(mkdir->path.data(), mkdir->mode) < 0) {
             auto err = log_status_from_errno(__func__, mkdir->path, "failed to create directory");
             co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
         }
@@ -316,9 +316,16 @@ namespace madbfs::server
         if (not rename) {
             co_return Unexpect{ rename.error() };
         }
-        spdlog::debug("{}: from={:?} -> to={:?}", __func__, rename->from.data(), rename->to.data());
+        auto [from, to, flags] = *rename;
+        spdlog::debug("{}: from={:?} -> to={:?} [flags={}]", __func__, from, to, flags);
 
-        if (::rename(rename->from.data(), rename->to.data()) < 0) {
+        // NOTE: renameat2 is not exposed directly by Android's linux kernel apparently (or not supported).
+        // workaround: https://stackoverflow.com/a/41655792/16506263 (https://lwn.net/Articles/655028/).
+        // paths are guaranteed to be absolute for both from and to, so the fds are not required according to
+        // man page rename(2).
+        // This function most likely will return invalid argument :D anyway since
+
+        if (syscall(SYS_renameat2, 0, from.data(), 0, to.data(), flags) < 0) {
             auto err = log_status_from_errno(__func__, rename->from, "failed to rename file");
             co_return co_await serv.send_resp(static_cast<rpc::Status>(err));
         }

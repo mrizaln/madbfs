@@ -73,11 +73,11 @@ namespace madbfs::rpc
         // clang-format off
         struct Stat          { Str path; };
         struct Readlink      { Str path; };
-        struct Mknod         { Str path; };
-        struct Mkdir         { Str path; };
+        struct Mknod         { Str path; mode_t mode; dev_t dev; };
+        struct Mkdir         { Str path; mode_t mode; };
         struct Unlink        { Str path; };
         struct Rmdir         { Str path; };
-        struct Rename        { Str from; Str to; };
+        struct Rename        { Str from; Str to; u32 flags; };
         struct Truncate      { Str path; i64 size; };
         struct Read          { Str path; i64 offset; u64 size; };
         struct Write         { Str path; i64 offset; Span<const u8> in; };

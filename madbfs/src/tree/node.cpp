@@ -74,16 +74,10 @@ namespace madbfs::tree
         return m_stat;
     }
 
-    Str Node::printable_type() const
+    const Error* Node::as_error() const
     {
-        auto visitor = util::Overload{
-            [](const RegularFile&) { return "file"; },       //
-            [](const Directory&) { return "directory"; },    //
-            [](const Link&) { return "link"; },              //
-            [](const Other&) { return "other"; },            //
-            [](const Error&) { return "error"; },            //
-        };
-        return std::visit(visitor, m_value);
+        auto err = as<Error>();
+        return err ? &err->get() : nullptr;
     }
 
     path::PathBuf Node::build_path() const
@@ -227,7 +221,7 @@ namespace madbfs::tree
         });
     }
 
-    AExpect<Ref<Node>> Node::mknod(Context context)
+    AExpect<Ref<Node>> Node::mknod(Context context, mode_t mode, dev_t dev)
     {
         if (auto err = as<Error>(); err.has_value()) {
             co_return Unexpect{ err->get().error };
@@ -249,7 +243,7 @@ namespace madbfs::tree
             overwrite = true;
         }
 
-        if (auto created = co_await context.connection.mknod(context.path); not created) {
+        if (auto created = co_await context.connection.mknod(context.path, mode, dev); not created) {
             co_return Unexpect{ created.error() };
         }
 
@@ -261,7 +255,7 @@ namespace madbfs::tree
             .transform([&](auto&& pair) { return pair.first; });
     }
 
-    AExpect<Ref<Node>> Node::mkdir(Context context)
+    AExpect<Ref<Node>> Node::mkdir(Context context, mode_t mode)
     {
         if (auto err = as<Error>(); err.has_value()) {
             co_return Unexpect{ err->get().error };
@@ -283,7 +277,7 @@ namespace madbfs::tree
             overwrite = true;
         }
 
-        auto may_mkdir = co_await context.connection.mkdir(context.path);
+        auto may_mkdir = co_await context.connection.mkdir(context.path, mode);
         if (not may_mkdir) {
             co_return Unexpect{ may_mkdir.error() };
         }

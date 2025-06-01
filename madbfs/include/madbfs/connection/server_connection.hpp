@@ -31,11 +31,11 @@ namespace madbfs::connection
         AExpect<data::Stat>      stat(path::Path path) override;
         AExpect<path::PathBuf>   readlink(path::Path path) override;
 
-        AExpect<void> mknod(path::Path path) override;
-        AExpect<void> mkdir(path::Path path) override;
+        AExpect<void> mknod(path::Path path, mode_t mode, dev_t dev) override;
+        AExpect<void> mkdir(path::Path path, mode_t mode) override;
         AExpect<void> unlink(path::Path path) override;
         AExpect<void> rmdir(path::Path path) override;
-        AExpect<void> rename(path::Path from, path::Path to) override;
+        AExpect<void> rename(path::Path from, path::Path to, u32 flags) override;
 
         AExpect<void>  truncate(path::Path path, off_t size) override;
         AExpect<usize> read(path::Path path, Span<char> out, off_t offset) override;

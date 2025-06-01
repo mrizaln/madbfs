@@ -317,22 +317,22 @@ namespace madbfs
             .error_or(0);
     }
 
-    i32 mknod(const char* path, [[maybe_unused]] mode_t mode, [[maybe_unused]] dev_t rdev)
+    i32 mknod(const char* path, mode_t mode, dev_t dev)
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](path::Path p) { return tree_blocking(&tree::FileTree::mknod, p); })
+            .and_then([=](path::Path p) { return tree_blocking(&tree::FileTree::mknod, p, mode, dev); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
 
-    i32 mkdir(const char* path, [[maybe_unused]] mode_t mode)
+    i32 mkdir(const char* path, mode_t mode)
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](path::Path p) { return tree_blocking(&tree::FileTree::mkdir, p); })
+            .and_then([=](path::Path p) { return tree_blocking(&tree::FileTree::mkdir, p, mode | S_IFDIR); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -357,10 +357,16 @@ namespace madbfs
             .error_or(0);
     }
 
-    // TODO: handle flags
-    i32 rename(const char* from, const char* to, [[maybe_unused]] u32 flags)
+    i32 rename(const char* from, const char* to, u32 flags)
     {
-        log_i({ "{}: {:?} -> {:?}" }, __func__, from, to);
+        log_i({ "{}: {:?} -> {:?} [flags={}]" }, __func__, from, to, flags);
+
+        // see: man page of rename(2)
+        if ((flags & RENAME_EXCHANGE) != 0 and (flags & RENAME_NOREPLACE) != 0) {
+            return fuse_err(__func__, from)(Errc::invalid_argument);
+        } else if ((flags & RENAME_EXCHANGE) != 0 and (flags & RENAME_WHITEOUT) != 0) {
+            return fuse_err(__func__, from)(Errc::invalid_argument);
+        }
 
         auto from_path = path::create(from);
         auto to_path   = path::create(to);
@@ -372,7 +378,7 @@ namespace madbfs
             return fuse_err(__func__, to)(Errc::operation_not_supported);
         }
 
-        return tree_blocking(&tree::FileTree::rename, *from_path, *to_path)
+        return tree_blocking(&tree::FileTree::rename, *from_path, *to_path, flags)
             .transform_error(fuse_err(__func__, from))
             .error_or(0);
     }
@@ -398,7 +404,7 @@ namespace madbfs
             .error_or(0);
     }
 
-    i32 read(const char* path, char* buf, size_t size, off_t offset, [[maybe_unused]] fuse_file_info* fi)
+    i32 read(const char* path, char* buf, size_t size, off_t offset, fuse_file_info* fi)
     {
         log_i({ "{}: [offset={}|size={}] {:?}" }, __func__, offset, size, path);
 
@@ -466,7 +472,7 @@ namespace madbfs
         return 0;
     }
 
-    i32 utimens(const char* path, [[maybe_unused]] const timespec tv[2], [[maybe_unused]] fuse_file_info* fi)
+    i32 utimens(const char* path, const timespec tv[2], [[maybe_unused]] fuse_file_info* fi)
     {
         log_i({ "{}: {:?}" }, __func__, path);
 
