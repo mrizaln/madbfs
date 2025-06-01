@@ -325,8 +325,14 @@ namespace madbfs::tree
         auto res = as<Directory>().and_then([&](Directory& dir) {
             return dir.find(name).and_then([&](Node& node) {
                 return node.as<Directory>().and_then([&](Directory& target) -> Expect<Ref<Directory>> {
-                    return target.children().empty() ? Expect<Ref<Directory>>{ dir }
-                                                     : Unexpect{ Errc::directory_not_empty };
+                    if (not target.children().empty()) {
+                        for (const auto& child : target.children()) {
+                            if (not child->is<Error>()) {
+                                Unexpect{ Errc::directory_not_empty };
+                            }
+                        }
+                    }
+                    return Expect<Ref<Directory>>{ dir };
                 });
             });
         });
