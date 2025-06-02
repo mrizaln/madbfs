@@ -4,6 +4,37 @@
 
 namespace madbfs::server
 {
+    class RequestHandler
+    {
+    public:
+        RequestHandler(async::tcp::Socket& sock)
+            : m_server{ sock, m_buffer }
+        {
+        }
+
+        AExpect<void> dispatch();
+
+    private:
+        using Response = Var<rpc::Status, rpc::Response>;
+
+        Response handle_req(rpc::req::Listdir req);
+        Response handle_req(rpc::req::Stat req);
+        Response handle_req(rpc::req::Readlink req);
+        Response handle_req(rpc::req::Mknod req);
+        Response handle_req(rpc::req::Mkdir req);
+        Response handle_req(rpc::req::Unlink req);
+        Response handle_req(rpc::req::Rmdir req);
+        Response handle_req(rpc::req::Rename req);
+        Response handle_req(rpc::req::Truncate req);
+        Response handle_req(rpc::req::Read req);
+        Response handle_req(rpc::req::Write req);
+        Response handle_req(rpc::req::Utimens req);
+        Response handle_req(rpc::req::CopyFileRange req);
+
+        Vec<u8>     m_buffer;
+        rpc::Server m_server;
+    };
+
     class Server
     {
     public:
@@ -20,23 +51,7 @@ namespace madbfs::server
         void          stop();
 
     private:
-        AExpect<void> handle(async::tcp::Socket sock);
-
-        // clang-format off
-        AExpect<void> handle_req_listdir        (rpc::Server& serv);
-        AExpect<void> handle_req_stat           (rpc::Server& serv);
-        AExpect<void> handle_req_readlink       (rpc::Server& serv);
-        AExpect<void> handle_req_mknod          (rpc::Server& serv);
-        AExpect<void> handle_req_mkdir          (rpc::Server& serv);
-        AExpect<void> handle_req_unlink         (rpc::Server& serv);
-        AExpect<void> handle_req_rmdir          (rpc::Server& serv);
-        AExpect<void> handle_req_rename         (rpc::Server& serv);
-        AExpect<void> handle_req_truncate       (rpc::Server& serv);
-        AExpect<void> handle_req_read           (rpc::Server& serv);
-        AExpect<void> handle_req_write          (rpc::Server& serv);
-        AExpect<void> handle_req_utimens        (rpc::Server& serv);
-        AExpect<void> handle_req_copy_file_range(rpc::Server& serv);
-        // clang-format on
+        AExpect<void> handle_connection(async::tcp::Socket sock);
 
         async::tcp::Acceptor m_acceptor;
         std::atomic<bool>    m_running;

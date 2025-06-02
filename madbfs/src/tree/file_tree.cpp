@@ -1,7 +1,8 @@
 #include "madbfs/tree/file_tree.hpp"
 
-#include "madbfs/log.hpp"
 #include "madbfs/tree/node.hpp"
+
+#include <madbfs-common/log.hpp>
 
 namespace madbfs::tree
 {
@@ -189,24 +190,24 @@ namespace madbfs::tree
         co_return (co_await traverse_or_build(path)).and_then(&Node::readlink);
     }
 
-    AExpect<Ref<Node>> FileTree::mknod(path::Path path)
+    AExpect<Ref<Node>> FileTree::mknod(path::Path path, mode_t mode, dev_t dev)
     {
         auto parent = path.parent_path();
         auto node   = co_await traverse_or_build(parent);
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().mknod(make_context(path));
+        co_return co_await node->get().mknod(make_context(path), mode, dev);
     }
 
-    AExpect<Ref<Node>> FileTree::mkdir(path::Path path)
+    AExpect<Ref<Node>> FileTree::mkdir(path::Path path, mode_t mode)
     {
         auto parent = path.parent_path();
         auto node   = co_await traverse_or_build(parent);
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().mkdir(make_context(path));
+        co_return co_await node->get().mkdir(make_context(path), mode);
     }
 
     AExpect<void> FileTree::unlink(path::Path path)
@@ -229,7 +230,7 @@ namespace madbfs::tree
         co_return co_await node->get().rmdir(make_context(path));
     }
 
-    AExpect<void> FileTree::rename(path::Path from, path::Path to)
+    AExpect<void> FileTree::rename(path::Path from, path::Path to, u32 flags)
     {
         // I don't think root can be moved, :P
         if (from.is_root()) {
@@ -241,7 +242,21 @@ namespace madbfs::tree
             co_return Unexpect{ from_node.error() };
         }
 
-        co_return (co_await m_connection.rename(from, to))
+        if ((flags & RENAME_EXCHANGE) != 0) {
+            auto to_node = co_await traverse_or_build(to);
+            if (not to_node.has_value()) {
+                co_return Unexpect{ to_node.error() };
+            } else if (auto err = to_node->get().as_error(); err != nullptr) {
+                co_return Unexpect{ err->error };
+            }
+        } else if ((flags & RENAME_NOREPLACE) != 0) {
+            auto to_node = co_await traverse_or_build(to);
+            if (to_node.has_value() and to_node->get().as_error() == nullptr) {
+                co_return Unexpect{ Errc::file_exists };
+            }
+        }
+
+        co_return (co_await m_connection.rename(from, to, flags))
             .transform([&] { return std::ref(*from_node->get().parent()); })    // non-root (always exists)
             .and_then(proj(&Node::extract, from.filename()))
             .and_then([&](Uniq<Node>&& node) {
@@ -251,7 +266,17 @@ namespace madbfs::tree
                     return to_parent.insert(std::move(node), true);
                 });
             })
-            .transform(sink_void);
+            .transform([&](Pair<Ref<Node>, Uniq<Node>> overwritten) {
+                if ((flags & RENAME_EXCHANGE) != 0) {
+                    assert(overwritten.second != nullptr);
+                    auto parent = from_node->get().parent();
+                    auto node   = std::move(overwritten).second;
+                    node->set_name(from.filename());
+                    node->set_parent(parent);
+                    auto res = parent->insert(std::move(node), false);
+                    assert(res->second == nullptr);    // has extracted before
+                }
+            });
     }
 
     AExpect<void> FileTree::truncate(path::Path path, off_t size)

@@ -1,8 +1,9 @@
 #include "madbfs/connection/adb_connection.hpp"
 
-#include "madbfs-common/util/split.hpp"
-#include "madbfs/log.hpp"
 #include "madbfs/path/path.hpp"
+
+#include <madbfs-common/log.hpp>
+#include <madbfs-common/util/split.hpp>
 
 #include <grp.h>
 #include <pwd.h>
@@ -127,14 +128,14 @@ namespace madbfs::connection
         });
     }
 
-    AExpect<void> AdbConnection::mknod(path::Path path)
+    AExpect<void> AdbConnection::mknod(path::Path path, mode_t /* mode */, dev_t /* dev */)
     {
         const auto qpath = quoted(path);
         const auto args  = Array{ "shell"sv, "touch"sv, Str{ qpath } };
         co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
     }
 
-    AExpect<void> AdbConnection::mkdir(path::Path path)
+    AExpect<void> AdbConnection::mkdir(path::Path path, mode_t /* mode */)
     {
         const auto qpath = quoted(path);
         const auto args  = Array{ "shell"sv, "mkdir"sv, Str{ qpath } };
@@ -155,12 +156,22 @@ namespace madbfs::connection
         co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
     }
 
-    AExpect<void> AdbConnection::rename(path::Path from, path::Path to)
+    AExpect<void> AdbConnection::rename(path::Path from, path::Path to, u32 flags)
     {
         const auto qfrom = quoted(from);
         const auto qto   = quoted(to);
-        const auto args  = Array{ "shell"sv, "mv"sv, Str{ qfrom }, Str{ qto } };
-        co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
+
+        if (flags == RENAME_EXCHANGE) {
+            // NOTE: there is no --exchange flag on Android's mv
+            // NOTE: renameat2 returns EINVAL when the fs doesn't support exchange operation see man rename(2)
+            co_return Unexpect{ Errc::invalid_argument };
+        } else if (flags == RENAME_NOREPLACE) {
+            const auto args = Array{ "shell"sv, "mv"sv, "-n"sv, Str{ qfrom }, Str{ qto } };
+            co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
+        } else {
+            const auto args = Array{ "shell"sv, "mv"sv, Str{ qfrom }, Str{ qto } };
+            co_return (co_await exec_async("adb", args, "", true)).transform(sink_void);
+        }
     }
 
     AExpect<void> AdbConnection::truncate(path::Path path, off_t size)

@@ -230,9 +230,25 @@ namespace madbfs::tree
 
         Expect<Ref<const data::Stat>> stat() const;
 
-        Str           printable_type() const;
+        /**
+         * @brief Get Error ptr value if the variant is an Error.
+         *
+         * This function is different from `as<Error>` since it's intended for use outside of Node. It will
+         * return nullptr if the Node is not an Error instance.
+         */
+        const Error* as_error() const;
+
+        /**
+         * @brief Build path from node.
+         */
         path::PathBuf build_path() const;
 
+        /**
+         * @brief Update time metadata.
+         *
+         * @param atime Access time (special values apply).
+         * @param mtime Modification time (special values apply)
+         */
         void refresh_stat(timespec atime, timespec mtime);
 
         /**
@@ -317,7 +333,6 @@ namespace madbfs::tree
         /**
          * @brief Create a new child node as Link.
          *
-         * @param context Context needed to communicate with device and local.
          * @param name The name of the link.
          * @param target The target of the link.
          *
@@ -329,26 +344,26 @@ namespace madbfs::tree
          * @brief Create a new child node as RegularFile.
          *
          * @param context Context needed to communicate with device and local.
+         * @param mode File mode to use and the type of node to be created.
          *
          * @return The new regular file node.
          */
-        AExpect<Ref<Node>> mknod(Context context);
+        AExpect<Ref<Node>> mknod(Context context, mode_t mode, dev_t dev);
 
         /**
          * @brief Create a new child node as Directory.
          *
          * @param context Context needed to communicate with device and local.
-         * @param name The name of the directory.
+         * @param mode The mode of the new directory.
          *
          * @return The new directory node.
          */
-        AExpect<Ref<Node>> mkdir(Context context);
+        AExpect<Ref<Node>> mkdir(Context context, mode_t mode);
 
         /**
          * @brief Remove a child node by its name (RegularFile or Directory).
          *
          * @param context Context needed to communicate with device and local.
-         * @param name The name of the child node.
          */
         AExpect<void> unlink(Context context);
 
@@ -356,7 +371,6 @@ namespace madbfs::tree
          * @brief Remove a child node by its name (Directory).
          *
          * @param context Context needed to communicate with device and local.
-         * @param name The name of the child node.
          */
         AExpect<void> rmdir(Context context);
 
@@ -500,8 +514,9 @@ namespace madbfs::tree
         constexpr auto errc = [&] {
             if constexpr (std::same_as<Directory, T>) {
                 return Errc::not_a_directory;
+            } else {
+                return Errc::invalid_argument;
             }
-            return Errc::invalid_argument;
         }();
         if (auto* val = std::get_if<T>(&m_value)) {
             return *val;
@@ -515,8 +530,9 @@ namespace madbfs::tree
         constexpr auto errc = [] {
             if constexpr (std::same_as<Directory, T>) {
                 return Errc::not_a_directory;
+            } else {
+                return Errc::invalid_argument;
             }
-            return Errc::invalid_argument;
         }();
         if (auto* val = std::get_if<T>(&m_value)) {
             return *val;

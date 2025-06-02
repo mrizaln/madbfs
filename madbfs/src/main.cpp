@@ -1,6 +1,7 @@
 #include "madbfs/args.hpp"
-#include "madbfs/log.hpp"
 #include "madbfs/madbfs.hpp"
+
+#include <madbfs-common/log.hpp>
 
 #include <execinfo.h>
 #include <unistd.h>

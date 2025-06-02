@@ -1,8 +1,8 @@
 #pragma once
 
-#include "madbfs-common/aliases.hpp"
-#include "madbfs-common/async/async.hpp"
 #include "madbfs/data/stat.hpp"
+
+#include <madbfs-common/async/async.hpp>
 
 namespace madbfs::path
 {
@@ -54,14 +54,14 @@ namespace madbfs::connection
          *
          * @param path Path of the new file.
          */
-        virtual AExpect<void> mknod(path::Path path) = 0;
+        virtual AExpect<void> mknod(path::Path path, mode_t mode, dev_t dev) = 0;
 
         /**
          * @brief Make a directory on the device.
          *
          * @param path Path to the directory.
          */
-        virtual AExpect<void> mkdir(path::Path path) = 0;
+        virtual AExpect<void> mkdir(path::Path path, mode_t mode) = 0;
 
         /**
          * @brief Remove a file on the device.
@@ -84,7 +84,7 @@ namespace madbfs::connection
          * @param from Target file.
          * @param to Destination file.
          */
-        virtual AExpect<void> rename(path::Path from, path::Path to) = 0;
+        virtual AExpect<void> rename(path::Path from, path::Path to, u32 flags) = 0;
 
         // --------------------
 
