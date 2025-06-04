@@ -6,7 +6,7 @@ class Recipe(ConanFile):
     settings = ["os", "compiler", "build_type", "arch"]
     generators = ["CMakeToolchain", "CMakeDeps"]
     requires = [
-        "asio/1.29.0",
+        "asio/1.34.2",
         "fmt/11.1.3",
         "spdlog/1.15.1",
     ]
