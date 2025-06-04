@@ -6,46 +6,46 @@
 
 namespace madbfs::data
 {
-    Page::Page(PageKey key, Uniq<char[]> buf, u32 size)
+    Page::Page(PageKey key, Uniq<char[]> buf, u32 size, u32 page_size)
         : m_key{ key }
         , m_data{ std::move(buf) }
         , m_size{ size }
+        , m_page_size{ page_size }
     {
     }
 
     usize Page::read(Span<char> out, usize offset)
     {
-        auto size = std::min((m_size & ~dirty_bit) - offset, out.size());
+        auto size = std::min(m_size - offset, out.size());
         std::copy_n(m_data.get() + offset, size, out.data());
         return size;
     }
 
     usize Page::write(Span<const char> in, usize offset)
     {
-        // NOTE: offset + in.size() is always assumed to be less than or equal to page size
-        auto size = offset + in.size();
+        if (offset >= m_page_size) {
+            log_w({ "{}: offset exceed page size [{} vs {}]" }, __func__, offset, m_page_size);
+            return 0;
+        }
+        auto size = std::min(static_cast<u32>(offset + in.size()), m_page_size);
         std::copy_n(in.data(), in.size(), m_data.get() + offset);
-        m_size = static_cast<u32>(size) | (m_size & dirty_bit);
+        m_size = size;
         return in.size();
     }
 
     usize Page::size() const
     {
-        return m_size & ~dirty_bit;
-    };
+        return m_size;
+    }
 
     bool Page::is_dirty() const
     {
-        return m_size & dirty_bit;
+        return m_size;
     }
 
     void Page::set_dirty(bool set)
     {
-        if (set) {
-            m_size |= dirty_bit;
-        } else {
-            m_size &= ~dirty_bit;
-        }
+        m_dirty = set;
     }
 }
 
@@ -101,9 +101,12 @@ namespace madbfs::data
                     promise.set_value(may_len.error());
                     m_queue.erase(key);
                     co_return Unexpect{ may_len.error() };
+                } else if (not m_queue.contains(key)) {
+                    promise.set_value(Errc::operation_canceled);
+                    co_return Unexpect{ Errc::operation_canceled };
                 }
 
-                m_lru.emplace_front(key, std::move(data), *may_len);
+                m_lru.emplace_front(key, std::move(data), *may_len, m_page_size);
                 auto [p, _] = m_table.emplace(key, m_lru.begin());
                 entry       = p;
 
@@ -165,7 +168,7 @@ namespace madbfs::data
 
             auto entry = m_table.find(key);
             if (entry == m_table.end()) {
-                m_lru.emplace_front(key, std::make_unique<char[]>(m_page_size), 0);
+                m_lru.emplace_front(key, std::make_unique<char[]>(m_page_size), 0, m_page_size);
                 auto [p, _] = m_table.emplace(key, m_lru.begin());
                 entry       = p;
             }
@@ -244,6 +247,8 @@ namespace madbfs::data
     {
         m_table.clear();
         m_lru.clear();
+        m_queue.clear();
+        m_path_map.clear();
 
         log_i({ "{}: cache invalidated" }, __func__);
     }
@@ -253,6 +258,8 @@ namespace madbfs::data
         m_page_size = new_page_size;
         m_table.clear();
         m_lru.clear();
+        m_queue.clear();
+        m_path_map.clear();
 
         log_i({ "{}: page size changed to: {}" }, __func__, new_page_size);
     }
@@ -262,6 +269,8 @@ namespace madbfs::data
         m_max_pages = new_max_pages;
         m_table.clear();
         m_lru.clear();
+        m_queue.clear();
+        m_path_map.clear();
 
         log_i({ "{}: max pages can be stored changed to: {}" }, __func__, new_max_pages);
     }
@@ -271,12 +280,12 @@ namespace madbfs::data
         auto found = m_path_map.find(id);
         assert(found != m_path_map.end());
 
-        // WARN: if m_path_map is updated, the path may point to freed memory
-        auto path = found->second.path.as_path();
+        // NOTE: if m_path_map is updated, the path may point to freed memory, so copy is made
+        auto path = found->second.path;
         auto idx  = static_cast<usize>(offset) / m_page_size;
 
         log_d({ "{}: [id={}|idx={}] cache miss, read from device..." }, __func__, id.inner(), idx, offset);
-        return m_connection.read(path, out, offset);
+        co_return co_await m_connection.read(path, out, offset);
     }
 
     AExpect<usize> Cache::on_flush(Id id, Span<const char> in, off_t offset)
@@ -284,12 +293,12 @@ namespace madbfs::data
         auto found = m_path_map.find(id);
         assert(found != m_path_map.end());
 
-        // WARN: if m_path_map is updated, the path may point to freed memory
-        auto path = found->second.path.as_path();
+        // NOTE: if m_path_map is updated, the path may point to freed memory, so copy is made
+        auto path = found->second.path;
         auto idx  = static_cast<usize>(offset) / m_page_size;
 
         log_d({ "{}: [id={}|idx={}] flush, write to device..." }, __func__, id.inner(), idx, offset);
-        return m_connection.write(path, in, offset);
+        co_return co_await m_connection.write(path, in, offset);
     }
 
     Await<void> Cache::evict(usize size)

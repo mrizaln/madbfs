@@ -9,7 +9,6 @@
 #include <saf.hpp>
 
 #include <cassert>
-#include <functional>
 #include <list>
 
 namespace madbfs::connection
@@ -32,14 +31,10 @@ namespace madbfs::data
         bool  operator==(const PageKey& other) const = default;
     };
 
-    // NOTE: page size is not stored to minimize the memory usage
     class Page
     {
     public:
-        // NOTE: can't use std::move_only_function in gcc: "atomic constraint depends on itself"
-        using WriteFn = std::function<Expect<Span<const char>>()>;
-
-        Page(PageKey key, Uniq<char[]> buf, u32 size);
+        Page(PageKey key, Uniq<char[]> buf, u32 size, u32 page_size);
 
         usize read(Span<char> out, usize offset);
         usize write(Span<const char> in, usize offset);
@@ -53,11 +48,11 @@ namespace madbfs::data
         Span<const char> buf() { return { m_data.get(), size() }; }
 
     private:
-        static constexpr auto dirty_bit = 0x10000000_u32;
-
         PageKey      m_key;
         Uniq<char[]> m_data;
-        u32          m_size;    // 1 bit is used as dirty flag, so max page size should be 2**31 bytes
+        u32          m_size;
+        u32          m_page_size;
+        bool         m_dirty;
     };
 
     class Cache
