@@ -40,7 +40,7 @@ namespace madbfs::data
 
     bool Page::is_dirty() const
     {
-        return m_size;
+        return m_dirty;
     }
 
     void Page::set_dirty(bool set)
@@ -313,7 +313,7 @@ namespace madbfs::data
             }
 
             auto [id, idx] = page.key();
-            log_w({ "{}: force push page [id={}|idx={}" }, __func__, id.inner(), idx);
+            log_w({ "{}: force push page [id={}|idx={}]" }, __func__, id.inner(), idx);
 
             auto offset = static_cast<off_t>(idx * m_page_size);
             if (auto res = co_await on_flush(id, page.buf(), offset); not res) {

@@ -52,7 +52,7 @@ namespace madbfs::data
         Uniq<char[]> m_data;
         u32          m_size;
         u32          m_page_size;
-        bool         m_dirty;
+        bool         m_dirty = false;
     };
 
     class Cache
