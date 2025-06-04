@@ -8,7 +8,7 @@
 
 namespace madbfs::connection
 {
-    AExpect<async::tcp::Socket> connect(u16 port)
+    AExpect<Uniq<rpc::Client>> ServerConnection::try_make_client(u16 port)
     {
         auto exec   = co_await async::this_coro::executor;
         auto socket = async::tcp::Socket{ exec };
@@ -22,30 +22,51 @@ namespace madbfs::connection
             co_return Unexpect{ errc };
         }
 
-        co_return std::move(socket);
+        if (auto res = co_await rpc::handshake(socket, true); not res) {
+            co_return Unexpect{ res.error() };
+        }
+
+        co_return std::make_unique<rpc::Client>(std::move(socket));
     }
 
-    template <rpc::IsRequest Req>
-    AExpect<rpc::ToResp<Req>> send_req(rpc::Client& client, Vec<u8>& buf, Req req)
+    AExpect<rpc::Response> ServerConnection::try_send(Vec<u8>& buf, rpc::Request req)
     {
-        auto fut = co_await client.send_req(buf, std::move(req));
+        if (m_client == nullptr) {
+            log_i({ "{}: client is not connected, trying to reestablish connection" }, __func__);
+            auto client = co_await try_make_client(m_port);
+            if (not client) {
+                log_e({ "{}: reconnection failed" }, __func__);
+                co_return Unexpect{ client.error() };
+            }
+            m_client = std::move(*client);
+            log_i({ "{}: reconnection successful" }, __func__);
+        }
+
+        if (not m_client->running()) {
+            co_await m_client->start();
+        }
+
+        auto fut = co_await m_client->send_req(buf, std::move(req));
         if (not fut) {
+            if (fut.error() == Errc::not_connected or fut.error() == Errc::broken_pipe) {
+                log_e({ "{}: client is disconnected, releasing client" }, __func__);
+                m_client.reset();
+            }
             co_return Unexpect{ fut.error() };
         }
 
-        auto resp = co_await fut->async_extract();
-        if (not resp) {
-            co_return Unexpect{ resp.error() };
+        auto res = co_await fut->async_extract();
+        if (not res) {
+            if (res.error() == Errc::not_connected or res.error() == Errc::broken_pipe) {
+                log_e({ "{}: client is disconnected, releasing client" }, __func__);
+                m_client.reset();
+            }
+            co_return Unexpect{ res.error() };
         }
 
-        using Resp = rpc::ToResp<Req>;
-        co_return std::get<Resp>(std::move(*resp));
+        co_return res;
     }
 
-}
-
-namespace madbfs::connection
-{
     AExpect<Uniq<ServerConnection>> ServerConnection::prepare_and_create(Opt<path::Path> server, u16 port)
     {
         namespace bp = boost::process::v2;
@@ -64,19 +85,13 @@ namespace madbfs::connection
 
         if (not server) {
             log_i({ "{}: server path not set, try connect" }, __func__);
-
-            auto socket = co_await connect(port);
-            if (not socket) {
-                co_return Unexpect{ socket.error() };
-            }
-
-            // check if already running
-            if (auto res = co_await rpc::handshake(*socket, true); not res) {
-                co_return Unexpect{ res.error() };
+            auto client = co_await try_make_client(port);
+            if (not client) {
+                co_return Unexpect{ client.error() };
             }
 
             log_i({ "{}: server is already running, continue normally" }, __func__);
-            co_return Uniq<ServerConnection>{ new ServerConnection{ port, std::move(*socket) } };
+            co_return Uniq<ServerConnection>{ new ServerConnection{ port, std::move(*client) } };
         }
 
         log_i({ "{}: server path set to {}, pushing server normally" }, __func__, server->fullpath());
@@ -136,26 +151,21 @@ namespace madbfs::connection
                 log_e({ "{}: server process broken pipe" }, __func__);
                 co_return Unexpect{ Errc::broken_pipe };
             } else if (buf != rpc::server_ready_string) {
-                log_e({ "{}: server process is responding, but incorrect response: {}" }, __func__, buf);
+                log_e({ "{}: server process is responding, but incorrect response: {:?}" }, __func__, buf);
                 co_return Unexpect{ Errc::broken_pipe };
             }
         }
 
-        auto socket = co_await connect(port);
-        if (not socket) {
-            co_return Unexpect{ socket.error() };
-        }
-
-        // check if already running
-        if (auto res = co_await rpc::handshake(*socket, true); not res) {
-            co_return Unexpect{ res.error() };
+        auto client = co_await try_make_client(port);
+        if (not client) {
+            co_return Unexpect{ client.error() };
         }
 
         log_i({ "{}: server is running and ready to be used" }, __func__);
 
         co_return Uniq<ServerConnection>{ new ServerConnection{
             port,
-            std::move(*socket),
+            std::move(*client),
             std::move(proc),
             std::move(out),
             std::move(err),
@@ -164,7 +174,9 @@ namespace madbfs::connection
 
     ServerConnection::~ServerConnection()
     {
-        m_client.stop();
+        if (m_client) {
+            m_client->stop();
+        }
 
         if (not m_server_proc) {
             return;
@@ -191,7 +203,7 @@ namespace madbfs::connection
     {
         auto buf  = Vec<u8>{};
         auto req  = rpc::req::Listdir{ .path = path.fullpath() };
-        auto resp = co_await send_req(m_client, buf, req);
+        auto resp = co_await send_req(buf, req);
         if (not resp) {
             co_return Unexpect{ resp.error() };
         }
@@ -222,7 +234,7 @@ namespace madbfs::connection
         auto buf = Vec<u8>{};
         auto req = rpc::req::Stat{ .path = path.fullpath() };
 
-        co_return (co_await send_req(m_client, buf, req)).transform([](rpc::resp::Stat resp) {
+        co_return (co_await send_req(buf, req)).transform([](rpc::resp::Stat resp) {
             return data::Stat{
                 .links = resp.links,
                 .size  = resp.size,
@@ -241,7 +253,7 @@ namespace madbfs::connection
         auto buf = Vec<u8>{};
         auto req = rpc::req::Readlink{ .path = path.fullpath() };
 
-        co_return (co_await send_req(m_client, buf, req)).transform([&](rpc::resp::Readlink resp) {
+        co_return (co_await send_req(buf, req)).transform([&](rpc::resp::Readlink resp) {
             return path::resolve(path.parent_path(), resp.target);
         });
     }
@@ -251,7 +263,7 @@ namespace madbfs::connection
         auto buf = Vec<u8>{};
         auto req = rpc::req::Mknod{ .path = path.fullpath(), .mode = mode, .dev = dev };
 
-        co_return (co_await send_req(m_client, buf, req)).transform(sink_void);
+        co_return (co_await send_req(buf, req)).transform(sink_void);
     }
 
     AExpect<void> ServerConnection::mkdir(path::Path path, mode_t mode)
@@ -259,7 +271,7 @@ namespace madbfs::connection
         auto buf = Vec<u8>{};
         auto req = rpc::req::Mkdir{ .path = path.fullpath(), .mode = mode };
 
-        co_return (co_await send_req(m_client, buf, req)).transform(sink_void);
+        co_return (co_await send_req(buf, req)).transform(sink_void);
     }
 
     AExpect<void> ServerConnection::unlink(path::Path path)
@@ -267,7 +279,7 @@ namespace madbfs::connection
         auto buf = Vec<u8>{};
         auto req = rpc::req::Unlink{ .path = path.fullpath() };
 
-        co_return (co_await send_req(m_client, buf, req)).transform(sink_void);
+        co_return (co_await send_req(buf, req)).transform(sink_void);
     }
 
     AExpect<void> ServerConnection::rmdir(path::Path path)
@@ -275,7 +287,7 @@ namespace madbfs::connection
         auto buf = Vec<u8>{};
         auto req = rpc::req::Rmdir{ .path = path.fullpath() };
 
-        co_return (co_await send_req(m_client, buf, req)).transform(sink_void);
+        co_return (co_await send_req(buf, req)).transform(sink_void);
     }
 
     AExpect<void> ServerConnection::rename(path::Path from, path::Path to, u32 flags)
@@ -283,7 +295,7 @@ namespace madbfs::connection
         auto buf = Vec<u8>{};
         auto req = rpc::req::Rename{ .from = from.fullpath(), .to = to.fullpath(), .flags = flags };
 
-        co_return (co_await send_req(m_client, buf, req)).transform(sink_void);
+        co_return (co_await send_req(buf, req)).transform(sink_void);
     }
 
     AExpect<void> ServerConnection::truncate(path::Path path, off_t size)
@@ -291,7 +303,7 @@ namespace madbfs::connection
         auto buf = Vec<u8>{};
         auto req = rpc::req::Truncate{ .path = path.fullpath(), .size = size };
 
-        co_return (co_await send_req(m_client, buf, req)).transform(sink_void);
+        co_return (co_await send_req(buf, req)).transform(sink_void);
     }
 
     AExpect<usize> ServerConnection::read(path::Path path, Span<char> out, off_t offset)
@@ -299,7 +311,7 @@ namespace madbfs::connection
         auto buf = Vec<u8>{};
         auto req = rpc::req::Read{ .path = path.fullpath(), .offset = offset, .size = out.size() };
 
-        co_return (co_await send_req(m_client, buf, req)).transform([&](rpc::resp::Read resp) {
+        co_return (co_await send_req(buf, req)).transform([&](rpc::resp::Read resp) {
             auto size = std::min(resp.read.size(), out.size());
             std::copy_n(resp.read.begin(), size, out.begin());
             return size;
@@ -312,7 +324,7 @@ namespace madbfs::connection
         auto bytes = Span{ reinterpret_cast<const u8*>(in.data()), in.size() };
         auto req   = rpc::req::Write{ .path = path.fullpath(), .offset = offset, .in = bytes };
 
-        co_return (co_await send_req(m_client, buf, req)).transform(proj(&rpc::resp::Write::size));
+        co_return (co_await send_req(buf, req)).transform(proj(&rpc::resp::Write::size));
     }
 
     AExpect<void> ServerConnection::utimens(path::Path path, timespec atime, timespec mtime)
@@ -320,7 +332,7 @@ namespace madbfs::connection
         auto buf = Vec<u8>{};
         auto req = rpc::req::Utimens{ .path = path.fullpath(), .atime = atime, .mtime = mtime };
 
-        co_return (co_await send_req(m_client, buf, req)).transform(sink_void);
+        co_return (co_await send_req(buf, req)).transform(sink_void);
     }
 
     AExpect<usize> ServerConnection::copy_file_range(
@@ -340,6 +352,6 @@ namespace madbfs::connection
             .size       = size,
         };
 
-        co_return (co_await send_req(m_client, buf, req)).transform(proj(&rpc::resp::CopyFileRange::size));
+        co_return (co_await send_req(buf, req)).transform(proj(&rpc::resp::CopyFileRange::size));
     }
 }

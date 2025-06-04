@@ -344,7 +344,7 @@ namespace madbfs::rpc
                 auto status = reader.read_status().value();
                 auto size   = reader.read_int<u64>().value();
 
-                log_d({ "receiver: RESPONSE RECEIVED {} [{}]" }, __func__, id.inner(), to_string(proc));
+                log_d({ "receiver: RESP RECV {} [{}]" }, id.inner(), to_string(proc));
 
                 auto req = m_requests.extract(id);
                 if (req.empty()) {
@@ -366,20 +366,20 @@ namespace madbfs::rpc
                 if (ec1) {
                     auto i   = id.inner();
                     auto msg = ec1.message();
-                    log_e({ "{}: [{}] failed to read response payload: {}" }, __func__, i, msg);
+                    log_e({ "receiver: [{}] failed to read response payload: {}" }, i, msg);
                     promise.set_value(Unexpect{ async::to_generic_err(ec1, Errc::not_connected) });
                     continue;
                 } else if (n1 != buffer.size()) {
                     auto i  = id.inner();
                     auto nn = buffer.size();
-                    log_e({ "{}: [{}] mismatched response length [{} vs {}]" }, __func__, i, n1, nn);
+                    log_e({ "receiver: [{}] mismatched response length [{} vs {}]" }, i, n1, nn);
                     promise.set_value(Unexpect{ Errc::broken_pipe });
                     continue;
                 };
 
                 auto response = parse_response(buffer, proc);
                 if (not response) {
-                    log_e({ "{}: [{}] failed to parse response" }, __func__, id.inner());
+                    log_e({ "receiver: [{}] failed to parse response" }, id.inner());
                     promise.set_value(Unexpect{ Errc::bad_message });
                     continue;
                 }
@@ -392,6 +392,7 @@ namespace madbfs::rpc
         auto exec = co_await async::this_coro::executor;
         asio::co_spawn(exec, receiver(), [&](std::exception_ptr e, Expect<void> res) {
             m_running = false;
+
             if (e) {
                 try {
                     std::rethrow_exception(e);
@@ -402,6 +403,12 @@ namespace madbfs::rpc
                 auto msg = std::make_error_code(res.error()).message();
                 log_e({ "receiver: finished with error: {}" }, msg);
             }
+
+            log_e({ "receiver: there are {} promises unhandled" }, m_requests.size());
+            for (auto& [id, promise] : m_requests) {
+                promise.promise.set_value(Unexpect{ e ? Errc::state_not_recoverable : Errc::not_connected });
+            }
+            m_requests.clear();
         });
     }
 
@@ -415,7 +422,7 @@ namespace madbfs::rpc
     AExpect<Client::Future> Client::send_req(Vec<u8>& buffer, Request req)
     {
         if (not m_running) {
-            co_await start();
+            co_return Unexpect{ Errc::not_connected };
         }
 
         buffer.clear();
@@ -424,7 +431,7 @@ namespace madbfs::rpc
         auto proc    = static_cast<Procedure>(req.index());
         auto builder = RequestBuilder{ buffer, id, proc };
 
-        log_d({ "{}: REQUEST SENT {} [{}]" }, __func__, id.inner(), to_string(proc));
+        log_d({ "{}: REQ  SENT {} [{}]" }, __func__, id.inner(), to_string(proc));
 
         auto overload = util::Overload{
             [&](req::Mknod&& req) {

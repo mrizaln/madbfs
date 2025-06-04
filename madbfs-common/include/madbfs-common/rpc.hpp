@@ -217,6 +217,7 @@ namespace madbfs::rpc
         Socket& sock() noexcept { return m_socket; }
         bool    running() const { return m_running; }
 
+        Await<void>     start();
         AExpect<Future> send_req(Vec<u8>& buffer, Request req);
         void            stop();
 
@@ -228,8 +229,6 @@ namespace madbfs::rpc
         };
 
         using Inflight = std::unordered_map<Id, Promise, Id::Hash>;
-
-        Await<void> start();
 
         Socket    m_socket;
         Inflight  m_requests;

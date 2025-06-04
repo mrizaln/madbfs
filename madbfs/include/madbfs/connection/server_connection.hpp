@@ -47,24 +47,45 @@ namespace madbfs::connection
             override;
 
     private:
-        ServerConnection(u16 port, rpc::Socket socket)
+        ServerConnection(u16 port, Uniq<rpc::Client> client)
             : m_port{ port }
-            , m_client{ std::move(socket) }
+            , m_client{ std::move(client) }
         {
         }
-        ServerConnection(u16 port, rpc::Socket socket, Process proc, Pipe out, Pipe err)
+
+        ServerConnection(u16 port, Uniq<rpc::Client> client, Process proc, Pipe out, Pipe err)
             : m_port{ port }
-            , m_client{ std::move(socket) }
+            , m_client{ std::move(client) }
             , m_server_proc{ std::move(proc) }
             , m_server_out{ std::move(out) }
             , m_server_err{ std::move(err) }
         {
         }
 
-        u16          m_port = 0;
-        rpc::Client  m_client;
-        Opt<Process> m_server_proc = {};    // server process handle
-        Opt<Pipe>    m_server_out  = {};    // server's stdout
-        Opt<Pipe>    m_server_err  = {};    // server's stderr
+        static AExpect<Uniq<rpc::Client>> try_make_client(u16 port);
+
+        AExpect<rpc::Response> try_send(Vec<u8>& buf, rpc::Request req);
+
+        template <rpc::IsRequest Req>
+        AExpect<rpc::ToResp<Req>> send_req(Vec<u8>& buf, Req req)
+        {
+            auto res = co_await try_send(buf, std::move(req));
+            if (not res) {
+                co_return Unexpect{ res.error() };
+            }
+
+            using Resp = rpc::ToResp<Req>;
+            if (auto resp = std::get_if<Resp>(&*res); resp != nullptr) {
+                co_return std::move(*resp);
+            }
+
+            co_return Unexpect{ Errc::bad_message };
+        }
+
+        u16               m_port        = 0;
+        Uniq<rpc::Client> m_client      = nullptr;    // may be nullable (in the case of disconnection)
+        Opt<Process>      m_server_proc = {};         // server process handle
+        Opt<Pipe>         m_server_out  = {};         // server's stdout
+        Opt<Pipe>         m_server_err  = {};         // server's stderr
     };
 }
