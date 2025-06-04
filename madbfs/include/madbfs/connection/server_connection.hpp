@@ -1,3 +1,4 @@
+#include "madbfs-common/rpc.hpp"
 #include "madbfs/connection/connection.hpp"
 
 #define BOOST_PROCESS_VERSION 2
@@ -46,19 +47,22 @@ namespace madbfs::connection
             override;
 
     private:
-        ServerConnection(u16 port)
+        ServerConnection(u16 port, rpc::Socket socket)
             : m_port{ port }
+            , m_client{ std::move(socket) }
         {
         }
-        ServerConnection(u16 port, Process proc, Pipe out, Pipe err)
+        ServerConnection(u16 port, rpc::Socket socket, Process proc, Pipe out, Pipe err)
             : m_port{ port }
+            , m_client{ std::move(socket) }
             , m_server_proc{ std::move(proc) }
             , m_server_out{ std::move(out) }
             , m_server_err{ std::move(err) }
         {
         }
 
-        u16          m_port        = 0;
+        u16          m_port = 0;
+        rpc::Client  m_client;
         Opt<Process> m_server_proc = {};    // server process handle
         Opt<Pipe>    m_server_out  = {};    // server's stdout
         Opt<Pipe>    m_server_err  = {};    // server's stderr

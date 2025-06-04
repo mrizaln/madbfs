@@ -42,47 +42,6 @@ namespace
 
 namespace madbfs::server
 {
-    AExpect<void> RequestHandler::dispatch()
-    {
-        auto procedure = co_await m_server.peek_req();
-        if (not procedure) {
-            log_e({ "{}: failed to get param for procedure {}" }, __func__, err_msg(procedure.error()));
-            co_return Expect<void>{};
-        }
-        log_i({ "{}: accepted procedure [{}]" }, __func__, to_string(*procedure));
-
-        auto handler = [&]<typename Req>(AExpect<Req> (rpc::Server::*recv)()) mutable -> AExpect<void> {
-            auto req = co_await (m_server.*recv)();
-            if (not req) {
-                co_return Unexpect{ req.error() };
-            }
-            auto resp = handle_req(std::move(*req));
-            co_return co_await m_server.send_resp(std::move(resp));
-        };
-
-        // clang-format off
-        switch (*procedure) {
-        case rpc::Procedure::Listdir:       co_return co_await handler(&rpc::Server::recv_req_listdir);
-        case rpc::Procedure::Stat:          co_return co_await handler(&rpc::Server::recv_req_stat);
-        case rpc::Procedure::Readlink:      co_return co_await handler(&rpc::Server::recv_req_readlink);
-        case rpc::Procedure::Mknod:         co_return co_await handler(&rpc::Server::recv_req_mknod);
-        case rpc::Procedure::Mkdir:         co_return co_await handler(&rpc::Server::recv_req_mkdir);
-        case rpc::Procedure::Unlink:        co_return co_await handler(&rpc::Server::recv_req_unlink);
-        case rpc::Procedure::Rmdir:         co_return co_await handler(&rpc::Server::recv_req_rmdir);
-        case rpc::Procedure::Rename:        co_return co_await handler(&rpc::Server::recv_req_rename);
-        case rpc::Procedure::Truncate:      co_return co_await handler(&rpc::Server::recv_req_truncate);
-        case rpc::Procedure::Read:          co_return co_await handler(&rpc::Server::recv_req_read);
-        case rpc::Procedure::Write:         co_return co_await handler(&rpc::Server::recv_req_write);
-        case rpc::Procedure::Utimens:       co_return co_await handler(&rpc::Server::recv_req_utimens);
-        case rpc::Procedure::CopyFileRange: co_return co_await handler(&rpc::Server::recv_req_copy_file_range);
-        }
-        // clang-format on
-
-        log_e({ "{}: invalid procedure with integral value {}" }, __func__, static_cast<u8>(*procedure));
-
-        co_return Expect<void>{};
-    }
-
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Listdir req)
     {
         const auto& [path] = req;
@@ -106,7 +65,7 @@ namespace madbfs::server
         };
 
         // WARN: invalidates strings and spans from argument
-        auto& buf = m_server.buf();
+        auto& buf = m_buffer;
         buf.clear();
 
         auto slices = Vec<Pair<Slice, rpc::resp::Stat>>{};
@@ -296,7 +255,7 @@ namespace madbfs::server
         }
 
         // WARN: invalidates strings and spans from argument
-        auto& buf = m_server.buf();
+        auto& buf = m_buffer;
         buf.resize(size);
 
         auto len = ::read(fd, buf.data(), buf.size());
@@ -411,7 +370,7 @@ namespace madbfs::server
         : m_acceptor{ context, async::tcp::Endpoint{ async::tcp::Proto::v4(), port } }
     {
         m_acceptor.set_option(async::tcp::Acceptor::reuse_address(true));
-        m_acceptor.listen();
+        m_acceptor.listen(1);
     }
 
     Server::~Server()
@@ -433,8 +392,21 @@ namespace madbfs::server
                 break;
             }
 
-            auto exec = co_await async::this_coro::executor;
-            async::spawn(exec, handle_connection(std::move(*sock)), async::detached);
+            if (auto res = co_await rpc::handshake(*sock, false); not res) {
+                co_return Unexpect{ res.error() };
+            }
+
+            auto handler = [&](Vec<u8>& buf, rpc::Request req) -> Await<Var<rpc::Status, rpc::Response>> {
+                auto handler  = RequestHandler{ buf };
+                auto overload = [&](rpc::IsRequest auto&& req) { return handler.handle_req(std::move(req)); };
+                co_return std::visit(std::move(overload), std::move(req));
+            };
+
+            auto rpc = rpc::Server{ std::move(*sock) };
+            auto res = co_await rpc.listen(handler);
+            if (not res) {
+                log_e({ "{}: rpc::Server::listen return with an error: {}" }, __func__, err_msg(res.error()));
+            }
         }
 
         co_return Expect<void>{};
@@ -445,18 +417,5 @@ namespace madbfs::server
         m_running = false;
         m_acceptor.cancel();
         m_acceptor.close();
-    }
-
-    AExpect<void> Server::handle_connection(async::tcp::Socket sock)
-    {
-        auto ec   = std::error_code{};
-        auto peer = sock.remote_endpoint(ec);
-        if (ec) {
-            log_e({ "{}: failed to get endpoint: {}" }, __func__, ec.message());
-        }
-        log_d({ "{}: new connection from {}:{}" }, __func__, peer.address().to_string(), peer.port());
-
-        auto handler = RequestHandler{ sock };
-        co_return co_await handler.dispatch();
     }
 }

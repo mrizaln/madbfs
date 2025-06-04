@@ -7,15 +7,12 @@ namespace madbfs::server
     class RequestHandler
     {
     public:
-        RequestHandler(async::tcp::Socket& sock)
-            : m_server{ sock, m_buffer }
+        using Response = Var<rpc::Status, rpc::Response>;
+
+        RequestHandler(Vec<u8>& buffer)
+            : m_buffer{ buffer }
         {
         }
-
-        AExpect<void> dispatch();
-
-    private:
-        using Response = Var<rpc::Status, rpc::Response>;
 
         Response handle_req(rpc::req::Listdir req);
         Response handle_req(rpc::req::Stat req);
@@ -31,8 +28,8 @@ namespace madbfs::server
         Response handle_req(rpc::req::Utimens req);
         Response handle_req(rpc::req::CopyFileRange req);
 
-        Vec<u8>     m_buffer;
-        rpc::Server m_server;
+    private:
+        Vec<u8>& m_buffer;
     };
 
     class Server
