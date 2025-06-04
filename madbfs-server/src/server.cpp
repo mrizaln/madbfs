@@ -326,7 +326,7 @@ namespace madbfs::server
             return status_from_errno(__func__, in, "failed to seek file");
         }
 
-        auto out_fd = ::open(out.data(), O_RDONLY);
+        auto out_fd = ::open(out.data(), O_WRONLY);
         if (out_fd < 0) {
             return status_from_errno(__func__, out, "failed to open file");
         }
@@ -346,7 +346,7 @@ namespace madbfs::server
         auto copied = 0_i64;
         auto len    = 0_i64;
 
-        while (len > 0) {
+        while (true) {
             if (len = ::read(in_fd, buffer.data(), buffer.size()); len <= 0) {
                 break;
             }
@@ -357,7 +357,7 @@ namespace madbfs::server
         }
 
         if (len < 0) {
-            return status_from_errno(__func__, out, "failed to seek file");
+            return status_from_errno(__func__, out, "failed to copy file");
         }
 
         return rpc::resp::CopyFileRange{ .size = static_cast<usize>(copied) };
