@@ -1,47 +1,29 @@
 #include "madbfs-common/rpc.hpp"
 #include "madbfs-common/async/async.hpp"
+#include "madbfs-common/log.hpp"
 #include "madbfs-common/util/overload.hpp"
 
 // TODO: add log
-#define HANDLE_ERROR(Ec, Size, Want)                                                                         \
+#define HANDLE_ERROR(Ec, Size, Want, Msg)                                                                    \
     if (Ec) {                                                                                                \
-        co_return madbfs::Unexpect{ madbfs::async::to_generic_err(Ec) };                                     \
+        madbfs::log_e({ "{}: " Msg ": {}" }, __func__, Ec.message());                                        \
+        co_return madbfs::Unexpect{ madbfs::async::to_generic_err(Ec, Errc::not_connected) };                \
     } else if (Size != Want) {                                                                               \
+        madbfs::log_e({ "{}: " Msg ": message length mismatch [{} vs {}]" }, __func__, Size, Want);          \
         co_return madbfs::Unexpect{ madbfs::Errc::broken_pipe };                                             \
     }
 
 // NOTE: if only C++ has '?' a la rust... this is the most I can think of for C++
-#define TRY_SCOPED(Stmt)                                                                                     \
-    if (auto res = Stmt; not res) {                                                                          \
-        co_return Unexpect{ res.error() };                                                                   \
-    }
-
 #define TRY(Name, Stmt)                                                                                      \
     auto Name = Stmt;                                                                                        \
     if (not Name) {                                                                                          \
-        co_return Unexpect{ Name.error() };                                                                  \
+        return std::nullopt;                                                                                 \
     }
 
 namespace
 {
     using namespace madbfs;
     using namespace madbfs::rpc;
-
-    struct Slice
-    {
-        isize offset;
-        usize size;
-    };
-
-    Str slice_as_str(Span<const u8> buf, Slice slice)
-    {
-        return Str{ reinterpret_cast<const char*>(buf.data() + slice.offset), slice.size };
-    }
-
-    Span<const u8> slice_bytes(Span<const u8> buf, Slice slice)
-    {
-        return buf.subspan(static_cast<usize>(slice.offset), slice.size);
-    }
 
     template <std::integral I>
     std::array<u8, sizeof(I)> to_net_bytes(I value)
@@ -76,545 +58,675 @@ namespace
         }
     }
 
-    template <std::integral I>
-    constexpr I swap_endian(const I& value) noexcept
+    class PayloadBuilder
     {
-        auto arr = to_net_bytes(value);
-        return std::bit_cast<I>(arr);
-    }
+    public:
+        PayloadBuilder(Vec<u8>& buffer)
+            : m_buffer{ buffer }
+        {
+        }
 
-    template <std::integral I>
-    AExpect<void> write_int(Socket& sock, I value)
-    {
-        auto array      = to_net_bytes(value);
-        auto [ec, size] = co_await madbfs::async::write_exact<u8>(sock, array);
-        HANDLE_ERROR(ec, size, array.size());
-        co_return Expect<void>{};
-    }
+        template <std::integral I, typename Self>
+        Self&& write_int(this Self&& self, I value)
+        {
+            auto array = to_net_bytes(value);
+            self.m_buffer.append_range(array);
+            return std::forward<Self>(self);
+        }
 
-    AExpect<void> write_procedure(Socket& sock, Procedure procedure)
-    {
-        return write_int<u8>(sock, static_cast<u8>(procedure));
-    }
+        template <typename Self>
+        Self&& write_procedure(this Self&& self, Procedure procedure)
+        {
+            return std::forward<Self>(self).write_int(static_cast<u8>(procedure));
+        }
 
-    AExpect<void> write_status(Socket& sock, Status status)
-    {
-        return write_int<u8>(sock, static_cast<u8>(status));
-    }
+        template <typename Self>
+        Self&& write_status(this Self&& self, Status status)
+        {
+            return std::forward<Self>(self).write_int(static_cast<u8>(status));
+        }
 
-    AExpect<void> write_bytes(Socket& sock, Span<const u8> bytes)
-    {
-        TRY_SCOPED(co_await write_int<u64>(sock, bytes.size()));
-        auto [ec, size] = co_await madbfs::async::write_exact<u8>(sock, bytes);
-        HANDLE_ERROR(ec, size, bytes.size());
-        co_return Expect<void>{};
-    }
+        template <typename Self>
+        Self&& write_id(this Self&& self, Id id)
+        {
+            return std::forward<Self>(self).write_int(id.inner());
+        }
 
-    AExpect<void> write_path(Socket& sock, Str path)
-    {
-        TRY_SCOPED(co_await write_int<u64>(sock, path.size()));
-        auto [ec_path, n_path] = co_await madbfs::async::write_exact<char>(sock, path);
-        HANDLE_ERROR(ec_path, n_path, path.size());
+        template <typename Self>
+        Self&& write_bytes(this Self&& self, Span<const u8> bytes)
+        {
+            self.template write_int<u64>(bytes.size());
+            self.m_buffer.append_range(bytes);
+            return std::forward<Self>(self);
+        }
 
-        co_return Expect<void>{};
+        template <typename Self>
+        Self&& write_path(this Self&& self, Str path)
+        {
+            self.template write_int<u64>(path.size());
+            auto span = Span{ reinterpret_cast<const u8*>(path.data()), path.size() };
+            self.m_buffer.append_range(span);
+            self.m_buffer.push_back(0x00);    // null terminator
+            return std::forward<Self>(self);
+        }
+
+    protected:
+        Vec<u8>& m_buffer;
     };
 
-    template <std::integral I>
-    AExpect<I> read_int(Socket& sock)
+    class PayloadReader
     {
-        auto buf     = Array<u8, sizeof(I)>{};
-        auto [ec, n] = co_await async::read_exact<u8>(sock, buf);
-        HANDLE_ERROR(ec, n, buf.size());
-        co_return from_net_bytes<I>(buf);
-    }
+    public:
+        PayloadReader(Span<const u8> buffer)
+            : m_buffer{ buffer }
+        {
+        }
 
-    AExpect<Procedure> read_procedure(Socket& sock)
+        template <std::integral I>
+        Opt<I> read_int()
+        {
+            if (m_index + sizeof(I) - 1 >= m_buffer.size()) {
+                return std::nullopt;
+            }
+
+            auto array = Array<u8, sizeof(I)>{};
+            sr::copy_n(m_buffer.begin() + static_cast<isize>(m_index), array.size(), array.begin());
+            auto value  = from_net_bytes<I>(array);
+            m_index    += sizeof(I);
+            return value;
+        }
+
+        Opt<Procedure> read_procedure()
+        {
+            return read_int<u8>().transform([](u8 v) { return Procedure{ v }; });
+        }
+
+        Opt<Status> read_status()
+        {
+            return read_int<u8>().transform([](u8 v) { return Status{ v }; });
+        }
+
+        Opt<Id> read_id()
+        {
+            return read_int<Id::Inner>().transform([](Id::Inner v) { return Id{ v }; });
+        }
+
+        Opt<Span<const u8>> read_bytes()
+        {
+            return read_int<u64>().and_then([&](u64 size) -> Opt<Span<const u8>> {
+                if (m_index + size - 1 >= m_buffer.size()) {
+                    return std::nullopt;
+                }
+                auto span  = m_buffer.subspan(m_index, size);
+                m_index   += size;
+                return span;
+            });
+        }
+
+        Opt<Str> read_path()
+        {
+            return read_int<u64>().and_then([&](u64 size) -> Opt<Str> {
+                if (m_index + size - 1 >= m_buffer.size()) {
+                    return std::nullopt;
+                }
+                auto span  = m_buffer.subspan(m_index, size - 1);    // without null terminator
+                m_index   += size;
+                return Str{ reinterpret_cast<const char*>(span.data()), span.size() };
+            });
+        }
+
+    private:
+        usize          m_index;
+        Span<const u8> m_buffer;
+    };
+
+    class RequestBuilder : public PayloadBuilder
     {
-        TRY(byte, co_await read_int<u8>(sock));
-        auto proc = static_cast<Procedure>(*byte);
+    public:
+        using PayloadBuilder::write_bytes;
+        using PayloadBuilder::write_int;
+        using PayloadBuilder::write_path;
+
+        RequestBuilder(Vec<u8>& buffer, Id id, Procedure proc)
+            : PayloadBuilder{ buffer }
+        {
+            write_id(id).write_procedure(proc);
+            write_int<u64>(0);    // will be filled later on build()
+        }
+
+        Span<const u8> build()
+        {
+            constexpr auto header_len = sizeof(Id) + sizeof(Procedure) + sizeof(u64);
+
+            auto& buf  = m_buffer;
+            auto  size = buf.size() - header_len;
+            auto  arr  = to_net_bytes(static_cast<u64>(size));
+            sr::copy_n(arr.begin(), arr.size(), buf.begin() + header_len);
+            return buf;
+        }
+    };
+
+    class ResponseBuilder : public PayloadBuilder
+    {
+    public:
+        using PayloadBuilder::write_bytes;
+        using PayloadBuilder::write_int;
+        using PayloadBuilder::write_path;
+
+        ResponseBuilder(Vec<u8>& buffer, Id id, Procedure proc, Status status)
+            : PayloadBuilder{ buffer }
+        {
+            write_id(id).write_procedure(proc).write_status(status);
+            write_int<u64>(0);    // will be filled later on build()
+        }
+
+        Span<const u8> build()
+        {
+            constexpr auto header_len = sizeof(Id) + sizeof(Procedure) + sizeof(Status) + sizeof(u64);
+
+            auto& buf  = m_buffer;
+            auto  size = buf.size() - header_len;
+            auto  arr  = to_net_bytes(static_cast<u64>(size));
+            sr::copy_n(arr.begin(), arr.size(), buf.begin() + header_len);
+            return buf;
+        }
+    };
+}
+
+namespace madbfs::rpc
+{
+    Opt<Response> parse_response(Span<const u8> buffer, Procedure proc)
+    {
+        auto reader = PayloadReader{ buffer };
 
         switch (proc) {
-        case Procedure::Listdir:
-        case Procedure::Stat:
-        case Procedure::Readlink:
-        case Procedure::Mknod:
-        case Procedure::Mkdir:
-        case Procedure::Unlink:
-        case Procedure::Rmdir:
-        case Procedure::Rename:
-        case Procedure::Truncate:
-        case Procedure::Read:
-        case Procedure::Write:
-        case Procedure::Utimens:
-        case Procedure::CopyFileRange: co_return proc;
+        case Procedure::Listdir: {
+            TRY(size, reader.read_int<u64>());
+
+            auto entries = Vec<Pair<Str, resp::Stat>>{};
+            entries.reserve(*size);
+
+            for (auto _ : sv::iota(0uz, *size)) {
+                TRY(path, reader.read_path());
+                TRY(size, reader.read_int<i64>());
+                TRY(links, reader.read_int<u64>());
+                TRY(mtime_sec, reader.read_int<i64>());
+                TRY(mtime_nsec, reader.read_int<i64>());
+                TRY(atime_sec, reader.read_int<i64>());
+                TRY(atime_nsec, reader.read_int<i64>());
+                TRY(ctime_sec, reader.read_int<i64>());
+                TRY(ctime_nsec, reader.read_int<i64>());
+                TRY(mode, reader.read_int<u32>());
+                TRY(uid, reader.read_int<u32>());
+                TRY(gid, reader.read_int<u32>());
+
+                entries.emplace_back(
+                    *path,
+                    resp::Stat{
+                        .size  = *size,
+                        .links = static_cast<nlink_t>(*links),
+                        .mtime = { .tv_sec = *mtime_sec, .tv_nsec = *mtime_nsec },
+                        .atime = { .tv_sec = *atime_sec, .tv_nsec = *atime_nsec },
+                        .ctime = { .tv_sec = *ctime_sec, .tv_nsec = *ctime_nsec },
+                        .mode  = *mode,
+                        .uid   = *uid,
+                        .gid   = *gid,
+                    }
+                );
+            }
+
+            return resp::Listdir{ .entries = std::move(entries) };
+        } break;
+
+        case Procedure::Stat: {
+            TRY(size, reader.read_int<i64>());
+            TRY(links, reader.read_int<u64>());
+            TRY(mtime_sec, reader.read_int<i64>());
+            TRY(mtime_nsec, reader.read_int<i64>());
+            TRY(atime_sec, reader.read_int<i64>());
+            TRY(atime_nsec, reader.read_int<i64>());
+            TRY(ctime_sec, reader.read_int<i64>());
+            TRY(ctime_nsec, reader.read_int<i64>());
+            TRY(mode, reader.read_int<u32>());
+            TRY(uid, reader.read_int<u32>());
+            TRY(gid, reader.read_int<u32>());
+
+            return resp::Stat{
+                .size  = *size,
+                .links = static_cast<nlink_t>(*links),
+                .mtime = { .tv_sec = *mtime_sec, .tv_nsec = *mtime_nsec },
+                .atime = { .tv_sec = *atime_sec, .tv_nsec = *atime_nsec },
+                .ctime = { .tv_sec = *ctime_sec, .tv_nsec = *ctime_nsec },
+                .mode  = *mode,
+                .uid   = *uid,
+                .gid   = *gid,
+            };
+        } break;
+
+        case Procedure::Readlink: {
+            TRY(path, reader.read_path());
+            return resp::Readlink{ .target = *path };
+        } break;
+
+        case Procedure::Mknod: return resp::Mknod{};
+        case Procedure::Mkdir: return resp::Mkdir{};
+        case Procedure::Unlink: return resp::Unlink{};
+        case Procedure::Rmdir: return resp::Rmdir{};
+        case Procedure::Rename: return resp::Rename{};
+        case Procedure::Truncate: return resp::Truncate{};
+
+        case Procedure::Read: {
+            TRY(bytes, reader.read_bytes());
+            return resp::Read{ .read = *bytes };
+        } break;
+
+        case Procedure::Write: {
+            TRY(size, reader.read_int<u64>());
+            return resp::Write{ .size = *size };
+        } break;
+
+        case Procedure::Utimens: return resp::Utimens{};
+
+        case Procedure::CopyFileRange: {
+            TRY(size, reader.read_int<u64>());
+            return resp::CopyFileRange{ .size = *size };
+        } break;
         }
 
-        co_return Unexpect{ Errc::invalid_argument };
+        return std::nullopt;
     }
 
-    AExpect<void> read_status(Socket& sock)
+    Await<void> Client::start()
     {
-        TRY(status, co_await read_int<u8>(sock));
-        co_return status == 0 ? Expect<void>{} : Unexpect{ static_cast<Errc>(*status) };
-    }
+        m_running     = true;
+        auto receiver = [&] -> AExpect<void> {
+            while (m_running) {
+                constexpr auto header_len = sizeof(Id) + sizeof(Procedure) + sizeof(Status) + sizeof(u64);
 
-    AExpect<Slice> read_bytes(Socket& sock, Vec<u8>& buf)
-    {
-        TRY(size, co_await read_int<u64>(sock));
+                auto header  = Array<u8, header_len>{};
+                auto [ec, n] = co_await async::read_exact<u8>(m_socket, header);
+                HANDLE_ERROR(ec, n, header_len, "failed to read response header");
 
-        auto off = static_cast<isize>(buf.size());
-        buf.resize(buf.size() + *size);
-        auto out = Span{ buf.begin() + off, *size };
+                auto reader = PayloadReader{ header };
+                auto id     = reader.read_id().value();
+                auto proc   = reader.read_procedure().value();
+                auto status = reader.read_status().value();
+                auto size   = reader.read_int<u64>().value();
 
-        auto [ec, n] = co_await async::read_exact<u8>(sock, out);
-        HANDLE_ERROR(ec, n, size);
-        co_return Slice{ off, n };
-    }
-
-    AExpect<Slice> read_path(Socket& sock, Vec<u8>& buf)
-    {
-        TRY(size, co_await read_int<u64>(sock));
-
-        auto off = static_cast<isize>(buf.size());
-        buf.resize(buf.size() + *size + 1);    // null terminator
-        auto out = Span{ buf.begin() + off, *size };
-
-        auto [ec, n] = co_await async::read_exact<u8>(sock, out);
-        HANDLE_ERROR(ec, n, size);
-
-        buf.push_back('\0');    // null terminator
-        co_return Slice{ off, n };
-    }
-}
-
-namespace madbfs::rpc
-{
-    // client send request
-    // -------------------
-
-    AExpect<resp::Listdir> Client::send_req_listdir(req::Listdir req)
-    {
-        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Listdir));
-        TRY_SCOPED(co_await write_path(m_socket, req.path));
-        TRY_SCOPED(co_await read_status(m_socket));
-
-        TRY(size, co_await read_int<u64>(m_socket));
-        auto slices = Vec<Pair<Slice, resp::Stat>>{};
-        slices.reserve(*size);
-
-        for (auto _ : sv::iota(0uz, *size)) {
-            TRY(slice, co_await read_bytes(m_socket, m_buffer));
-            TRY(size, co_await read_int<i64>(m_socket));
-            TRY(links, co_await read_int<u64>(m_socket));
-            TRY(mtime_sec, co_await read_int<i64>(m_socket));
-            TRY(mtime_nsec, co_await read_int<i64>(m_socket));
-            TRY(atime_sec, co_await read_int<i64>(m_socket));
-            TRY(atime_nsec, co_await read_int<i64>(m_socket));
-            TRY(ctime_sec, co_await read_int<i64>(m_socket));
-            TRY(ctime_nsec, co_await read_int<i64>(m_socket));
-            TRY(mode, co_await read_int<u32>(m_socket));
-            TRY(uid, co_await read_int<u32>(m_socket));
-            TRY(gid, co_await read_int<u32>(m_socket));
-
-            slices.emplace_back(
-                *slice,
-                resp::Stat{
-                    .size  = *size,
-                    .links = static_cast<nlink_t>(*links),
-                    .mtime = { .tv_sec = *mtime_sec, .tv_nsec = *mtime_nsec },
-                    .atime = { .tv_sec = *atime_sec, .tv_nsec = *atime_nsec },
-                    .ctime = { .tv_sec = *ctime_sec, .tv_nsec = *ctime_nsec },
-                    .mode  = *mode,
-                    .uid   = *uid,
-                    .gid   = *gid,
+                auto req = m_requests.extract(id);
+                if (req.empty()) {
+                    log_e({ "receiver: response incoming for id {} but no promise registered" }, id.inner());
+                    continue;
                 }
-            );
-        }
 
-        auto entries = Vec<Pair<Str, resp::Stat>>{};
-        entries.reserve(*size);
+                auto& [buffer, promise] = req.mapped();
+                if (status != Status::Success) {
+                    promise.set_value(Unexpect{ static_cast<Errc>(status) });
+                    continue;
+                }
 
-        for (auto&& [slice, stat] : std::move(slices)) {
-            entries.emplace_back(slice_as_str(m_buffer, slice), std::move(stat));
-        }
+                buffer.resize(size);
+                auto [ec1, n1] = co_await async::read_exact<u8>(m_socket, buffer);
+                if (ec1) {
+                    auto i   = id.inner();
+                    auto msg = ec1.message();
+                    log_e({ "{}: [{}] failed to read response payload: {}" }, __func__, i, msg);
+                    promise.set_value(Unexpect{ async::to_generic_err(ec1, Errc::not_connected) });
+                    continue;
+                } else if (n1 != buffer.size()) {
+                    auto i  = id.inner();
+                    auto nn = buffer.size();
+                    log_e({ "{}: [{}] mismatched response length [{} vs {}]" }, __func__, i, n1, nn);
+                    promise.set_value(Unexpect{ Errc::broken_pipe });
+                    continue;
+                };
 
-        co_return resp::Listdir{ .entries = std::move(entries) };
-    }
+                auto response = parse_response(buffer, proc);
+                if (not response) {
+                    log_e({ "{}: [{}] failed to parse response" }, __func__, id.inner());
+                    promise.set_value(Unexpect{ Errc::bad_message });
+                    continue;
+                }
 
-    AExpect<resp::Stat> Client::send_req_stat(req::Stat req)
-    {
-        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Stat));
-        TRY_SCOPED(co_await write_path(m_socket, req.path));
-        TRY_SCOPED(co_await read_status(m_socket));
-        TRY(size, co_await read_int<i64>(m_socket));
-        TRY(links, co_await read_int<u64>(m_socket));
-        TRY(mtime_sec, co_await read_int<i64>(m_socket));
-        TRY(mtime_nsec, co_await read_int<i64>(m_socket));
-        TRY(atime_sec, co_await read_int<i64>(m_socket));
-        TRY(atime_nsec, co_await read_int<i64>(m_socket));
-        TRY(ctime_sec, co_await read_int<i64>(m_socket));
-        TRY(ctime_nsec, co_await read_int<i64>(m_socket));
-        TRY(mode, co_await read_int<u32>(m_socket));
-        TRY(uid, co_await read_int<u32>(m_socket));
-        TRY(gid, co_await read_int<u32>(m_socket));
-
-        co_return resp::Stat{
-            .size  = *size,
-            .links = static_cast<nlink_t>(*links),
-            .mtime = { .tv_sec = *mtime_sec, .tv_nsec = *mtime_nsec },
-            .atime = { .tv_sec = *atime_sec, .tv_nsec = *atime_nsec },
-            .ctime = { .tv_sec = *ctime_sec, .tv_nsec = *ctime_nsec },
-            .mode  = *mode,
-            .uid   = *uid,
-            .gid   = *gid,
+                promise.set_value(std::move(response).value());
+            }
+            co_return Expect<void>{};
         };
+
+        auto exec = co_await async::this_coro::executor;
+        asio::co_spawn(exec, receiver(), [&](std::exception_ptr e, Expect<void> res) {
+            m_running = false;
+            if (e) {
+                try {
+                    std::rethrow_exception(e);
+                } catch (std::exception& e) {
+                    log_c({ "receiver: exception occurred: {}" }, e.what());
+                }
+            } else if (not res) {
+                auto msg = std::make_error_code(res.error()).message();
+                log_e({ "receiver: finished with error: {}" }, msg);
+            }
+        });
     }
 
-    AExpect<resp::Readlink> Client::send_req_readlink(req::Readlink req)
+    void Client::stop()
     {
-        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Readlink));
-        TRY_SCOPED(co_await write_path(m_socket, req.path));
-        TRY_SCOPED(co_await read_status(m_socket));
-        TRY(slice, co_await read_bytes(m_socket, m_buffer));
-        co_return resp::Readlink{ .target = slice_as_str(m_buffer, *slice) };
+        m_running = false;
+        m_socket.cancel();
+        m_socket.close();
     }
 
-    AExpect<resp::Mknod> Client::send_req_mknod(req::Mknod req)
+    AExpect<Client::Future> Client::send_req(Vec<u8>& buffer, Request req)
     {
-        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Mknod));
-        TRY_SCOPED(co_await write_path(m_socket, req.path));
-        TRY_SCOPED(co_await write_int<u32>(m_socket, req.mode));
-        TRY_SCOPED(co_await write_int<u64>(m_socket, req.dev));
-        TRY_SCOPED(co_await read_status(m_socket));
-        co_return resp::Mknod{};
-    }
+        if (not m_running) {
+            co_await start();
+        }
 
-    AExpect<resp::Mkdir> Client::send_req_mkdir(req::Mkdir req)
-    {
-        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Mkdir));
-        TRY_SCOPED(co_await write_path(m_socket, req.path));
-        TRY_SCOPED(co_await write_int<u32>(m_socket, req.mode));
-        TRY_SCOPED(co_await read_status(m_socket));
-        co_return resp::Mkdir{};
-    }
+        buffer.clear();
 
-    AExpect<resp::Unlink> Client::send_req_unlink(req::Unlink req)
-    {
-        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Unlink));
-        TRY_SCOPED(co_await write_path(m_socket, req.path));
-        TRY_SCOPED(co_await read_status(m_socket));
-        co_return resp::Unlink{};
-    }
+        auto id      = Id{ ++m_counter };
+        auto proc    = static_cast<Procedure>(req.index());
+        auto builder = RequestBuilder{ buffer, id, proc };
 
-    AExpect<resp::Rmdir> Client::send_req_rmdir(req::Rmdir req)
-    {
-        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Rmdir));
-        TRY_SCOPED(co_await write_path(m_socket, req.path));
-        TRY_SCOPED(co_await read_status(m_socket));
-        co_return resp::Rmdir{};
-    }
+        auto overload = util::Overload{
+            [&](req::Mknod&& req) {
+                auto [path, mode, dev] = req;
+                builder    //
+                    .write_path(path)
+                    .write_int<u32>(mode)
+                    .write_int<u64>(dev);
+            },
+            [&](req::Mkdir&& req) {
+                auto [path, mode] = req;
+                builder    //
+                    .write_path(path)
+                    .write_int<u32>(mode);
+            },
+            [&](req::Rename&& req) {
+                auto [from, to, flags] = req;
+                builder    //
+                    .write_path(from)
+                    .write_path(to)
+                    .write_int<u32>(flags);
+            },
+            [&](req::Truncate&& req) {
+                auto [path, size] = req;
+                builder    //
+                    .write_path(path)
+                    .write_int<i64>(size);
+            },
+            [&](req::Read&& req) {
+                auto [path, offset, size] = req;
+                builder    //
+                    .write_path(path)
+                    .write_int<i64>(offset)
+                    .write_int<u64>(size);
+            },
+            [&](req::Write&& req) {
+                auto [path, offset, in] = req;
+                builder    //
+                    .write_path(path)
+                    .write_int<i64>(offset)
+                    .write_bytes(in);
+            },
+            [&](req::Utimens&& req) {
+                auto [path, atime, mtime] = req;
+                builder    //
+                    .write_path(path)
+                    .write_int<i64>(atime.tv_sec)
+                    .write_int<i64>(atime.tv_nsec)
+                    .write_int<i64>(mtime.tv_sec)
+                    .write_int<i64>(mtime.tv_nsec);
+            },
+            [&](req::CopyFileRange&& req) {
+                auto [in_path, in_off, out_path, out_off, size] = req;
+                builder    //
+                    .write_path(in_path)
+                    .write_int<i64>(in_off)
+                    .write_path(out_path)
+                    .write_int<i64>(out_off)
+                    .write_int<u64>(size);
+            },
+            [&](auto&& req) {
+                auto [path] = req;
+                builder.write_path(path);
+            },
+        };
 
-    AExpect<resp::Rename> Client::send_req_rename(req::Rename req)
-    {
-        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Rename));
-        TRY_SCOPED(co_await write_path(m_socket, req.from));
-        TRY_SCOPED(co_await write_path(m_socket, req.to));
-        TRY_SCOPED(co_await write_int<u32>(m_socket, req.flags));
-        TRY_SCOPED(co_await read_status(m_socket));
-        co_return resp::Rename{};
-    }
+        auto promise = saf::promise<Expect<Response>>{ co_await async::this_coro::executor };
+        auto future  = promise.get_future();
 
-    AExpect<resp::Truncate> Client::send_req_truncate(req::Truncate req)
-    {
-        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Truncate));
-        TRY_SCOPED(co_await write_path(m_socket, req.path));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, req.size));
-        TRY_SCOPED(co_await read_status(m_socket));
-        co_return resp::Truncate{};
-    }
+        m_requests.emplace(id, Promise{ buffer, std::move(promise) });
 
-    AExpect<resp::Read> Client::send_req_read(req::Read req)
-    {
-        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Read));
-        TRY_SCOPED(co_await write_path(m_socket, req.path));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, req.offset));
-        TRY_SCOPED(co_await write_int<u64>(m_socket, req.size));
-        TRY_SCOPED(co_await read_status(m_socket));
-        TRY(slice, co_await read_bytes(m_socket, m_buffer));
-        co_return resp::Read{ .read = slice_bytes(m_buffer, *slice) };
-    }
+        std::visit(std::move(overload), std::move(req));
+        auto payload = builder.build();
 
-    AExpect<resp::Write> Client::send_req_write(req::Write req)
-    {
-        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Write));
-        TRY_SCOPED(co_await write_path(m_socket, req.path));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, req.offset));
-        TRY_SCOPED(co_await write_bytes(m_socket, req.in));
-        TRY_SCOPED(co_await read_status(m_socket));
-        TRY(size, co_await read_int<u64>(m_socket));
-        co_return resp::Write{ .size = *size };
-    }
+        auto [ec, n] = co_await async::write_exact(m_socket, payload);
+        HANDLE_ERROR(ec, n, payload.size(), "failed to send request payload");
 
-    AExpect<resp::Utimens> Client::send_req_utimens(req::Utimens req)
-    {
-        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::Utimens));
-        TRY_SCOPED(co_await write_path(m_socket, req.path));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, req.atime.tv_sec));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, req.atime.tv_nsec));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, req.mtime.tv_sec));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, req.mtime.tv_nsec));
-        TRY_SCOPED(co_await read_status(m_socket));
-        co_return resp::Utimens{};
-    }
+        buffer.clear();
 
-    AExpect<resp::CopyFileRange> Client::send_req_copy_file_range(req::CopyFileRange req)
-    {
-        TRY_SCOPED(co_await write_procedure(m_socket, Procedure::CopyFileRange));
-        TRY_SCOPED(co_await write_path(m_socket, req.in_path));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, req.in_offset));
-        TRY_SCOPED(co_await write_path(m_socket, req.out_path));
-        TRY_SCOPED(co_await write_int<i64>(m_socket, req.out_offset));
-        TRY_SCOPED(co_await write_int<u64>(m_socket, req.size));
-        TRY_SCOPED(co_await read_status(m_socket));
-        TRY(size, co_await read_int<u64>(m_socket));
-        co_return resp::CopyFileRange{ .size = *size };
+        co_return future;
     }
 }
 
 namespace madbfs::rpc
 {
-    // server read request
-    // -------------------
-
-    AExpect<req::Listdir> Server::recv_req_listdir()
+    Opt<Request> parse_request(Span<const u8> buffer, Procedure proc)
     {
-        TRY(slice, co_await read_path(m_socket, m_buffer));
-        co_return req::Listdir{ .path = slice_as_str(m_buffer, *slice) };
+        auto reader = PayloadReader{ buffer };
+
+        switch (proc) {
+        case Procedure::Listdir: {
+            TRY(path, reader.read_path());
+            return req::Listdir{ .path = *path };
+        }
+
+        case Procedure::Stat: {
+            TRY(path, reader.read_path());
+            return req::Stat{ .path = *path };
+        }
+
+        case Procedure::Readlink: {
+            TRY(path, reader.read_path());
+            return req::Readlink{ .path = *path };
+        }
+
+        case Procedure::Mknod: {
+            TRY(path, reader.read_path());
+            TRY(mode, reader.read_int<u32>());
+            TRY(dev, reader.read_int<u64>());
+            return req::Mknod{ .path = *path, .mode = *mode, .dev = *dev };
+        }
+
+        case Procedure::Mkdir: {
+            TRY(path, reader.read_path());
+            TRY(mode, reader.read_int<u32>());
+            return req::Mkdir{ .path = *path, .mode = *mode };
+        }
+
+        case Procedure::Unlink: {
+            TRY(path, reader.read_path());
+            return req::Unlink{ .path = *path };
+        }
+
+        case Procedure::Rmdir: {
+            TRY(path, reader.read_path());
+            return req::Rmdir{ .path = *path };
+        }
+
+        case Procedure::Rename: {
+            TRY(from, reader.read_path());
+            TRY(to, reader.read_path());
+            TRY(flags, reader.read_int<u32>());
+            return req::Rename{ .from = *from, .to = *to, .flags = *flags };
+        }
+
+        case Procedure::Truncate: {
+            TRY(path, reader.read_path());
+            TRY(size, reader.read_int<i64>());
+            return req::Truncate{ .path = *path, .size = *size };
+        }
+
+        case Procedure::Read: {
+            TRY(path, reader.read_path());
+            TRY(offset, reader.read_int<i64>());
+            TRY(size, reader.read_int<u64>());
+            return req::Read{ .path = *path, .offset = *offset, .size = *size };
+        }
+
+        case Procedure::Write: {
+            TRY(path, reader.read_path());
+            TRY(offset, reader.read_int<i64>());
+            TRY(bytes, reader.read_bytes());
+            return req::Write{ .path = *path, .offset = *offset, .in = *bytes };
+        }
+
+        case Procedure::Utimens: {
+            TRY(path, reader.read_path());
+            TRY(atime_sec, reader.read_int<i64>());
+            TRY(atime_nsec, reader.read_int<i64>());
+            TRY(mtime_sec, reader.read_int<i64>());
+            TRY(mtime_nsec, reader.read_int<i64>());
+            return req::Utimens{
+                .path  = *path,
+                .atime = { .tv_sec = *atime_sec, .tv_nsec = *atime_nsec },
+                .mtime = { .tv_sec = *mtime_sec, .tv_nsec = *mtime_nsec },
+            };
+        }
+
+        case Procedure::CopyFileRange: {
+            TRY(in_path, reader.read_path());
+            TRY(in_offset, reader.read_int<i64>());
+            TRY(out_path, reader.read_path());
+            TRY(out_offset, reader.read_int<i64>());
+            TRY(size, reader.read_int<u64>());
+            return req::CopyFileRange{
+                .in_path    = *in_path,
+                .in_offset  = *in_offset,
+                .out_path   = *out_path,
+                .out_offset = *out_offset,
+                .size       = *size,
+            };
+        } break;
+        }
+
+        return std::nullopt;
     }
 
-    AExpect<req::Stat> Server::recv_req_stat()
+    AExpect<void> Server::listen(Handler handler)
     {
-        TRY(slice, co_await read_path(m_socket, m_buffer));
-        co_return req::Stat{ .path = slice_as_str(m_buffer, *slice) };
-    }
+        m_running = true;
 
-    AExpect<req::Readlink> Server::recv_req_readlink()
-    {
-        TRY(slice, co_await read_path(m_socket, m_buffer));
-        co_return req::Readlink{ .path = slice_as_str(m_buffer, *slice) };
-    }
+        while (m_running) {
+            constexpr auto header_len = sizeof(Id) + sizeof(Procedure) + sizeof(u64);
 
-    AExpect<req::Mknod> Server::recv_req_mknod()
-    {
-        TRY(slice, co_await read_path(m_socket, m_buffer));
-        TRY(mode, co_await read_int<u32>(m_socket));
-        TRY(dev, co_await read_int<u64>(m_socket));
-        co_return req::Mknod{ .path = slice_as_str(m_buffer, *slice), .mode = *mode, .dev = *dev };
-    }
+            auto header  = Array<u8, header_len>{};
+            auto [ec, n] = co_await async::read_exact<u8>(m_socket, header);
+            HANDLE_ERROR(ec, n, header_len, "failed to read request header");
 
-    AExpect<req::Mkdir> Server::recv_req_mkdir()
-    {
-        TRY(slice, co_await read_path(m_socket, m_buffer));
-        TRY(mode, co_await read_int<u32>(m_socket));
-        co_return req::Mkdir{ .path = slice_as_str(m_buffer, *slice), .mode = *mode };
-    }
+            auto reader = PayloadReader{ header };
+            auto id     = reader.read_id().value();
+            auto proc   = reader.read_procedure().value();
+            auto size   = reader.read_int<u64>().value();
 
-    AExpect<req::Unlink> Server::recv_req_unlink()
-    {
-        TRY(slice, co_await read_path(m_socket, m_buffer));
-        co_return req::Unlink{ .path = slice_as_str(m_buffer, *slice) };
-    }
+            auto buffer    = Vec<u8>(size);
+            auto [ec1, n1] = co_await async::read_exact<u8>(m_socket, buffer);
+            HANDLE_ERROR(ec1, n1, buffer.size(), "failed to read request payload");
 
-    AExpect<req::Rmdir> Server::recv_req_rmdir()
-    {
-        TRY(slice, co_await read_path(m_socket, m_buffer));
-        co_return req::Rmdir{ .path = slice_as_str(m_buffer, *slice) };
-    }
+            auto request = parse_request(buffer, proc);
+            if (not request) {
+                log_e({ "{}: [{}] failed to parse request" }, __func__, id.inner());
+                continue;
+            }
 
-    AExpect<req::Rename> Server::recv_req_rename()
-    {
-        TRY(from_slice, co_await read_path(m_socket, m_buffer));
-        TRY(to_slice, co_await read_path(m_socket, m_buffer));
-        TRY(flags, co_await read_int<u32>(m_socket));
+            auto exec = co_await async::this_coro::executor;
+            auto coro = [&, id, proc, r = std::move(request), b = std::move(buffer)] mutable -> Await<void> {
+                auto response = co_await handler(b, std::move(r).value());
+                std::ignore   = co_await send_resp(id, proc, std::move(response));
+            };
 
-        co_return req::Rename{
-            .from  = slice_as_str(m_buffer, *from_slice),
-            .to    = slice_as_str(m_buffer, *to_slice),
-            .flags = *flags,
-        };
-    }
-
-    AExpect<req::Truncate> Server::recv_req_truncate()
-    {
-        TRY(path_slice, co_await read_path(m_socket, m_buffer));
-        TRY(size, co_await read_int<i64>(m_socket));
-
-        co_return req::Truncate{
-            .path = slice_as_str(m_buffer, *path_slice),
-            .size = *size,
-        };
-    }
-
-    AExpect<req::Read> Server::recv_req_read()
-    {
-        TRY(path_slice, co_await read_path(m_socket, m_buffer));
-        TRY(offset, co_await read_int<i64>(m_socket));
-        TRY(size, co_await read_int<u64>(m_socket));
-
-        co_return req::Read{
-            .path   = slice_as_str(m_buffer, *path_slice),
-            .offset = *offset,
-            .size   = *size,
-        };
-    }
-
-    AExpect<req::Write> Server::recv_req_write()
-    {
-        TRY(path_slice, co_await read_path(m_socket, m_buffer));
-        TRY(offset, co_await read_int<i64>(m_socket));
-        TRY(bytes_slice, co_await read_bytes(m_socket, m_buffer));
-
-        co_return req::Write{
-            .path   = slice_as_str(m_buffer, *path_slice),
-            .offset = *offset,
-            .in     = slice_bytes(m_buffer, *bytes_slice),
-        };
-    }
-
-    AExpect<req::Utimens> Server::recv_req_utimens()
-    {
-        TRY(path_slice, co_await read_path(m_socket, m_buffer));
-        TRY(atime_sec_slice, co_await read_int<i64>(m_socket));
-        TRY(atime_nsec_slice, co_await read_int<i64>(m_socket));
-        TRY(mtime_sec_slice, co_await read_int<i64>(m_socket));
-        TRY(mtime_nsec_slice, co_await read_int<i64>(m_socket));
-
-        co_return req::Utimens{
-            .path  = slice_as_str(m_buffer, *path_slice),
-            .atime = { .tv_sec = *atime_sec_slice, .tv_nsec = *atime_nsec_slice },
-            .mtime = { .tv_sec = *mtime_sec_slice, .tv_nsec = *mtime_nsec_slice },
-        };
-    }
-
-    AExpect<req::CopyFileRange> Server::recv_req_copy_file_range()
-    {
-        TRY(in_slice, co_await read_path(m_socket, m_buffer));
-        TRY(in_offset, co_await read_int<i64>(m_socket));
-        TRY(out_slice, co_await read_path(m_socket, m_buffer));
-        TRY(out_offset, co_await read_int<i64>(m_socket));
-        TRY(size, co_await read_int<u64>(m_socket));
-
-        co_return req::CopyFileRange{
-            .in_path    = slice_as_str(m_buffer, *in_slice),
-            .in_offset  = *in_offset,
-            .out_path   = slice_as_str(m_buffer, *out_slice),
-            .out_offset = *out_offset,
-            .size       = *size,
-        };
-    }
-
-    // -------------------
-
-    // server send response
-    // --------------------
-    AExpect<void> write_resp_listdir(Socket& sock, resp::Listdir&& resp)
-    {
-        TRY_SCOPED(co_await write_int<u64>(sock, resp.entries.size()));
-
-        for (const auto& [name, stat] : resp.entries) {
-            TRY_SCOPED(co_await write_path(sock, name));
-            TRY_SCOPED(co_await write_int<i64>(sock, stat.size));
-            TRY_SCOPED(co_await write_int<u64>(sock, stat.links));
-            TRY_SCOPED(co_await write_int<i64>(sock, stat.mtime.tv_sec));
-            TRY_SCOPED(co_await write_int<i64>(sock, stat.mtime.tv_nsec));
-            TRY_SCOPED(co_await write_int<i64>(sock, stat.atime.tv_sec));
-            TRY_SCOPED(co_await write_int<i64>(sock, stat.atime.tv_nsec));
-            TRY_SCOPED(co_await write_int<i64>(sock, stat.ctime.tv_sec));
-            TRY_SCOPED(co_await write_int<i64>(sock, stat.ctime.tv_nsec));
-            TRY_SCOPED(co_await write_int<u32>(sock, stat.mode));
-            TRY_SCOPED(co_await write_int<u32>(sock, stat.uid));
-            TRY_SCOPED(co_await write_int<u32>(sock, stat.gid));
+            async::spawn(exec, coro(), async::detached);
         }
 
         co_return Expect<void>{};
     }
 
-    AExpect<void> write_resp_stat(Socket& sock, resp::Stat&& resp)
-    {
-        TRY_SCOPED(co_await write_int<i64>(sock, resp.size));
-        TRY_SCOPED(co_await write_int<u64>(sock, resp.links));
-        TRY_SCOPED(co_await write_int<i64>(sock, resp.mtime.tv_sec));
-        TRY_SCOPED(co_await write_int<i64>(sock, resp.mtime.tv_nsec));
-        TRY_SCOPED(co_await write_int<i64>(sock, resp.atime.tv_sec));
-        TRY_SCOPED(co_await write_int<i64>(sock, resp.atime.tv_nsec));
-        TRY_SCOPED(co_await write_int<i64>(sock, resp.ctime.tv_sec));
-        TRY_SCOPED(co_await write_int<i64>(sock, resp.ctime.tv_nsec));
-        TRY_SCOPED(co_await write_int<u32>(sock, resp.mode));
-        TRY_SCOPED(co_await write_int<u32>(sock, resp.uid));
-        co_return co_await write_int<u32>(sock, resp.gid);
-    }
-
-    AExpect<void> write_resp_readlink(Socket& sock, resp::Readlink&& resp)
-    {
-        return write_path(sock, resp.target);
-    }
-
-    AExpect<void> write_resp_read(Socket& sock, resp::Read&& resp)
-    {
-        return write_bytes(sock, resp.read);
-    }
-
-    AExpect<void> write_resp_write(Socket& sock, resp::Write&& resp)
-    {
-        return write_int<u64>(sock, resp.size);
-    }
-
-    AExpect<void> write_resp_copy_file_range(Socket& sock, resp::CopyFileRange&& resp)
-    {
-        return write_int<u64>(sock, resp.size);
-    }
-
-    // --------------------
-
-    AExpect<Procedure> Server::peek_req()
-    {
-        return read_procedure(m_socket);
-    }
-
-    AExpect<void> Server::send_resp(Var<Status, Response> response)
+    AExpect<void> Server::send_resp(Id id, Procedure proc, Var<Status, Response> response)
     {
         auto status = Status::Success;
         if (auto err = std::get_if<Status>(&response); err) {
             status = *err;
         }
 
-        TRY_SCOPED(co_await write_status(m_socket, status));
+        auto buffer  = Vec<u8>{};
+        auto builder = ResponseBuilder{ buffer, id, proc, status };
 
         if (status != Status::Success) {
+            auto payload = builder.build();
+            auto [ec, n] = co_await async::write_exact(m_socket, payload);
+            HANDLE_ERROR(ec, n, payload.size(), "failed to send response payload");
             co_return Expect<void>{};
         }
 
-        auto empty_response = [&] -> AExpect<void> { co_return Expect<void>{}; };
-
         auto overload = util::Overload{
-            // clang-format off
-            [&](resp::Listdir&&       resp) { return write_resp_listdir        (m_socket, std::move(resp)); },
-            [&](resp::Stat&&          resp) { return write_resp_stat           (m_socket, std::move(resp)); },
-            [&](resp::Readlink&&      resp) { return write_resp_readlink       (m_socket, std::move(resp)); },
-            [&](resp::Mknod&&             ) { return empty_response();                                      },
-            [&](resp::Mkdir&&             ) { return empty_response();                                      },
-            [&](resp::Unlink&&            ) { return empty_response();                                      },
-            [&](resp::Rmdir&&             ) { return empty_response();                                      },
-            [&](resp::Rename&&            ) { return empty_response();                                      },
-            [&](resp::Truncate&&          ) { return empty_response();                                      },
-            [&](resp::Read&&          resp) { return write_resp_read           (m_socket, std::move(resp)); },
-            [&](resp::Write&&         resp) { return write_resp_write          (m_socket, std::move(resp)); },
-            [&](resp::Utimens&&           ) { return empty_response();                                      },
-            [&](resp::CopyFileRange&& resp) { return write_resp_copy_file_range(m_socket, std::move(resp)); },
-            // clang-format on
+            [&](resp::Listdir&& resp) {
+                builder.write_int<u64>(resp.entries.size());
+                for (const auto& [name, stat] : resp.entries) {
+                    builder    //
+                        .write_path(name)
+                        .write_int<i64>(stat.size)
+                        .write_int<u64>(stat.links)
+                        .write_int<i64>(stat.mtime.tv_sec)
+                        .write_int<i64>(stat.mtime.tv_nsec)
+                        .write_int<i64>(stat.atime.tv_sec)
+                        .write_int<i64>(stat.atime.tv_nsec)
+                        .write_int<i64>(stat.ctime.tv_sec)
+                        .write_int<i64>(stat.ctime.tv_nsec)
+                        .write_int<u32>(stat.mode)
+                        .write_int<u32>(stat.uid)
+                        .write_int<u32>(stat.gid);
+                }
+            },
+            [&](resp::Stat&& resp) {
+                builder    //
+                    .write_int<i64>(resp.size)
+                    .write_int<u64>(resp.links)
+                    .write_int<i64>(resp.mtime.tv_sec)
+                    .write_int<i64>(resp.mtime.tv_nsec)
+                    .write_int<i64>(resp.atime.tv_sec)
+                    .write_int<i64>(resp.atime.tv_nsec)
+                    .write_int<i64>(resp.ctime.tv_sec)
+                    .write_int<i64>(resp.ctime.tv_nsec)
+                    .write_int<u32>(resp.mode)
+                    .write_int<u32>(resp.uid)
+                    .write_int<u32>(resp.gid);
+            },
+            [&](resp::Readlink&& resp) { builder.write_path(resp.target); },
+            [&](resp::Mknod&&) { /* empty */ },
+            [&](resp::Mkdir&&) { /* empty */ },
+            [&](resp::Unlink&&) { /* empty */ },
+            [&](resp::Rmdir&&) { /* empty */ },
+            [&](resp::Rename&&) { /* empty */ },
+            [&](resp::Truncate&&) { /* empty */ },
+            [&](resp::Read&& resp) { builder.write_bytes(resp.read); },
+            [&](resp::Write&& resp) { builder.write_int<u64>(resp.size); },
+            [&](resp::Utimens&&) { /* empty */ },
+            [&](resp::CopyFileRange&& resp) { builder.write_int<u64>(resp.size); },
         };
 
-        co_return co_await std::visit(std::move(overload), std::get<Response>(std::move(response)));
+        auto resp = std::get<Response>(std::move(response));
+        if (auto actual = static_cast<Procedure>(resp.index()); actual != proc) {
+            log_e({ "{}: mismatched procedure: [{} vs {}]" }, __func__, to_string(actual), to_string(proc));
+            co_return Unexpect{ Errc::bad_message };
+        }
+
+        std::visit(std::move(overload), std::move(resp));
+
+        auto payload = builder.build();
+        auto [ec, n] = co_await async::write_exact(m_socket, payload);
+        HANDLE_ERROR(ec, n, payload.size(), "failed to send response payload");
+        co_return Expect<void>{};
     }
 }
 
@@ -644,13 +756,13 @@ namespace madbfs::rpc
 
     Str to_string(Request request)
     {
-        auto index = request.index() + 1;
+        auto index = request.index();
         return to_string(static_cast<Procedure>(index));
     }
 
     Str to_string(Response response)
     {
-        auto index = response.index() + 1;
+        auto index = response.index();
         return to_string(static_cast<Procedure>(index));
     }
 }
