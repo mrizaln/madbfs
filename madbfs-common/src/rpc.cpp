@@ -3,7 +3,6 @@
 #include "madbfs-common/log.hpp"
 #include "madbfs-common/util/overload.hpp"
 
-// TODO: add log
 #define HANDLE_ERROR(Ec, Size, Want, Msg)                                                                    \
     if (Ec) {                                                                                                \
         madbfs::log_e({ "{}: " Msg ": {}" }, __func__, Ec.message());                                        \
@@ -20,41 +19,25 @@
         return std::nullopt;                                                                                 \
     }
 
-namespace
+namespace madbfs::rpc
 {
-    using namespace madbfs;
-    using namespace madbfs::rpc;
-
     template <std::integral I>
     std::array<u8, sizeof(I)> to_net_bytes(I value)
     {
-        constexpr auto size = sizeof(I);
-
-        // if constexpr (std::endian::native == std::endian::big) {
-        if constexpr (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) {
-            return std::bit_cast<std::array<u8, size>>(value);
+        if constexpr (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) {    // no std::endian on Android NDK
+            return std::bit_cast<std::array<u8, sizeof(I)>>(value);
         } else {
-            auto array = std::bit_cast<std::array<u8, size>>(value);
-            for (auto i = 0u; i < size / 2; ++i) {
-                std::swap(array[i], array[size - i - 1]);
-            }
-            return array;
+            return std::bit_cast<std::array<u8, sizeof(I)>>(std::byteswap(value));
         }
     }
 
     template <std::integral I>
     I from_net_bytes(std::array<u8, sizeof(I)> bytes)
     {
-        constexpr auto size = sizeof(I);
-
-        // if constexpr (std::endian::native == std::endian::big) {
-        if constexpr (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) {
+        if constexpr (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) {    // no std::endian on Android NDK
             return std::bit_cast<I>(bytes);
         } else {
-            for (auto i = 0u; i < size / 2; ++i) {
-                std::swap(bytes[i], bytes[size - i - 1]);
-            }
-            return std::bit_cast<I>(bytes);
+            return std::byteswap(std::bit_cast<I>(bytes));
         }
     }
 
@@ -361,9 +344,14 @@ namespace madbfs::rpc
                 auto status = reader.read_status().value();
                 auto size   = reader.read_int<u64>().value();
 
+                log_d({ "receiver: RESPONSE RECEIVED {} [{}]" }, __func__, id.inner(), to_string(proc));
+
                 auto req = m_requests.extract(id);
                 if (req.empty()) {
                     log_e({ "receiver: response incoming for id {} but no promise registered" }, id.inner());
+                    // clean the socket
+                    auto buffer = Vec<u8>(size);
+                    std::ignore = co_await async::read_exact<u8>(m_socket, buffer);
                     continue;
                 }
 
@@ -435,6 +423,8 @@ namespace madbfs::rpc
         auto id      = Id{ ++m_counter };
         auto proc    = static_cast<Procedure>(req.index());
         auto builder = RequestBuilder{ buffer, id, proc };
+
+        log_d({ "{}: REQUEST SENT {} [{}]" }, __func__, id.inner(), to_string(proc));
 
         auto overload = util::Overload{
             [&](req::Mknod&& req) {
