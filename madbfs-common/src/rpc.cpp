@@ -103,7 +103,7 @@ namespace
         template <typename Self>
         Self&& write_path(this Self&& self, Str path)
         {
-            self.template write_int<u64>(path.size());
+            self.template write_int<u64>(path.size() + 1);
             auto span = Span{ reinterpret_cast<const u8*>(path.data()), path.size() };
             self.m_buffer.append_range(span);
             self.m_buffer.push_back(0x00);    // null terminator
@@ -176,7 +176,7 @@ namespace
         }
 
     private:
-        usize          m_index;
+        usize          m_index = 0;
         Span<const u8> m_buffer;
     };
 
@@ -201,7 +201,11 @@ namespace
             auto& buf  = m_buffer;
             auto  size = buf.size() - header_len;
             auto  arr  = to_net_bytes(static_cast<u64>(size));
-            sr::copy_n(arr.begin(), arr.size(), buf.begin() + header_len);
+            sr::copy_n(arr.begin(), arr.size(), buf.begin() + header_len - sizeof(u64));
+
+            // auto str = Str{ reinterpret_cast<const char*>(buf.data()), buf.size() };
+            // log_d({ "{}: request built: {:?}" }, __func__, str);
+
             return buf;
         }
     };
@@ -227,7 +231,11 @@ namespace
             auto& buf  = m_buffer;
             auto  size = buf.size() - header_len;
             auto  arr  = to_net_bytes(static_cast<u64>(size));
-            sr::copy_n(arr.begin(), arr.size(), buf.begin() + header_len);
+            sr::copy_n(arr.begin(), arr.size(), buf.begin() + header_len - sizeof(u64));
+
+            // auto str = Str{ reinterpret_cast<const char*>(buf.data()), buf.size() };
+            // log_d({ "{}: response built: {:?}" }, __func__, str);
+
             return buf;
         }
     };
@@ -625,14 +633,22 @@ namespace madbfs::rpc
             auto [ec, n] = co_await async::read_exact<u8>(m_socket, header);
             HANDLE_ERROR(ec, n, header_len, "failed to read request header");
 
+            // auto str = Str{ reinterpret_cast<const char*>(header.data()), header.size() };
+            // log_d({ "{}: header: {:?}" }, __func__, str);
+
             auto reader = PayloadReader{ header };
             auto id     = reader.read_id().value();
             auto proc   = reader.read_procedure().value();
             auto size   = reader.read_int<u64>().value();
 
+            log_d({ "{}: recv req: id={} | proc={} | size={}" }, __func__, id.inner(), to_string(proc), size);
+
             auto buffer    = Vec<u8>(size);
             auto [ec1, n1] = co_await async::read_exact<u8>(m_socket, buffer);
             HANDLE_ERROR(ec1, n1, buffer.size(), "failed to read request payload");
+
+            // str = Str{ reinterpret_cast<const char*>(buffer.data()), buffer.size() };
+            // log_d({ "{}: [{}] payload: {:?}" }, __func__, id.inner(), str);
 
             auto request = parse_request(buffer, proc);
             if (not request) {
@@ -764,5 +780,34 @@ namespace madbfs::rpc
     {
         auto index = response.index();
         return to_string(static_cast<Procedure>(index));
+    }
+
+    AExpect<void> handshake(Socket& sock, bool client)
+    {
+        if (client) {
+            auto [ec, n] = co_await async::write_exact<char>(sock, server_ready_string);
+            HANDLE_ERROR(ec, n, server_ready_string.size(), "failed to send handshake to server");
+
+            auto buffer    = String(server_ready_string.size(), '\0');
+            auto [ec1, n1] = co_await async::read_exact<char>(sock, buffer);
+            HANDLE_ERROR(ec1, n1, buffer.size(), "failed to read handshake from server");
+
+            if (buffer != server_ready_string) {
+                co_return Unexpect{ Errc::bad_message };
+            }
+        } else {
+            auto buffer    = String(server_ready_string.size(), '\0');
+            auto [ec1, n1] = co_await async::read_exact<char>(sock, buffer);
+            HANDLE_ERROR(ec1, n1, buffer.size(), "failed to read handshake from client");
+
+            if (buffer != server_ready_string) {
+                co_return Unexpect{ Errc::bad_message };
+            }
+
+            auto [ec, n] = co_await async::write_exact<char>(sock, server_ready_string);
+            HANDLE_ERROR(ec, n, server_ready_string.size(), "failed to send handshake to client");
+        }
+
+        co_return Expect<void>{};
     }
 }

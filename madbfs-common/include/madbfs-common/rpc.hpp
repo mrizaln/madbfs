@@ -51,7 +51,7 @@ namespace madbfs::rpc
 
         struct Hash
         {
-            usize operator()(Id id) { return std::hash<Inner>{}(id.inner()); }
+            usize operator()(Id id) const { return std::hash<Inner>{}(id.inner()); }
         };
 
         Id() = default;
@@ -154,6 +154,56 @@ namespace madbfs::rpc
         resp::Utimens,
         resp::CopyFileRange>;
 
+    namespace meta
+    {
+        template <typename>
+        struct VarTraits
+        {
+        };
+
+        template <template <typename...> typename VT, typename... Ts>
+        struct VarTraits<VT<Ts...>>
+        {
+            static constexpr usize size = sizeof...(Ts);
+
+            template <typename T>
+            static constexpr bool has_type = (std::same_as<T, Ts> || ...);
+
+            template <usize I>
+            using TypeAt = std::tuple_element_t<I, std::tuple<Ts...>>;    // A hack :D
+
+            template <typename T>
+                requires has_type<T>
+            static consteval usize type_index()
+            {
+                auto handler = []<usize... Is>(std::index_sequence<Is...>) {
+                    return ((std::same_as<T, Ts> ? Is : 0) + ...);
+                };
+                return handler(std::make_index_sequence<size>{});
+            }
+
+            template <typename T, typename Var>
+            using Swap = VarTraits<Var>::template TypeAt<type_index<T>()>;
+        };
+
+        template <typename T>
+        concept IsRequest = meta::VarTraits<Request>::has_type<T>;
+
+        template <typename T>
+        concept IsResponse = meta::VarTraits<Response>::has_type<T>;
+
+        template <IsRequest Req>
+        using ToResp = VarTraits<Request>::Swap<Req, Response>;
+
+        template <IsResponse Resp>
+        using ToReq = VarTraits<Response>::Swap<Resp, rpc::Request>;
+    }
+
+    using meta::IsRequest;
+    using meta::IsResponse;
+    using meta::ToReq;
+    using meta::ToResp;
+
     class Client
     {
     public:
@@ -232,4 +282,11 @@ namespace madbfs::rpc
      * The string lifetime is static.
      */
     Str to_string(Response response);
+
+    /**
+     * @brief Do a handshake with remote connection.
+     *
+     * Set client to true if you are client, set client to false if you are server.
+     */
+    AExpect<void> handshake(Socket& sock, bool client);
 }
