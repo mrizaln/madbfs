@@ -46,6 +46,7 @@ set_target_properties(madbfs-common PROPERTIES CXX_EXTENSIONS OFF)
 
 if(MADBFS_USE_NON_BOOST_ASIO)
     target_compile_definitions(madbfs-common PUBLIC MADBFS_NON_BOOST_ASIO=1)
+    target_compile_definitions(madbfs-common PUBLIC SAF_ASIO_STANDALONE)
 endif()
 if(MADBFS_ENABLE_RAPIDHASH_BLANKET_IMPL)
     target_compile_definitions(madbfs-common PUBLIC MADBFS_RAPIDHASH_ENABLED=1)
