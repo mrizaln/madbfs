@@ -2,7 +2,6 @@ include(cmake/prelude.cmake)
 
 find_package(Boost REQUIRED)
 find_package(libfuse REQUIRED)
-find_package(spdlog REQUIRED)
 find_package(unordered_dense REQUIRED)
 
 include(cmake/fetched-libs.cmake) # linr, saf
@@ -27,10 +26,8 @@ target_link_libraries(
     PUBLIC
         madbfs-common
         fetch::linr
-        fetch::saf
         boost::boost
         libfuse::libfuse
-        spdlog::spdlog
         unordered_dense::unordered_dense
 )
 target_include_directories(madbfs-lib PUBLIC include)

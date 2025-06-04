@@ -24,10 +24,20 @@ if(MADBFS_ENABLE_RAPIDHASH_BLANKET_IMPL)
     find_package(rapidhash REQUIRED)
 endif()
 
+find_package(spdlog REQUIRED)
+find_package(fmt REQUIRED)
+
+include(cmake/fetched-libs.cmake)
+
 add_library(madbfs-common STATIC src/rpc.cpp)
 target_link_libraries(
     madbfs-common
-    PUBLIC ${MADBFS_ASIO_TARGET} ${MADBFS_RAPIDHASH_TARGET}
+    PUBLIC
+        fetch::saf
+        fmt::fmt
+        spdlog::spdlog
+        ${MADBFS_ASIO_TARGET}
+        ${MADBFS_RAPIDHASH_TARGET}
 )
 
 target_include_directories(madbfs-common PUBLIC include)
