@@ -38,7 +38,7 @@ namespace madbfs
 
     private:
         Uniq<connection::Connection> prepare_connection(Opt<path::Path> server, u16 port);
-        Uniq<data::Ipc>              create_and_launch_ipc();
+        Uniq<data::Ipc>              create_ipc();
         void                         work_thread_function();
 
         boost::json::value ipc_handler(data::ipc::Op op);

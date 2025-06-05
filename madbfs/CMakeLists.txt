@@ -2,7 +2,6 @@ include(cmake/prelude.cmake)
 
 find_package(Boost REQUIRED)
 find_package(libfuse REQUIRED)
-find_package(spdlog REQUIRED)
 find_package(unordered_dense REQUIRED)
 
 include(cmake/fetched-libs.cmake) # linr, saf
@@ -27,10 +26,8 @@ target_link_libraries(
     PUBLIC
         madbfs-common
         fetch::linr
-        fetch::saf
         boost::boost
         libfuse::libfuse
-        spdlog::spdlog
         unordered_dense::unordered_dense
 )
 target_include_directories(madbfs-lib PUBLIC include)
@@ -40,10 +37,8 @@ target_link_libraries(madbfs PRIVATE madbfs-lib)
 target_compile_options(madbfs PRIVATE -Wall -Wextra -Wconversion)
 
 # # sanitizer
-# # target_compile_options(madbfs PRIVATE -fsanitize=address,leak,undefined)
-# # target_link_options(madbfs PRIVATE -fsanitize=address,leak,undefined)
-# target_compile_options(madbfs PRIVATE -fsanitize=address,undefined)
-# target_link_options(madbfs PRIVATE -fsanitize=address,undefined)
+# target_compile_options(madbfs PRIVATE -fsanitize=address,leak,undefined)
+# target_link_options(madbfs PRIVATE -fsanitize=address,leak,undefined)
 
 if(MADBFS_ENABLE_TESTS)
     message(STATUS "Building tests")

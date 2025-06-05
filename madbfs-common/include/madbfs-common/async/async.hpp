@@ -61,10 +61,11 @@ namespace madbfs::async
 
     inline Errc to_generic_err(error_code ec, Errc fallback = Errc::io_error)
     {
+        const auto& cat = ec.category();
 #if MADBFS_NON_BOOST_ASIO
-        if (ec.category() == std::generic_category()) {
+        if (cat == std::generic_category() or cat == std::system_category()) {
 #else
-        if (ec.category() == boost::system::generic_category()) {
+        if (cat == boost::system::generic_category() or cat == asio::error::get_system_category()) {
 #endif
             return static_cast<Errc>(ec.value());
         }

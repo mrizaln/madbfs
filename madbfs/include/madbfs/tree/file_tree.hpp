@@ -17,7 +17,7 @@ namespace madbfs::tree
     class FileTree
     {
     public:
-        using Filler = std::function<void(const char* name)>;
+        using Filler = std::move_only_function<void(const char* name)>;
 
         FileTree(connection::Connection& connection, data::Cache& cache);
         ~FileTree() = default;

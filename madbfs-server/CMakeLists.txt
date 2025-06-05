@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 project(
     madbfs-server
-    VERSION 0.4.0
+    VERSION 0.5.0
     LANGUAGES CXX
     DESCRIPTION "Userspace filesystem for Android via adb using FUSE (proxy component)"
 )
@@ -13,7 +13,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(asio REQUIRED)
-find_package(spdlog REQUIRED)
 
 set(MADBFS_USE_NON_BOOST_ASIO ON CACHE BOOL "use non-boost asio")
 set(MADBFS_ENABLE_RAPIDHASH_BLANKET_IMPL OFF CACHE BOOL "disable rapidhash")
@@ -26,7 +25,7 @@ add_subdirectory(
 
 add_library(madbfs-server-lib STATIC src/server.cpp)
 target_include_directories(madbfs-server-lib PUBLIC include)
-target_link_libraries(madbfs-server-lib PUBLIC madbfs-common spdlog::spdlog)
+target_link_libraries(madbfs-server-lib PUBLIC madbfs-common)
 
 add_executable(madbfs-server src/main.cpp)
 target_include_directories(madbfs-server PRIVATE src)

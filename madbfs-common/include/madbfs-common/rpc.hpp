@@ -3,36 +3,19 @@
 #include "madbfs-common/aliases.hpp"
 #include "madbfs-common/async/async.hpp"
 
+#include <saf.hpp>
+
 #include <sys/stat.h>
 #include <sys/types.h>
 
 namespace madbfs::rpc
 {
-    /*
-     * This RPC is opaque from both the client and the server. The stub is provided as is and provides correct
-     * semantics if provided that the caller and callee conforms to the contract:
-     *
-     * client:
-     * - call to `send_req_procedure` with certain procedure
-     * - must be followed by a call to `send_req_param` with appropriate param in req namespace
-     * - read the response by calling `recv_resp_procedure`
-     *
-     * server:
-     * - call to `recv_req_procedure`
-     * - followed by call to `recv_req_param` with previously obtained procedure enum
-     * - response with `send_resp_procedure`
-     *
-     * For Listdir procedure only:
-     * - server must send dirent continuously using `listdir_channel::Sender::send_next`, send EOF on complete
-     * - client must recv dirent continuously using `listdir_channel::Receiver::recv_next` until EOF
-     */
-
     using Socket = async::tcp::Socket;
 
     // NOTE: if you decided to add/remove one or more entries, do update domain check in peek_req
     enum class Procedure : u8
     {
-        Listdir = 1,
+        Listdir,
         Stat,
         Readlink,
         Mknod,
@@ -61,16 +44,35 @@ namespace madbfs::rpc
         DirectoryNotEmpty     = ENOTEMPTY,
     };
 
-    namespace req
+    class Id
     {
-        // NOTE: server after receiving this request must immediately use `listdir_channel::Sender` and send
-        // the directory data by that channel.
-        struct Listdir
+    public:
+        using Inner = u32;
+
+        struct Hash
         {
-            Str path;
+            usize operator()(Id id) const { return std::hash<Inner>{}(id.inner()); }
         };
 
+        Id() = default;
+
+        Id(Inner inner)
+            : m_inner{ inner }
+        {
+        }
+
+        Inner inner() const { return m_inner; }
+
+        auto operator<=>(const Id&) const = default;
+
+    private:
+        Inner m_inner = 0;
+    };
+
+    namespace req
+    {
         // clang-format off
+        struct Listdir       { Str path; };
         struct Stat          { Str path; };
         struct Readlink      { Str path; };
         struct Mknod         { Str path; mode_t mode; dev_t dev; };
@@ -152,71 +154,109 @@ namespace madbfs::rpc
         resp::Utimens,
         resp::CopyFileRange>;
 
+    namespace meta
+    {
+        template <typename>
+        struct VarTraits
+        {
+        };
+
+        template <template <typename...> typename VT, typename... Ts>
+        struct VarTraits<VT<Ts...>>
+        {
+            static constexpr usize size = sizeof...(Ts);
+
+            template <typename T>
+            static constexpr bool has_type = (std::same_as<T, Ts> || ...);
+
+            template <usize I>
+            using TypeAt = std::tuple_element_t<I, std::tuple<Ts...>>;    // A hack :D
+
+            template <typename T>
+                requires has_type<T>
+            static consteval usize type_index()
+            {
+                auto handler = []<usize... Is>(std::index_sequence<Is...>) {
+                    return ((std::same_as<T, Ts> ? Is : 0) + ...);
+                };
+                return handler(std::make_index_sequence<size>{});
+            }
+
+            template <typename T, typename Var>
+            using Swap = VarTraits<Var>::template TypeAt<type_index<T>()>;
+        };
+
+        template <typename T>
+        concept IsRequest = meta::VarTraits<Request>::has_type<T>;
+
+        template <typename T>
+        concept IsResponse = meta::VarTraits<Response>::has_type<T>;
+
+        template <IsRequest Req>
+        using ToResp = VarTraits<Request>::Swap<Req, Response>;
+
+        template <IsResponse Resp>
+        using ToReq = VarTraits<Response>::Swap<Resp, rpc::Request>;
+    }
+
+    using meta::IsRequest;
+    using meta::IsResponse;
+    using meta::ToReq;
+    using meta::ToResp;
+
     class Client
     {
     public:
-        Client(Socket& socket, Vec<u8>& buffer)
-            : m_socket{ socket }
-            , m_buffer{ buffer }
+        using Future = saf::future<Expect<Response>>;
+
+        Client(Socket socket)
+            : m_socket{ std::move(socket) }
         {
         }
 
-        Socket&  sock() noexcept { return m_socket; }
-        Vec<u8>& buf() noexcept { return m_buffer; }
+        Socket& sock() noexcept { return m_socket; }
+        bool    running() const { return m_running; }
 
-        // clang-format off
-        AExpect<resp::Listdir>       send_req_listdir        (req::Listdir       req);
-        AExpect<resp::Stat>          send_req_stat           (req::Stat          req);
-        AExpect<resp::Readlink>      send_req_readlink       (req::Readlink      req);
-        AExpect<resp::Mknod>         send_req_mknod          (req::Mknod         req);
-        AExpect<resp::Mkdir>         send_req_mkdir          (req::Mkdir         req);
-        AExpect<resp::Unlink>        send_req_unlink         (req::Unlink        req);
-        AExpect<resp::Rmdir>         send_req_rmdir          (req::Rmdir         req);
-        AExpect<resp::Rename>        send_req_rename         (req::Rename        req);
-        AExpect<resp::Truncate>      send_req_truncate       (req::Truncate      req);
-        AExpect<resp::Read>          send_req_read           (req::Read          req);
-        AExpect<resp::Write>         send_req_write          (req::Write         req);
-        AExpect<resp::Utimens>       send_req_utimens        (req::Utimens       req);
-        AExpect<resp::CopyFileRange> send_req_copy_file_range(req::CopyFileRange req);
-        // clang-format on
+        Await<void>     start();
+        AExpect<Future> send_req(Vec<u8>& buffer, Request req);
+        void            stop();
 
     private:
-        Socket&  m_socket;
-        Vec<u8>& m_buffer;
+        struct Promise
+        {
+            Vec<u8>&                       buffer;
+            saf::promise<Expect<Response>> promise;
+        };
+
+        using Inflight = std::unordered_map<Id, Promise, Id::Hash>;
+
+        Socket    m_socket;
+        Inflight  m_requests;
+        Id::Inner m_counter = 0;
+        bool      m_running = false;
     };
 
     class Server
     {
     public:
-        Server(Socket& socket, Vec<u8>& buffer)
-            : m_socket{ socket }
-            , m_buffer{ buffer }
+        using HandlerSig = Await<Var<Status, Response>>(Vec<u8>& buffer, Request request);
+        using Handler    = std::function<HandlerSig>;
+
+        Server(Socket socket)
+            : m_socket{ std::move(socket) }
         {
         }
 
-        Socket&  sock() noexcept { return m_socket; }
-        Vec<u8>& buf() noexcept { return m_buffer; }
+        Socket& sock() noexcept { return m_socket; }
 
-        AExpect<Procedure> peek_req();
-        AExpect<void>      send_resp(Var<Status, Response> response);
-
-        AExpect<req::Listdir>       recv_req_listdir();
-        AExpect<req::Stat>          recv_req_stat();
-        AExpect<req::Readlink>      recv_req_readlink();
-        AExpect<req::Mknod>         recv_req_mknod();
-        AExpect<req::Mkdir>         recv_req_mkdir();
-        AExpect<req::Unlink>        recv_req_unlink();
-        AExpect<req::Rmdir>         recv_req_rmdir();
-        AExpect<req::Rename>        recv_req_rename();
-        AExpect<req::Truncate>      recv_req_truncate();
-        AExpect<req::Read>          recv_req_read();
-        AExpect<req::Write>         recv_req_write();
-        AExpect<req::Utimens>       recv_req_utimens();
-        AExpect<req::CopyFileRange> recv_req_copy_file_range();
+        AExpect<void> listen(Handler handler);
+        void          stop();
 
     private:
-        Socket&  m_socket;
-        Vec<u8>& m_buffer;
+        AExpect<void> send_resp(Id id, Procedure proc, Var<Status, Response> response);
+
+        Socket m_socket;
+        bool   m_running;
     };
 
     static constexpr Str server_ready_string = "SERVER_IS_READY";
@@ -241,4 +281,11 @@ namespace madbfs::rpc
      * The string lifetime is static.
      */
     Str to_string(Response response);
+
+    /**
+     * @brief Do a handshake with remote connection.
+     *
+     * Set client to true if you are client, set client to false if you are server.
+     */
+    AExpect<void> handshake(Socket& sock, bool client);
 }

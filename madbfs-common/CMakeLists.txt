@@ -24,10 +24,20 @@ if(MADBFS_ENABLE_RAPIDHASH_BLANKET_IMPL)
     find_package(rapidhash REQUIRED)
 endif()
 
+find_package(spdlog REQUIRED)
+find_package(fmt REQUIRED)
+
+include(cmake/fetched-libs.cmake)
+
 add_library(madbfs-common STATIC src/rpc.cpp)
 target_link_libraries(
     madbfs-common
-    PUBLIC ${MADBFS_ASIO_TARGET} ${MADBFS_RAPIDHASH_TARGET}
+    PUBLIC
+        fetch::saf
+        fmt::fmt
+        spdlog::spdlog
+        ${MADBFS_ASIO_TARGET}
+        ${MADBFS_RAPIDHASH_TARGET}
 )
 
 target_include_directories(madbfs-common PUBLIC include)
@@ -36,6 +46,7 @@ set_target_properties(madbfs-common PROPERTIES CXX_EXTENSIONS OFF)
 
 if(MADBFS_USE_NON_BOOST_ASIO)
     target_compile_definitions(madbfs-common PUBLIC MADBFS_NON_BOOST_ASIO=1)
+    target_compile_definitions(madbfs-common PUBLIC SAF_ASIO_STANDALONE)
 endif()
 if(MADBFS_ENABLE_RAPIDHASH_BLANKET_IMPL)
     target_compile_definitions(madbfs-common PUBLIC MADBFS_RAPIDHASH_ENABLED=1)

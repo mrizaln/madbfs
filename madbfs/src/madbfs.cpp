@@ -113,7 +113,7 @@ namespace madbfs
         return fut.get();
     }
 
-    Uniq<data::Ipc> Madbfs::create_and_launch_ipc()
+    Uniq<data::Ipc> Madbfs::create_ipc()
     {
         auto ipc = data::Ipc::create(m_async_ctx);
         if (not ipc.has_value()) {
@@ -123,10 +123,6 @@ namespace madbfs
         }
 
         log_i({ "Madbfs: succesfully created ipc: {}" }, (*ipc)->path().fullpath());
-
-        auto coro = (*ipc)->launch([this](data::ipc::Op op) { return ipc_handler(op); });
-        async::spawn(m_async_ctx, std::move(coro), async::detached);
-
         return std::move(*ipc);
     }
 
@@ -148,8 +144,12 @@ namespace madbfs
         , m_connection{ prepare_connection(server, port) }
         , m_cache{ *m_connection, page_size, max_pages }
         , m_tree{ *m_connection, m_cache }
-        , m_ipc{ create_and_launch_ipc() }
+        , m_ipc{ create_ipc() }
     {
+        if (m_ipc != nullptr) {
+            auto coro = m_ipc->launch([this](data::ipc::Op op) { return ipc_handler(op); });
+            async::spawn(m_async_ctx, std::move(coro), async::detached);
+        }
     }
 
     Madbfs::~Madbfs()
