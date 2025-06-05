@@ -4,10 +4,8 @@
 #include <madbfs-common/log.hpp>
 
 #include <execinfo.h>
-#include <unistd.h>
 
 #include <array>
-#include <cassert>
 #include <csignal>
 #include <cstdlib>
 
@@ -19,7 +17,7 @@
  */
 void unexpected_program_end(const char* msg, bool is_sigsegv)
 {
-    fmt::print("> Program reached an unexpected end: {}", msg);
+    fmt::println("> Program reached an unexpected end: {}", msg);
 
     if (not is_sigsegv) {
         auto exception = std::current_exception();
@@ -27,9 +25,9 @@ void unexpected_program_end(const char* msg, bool is_sigsegv)
             try {
                 std::rethrow_exception(exception);
             } catch (const std::exception& e) {
-                fmt::print("> Uncaught exception:\n{}\n", e.what());
+                fmt::println("> Uncaught exception:\n{}", e.what());
             } catch (...) {
-                fmt::print("> Uncaught exception (unknown type)\n");
+                fmt::println("> Uncaught exception (unknown type)");
             }
         }
     }
