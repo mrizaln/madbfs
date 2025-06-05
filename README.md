@@ -413,4 +413,5 @@ The `<value>` then will be different depending on the operation performed:
 - [x] Eliminate copying data to and from memory when transferring/copying files within the filesystem.
 - [ ] Use multiple threads backing the async runtime.
 - [ ] Rewrite the server app in Kotlin, using the Android runtime instead as native binary.
-- [ ] Use persistent TCP connection to the server instead of making connection per request.
+- [x] Use persistent TCP connection to the server instead of making connection per request.
+- [ ] Fix open/close semantics.
