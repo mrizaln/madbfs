@@ -37,10 +37,8 @@ target_link_libraries(madbfs PRIVATE madbfs-lib)
 target_compile_options(madbfs PRIVATE -Wall -Wextra -Wconversion)
 
 # # sanitizer
-# # target_compile_options(madbfs PRIVATE -fsanitize=address,leak,undefined)
-# # target_link_options(madbfs PRIVATE -fsanitize=address,leak,undefined)
-# target_compile_options(madbfs PRIVATE -fsanitize=address,undefined)
-# target_link_options(madbfs PRIVATE -fsanitize=address,undefined)
+# target_compile_options(madbfs PRIVATE -fsanitize=address,leak,undefined)
+# target_link_options(madbfs PRIVATE -fsanitize=address,leak,undefined)
 
 if(MADBFS_ENABLE_TESTS)
     message(STATUS "Building tests")
