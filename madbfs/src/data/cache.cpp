@@ -4,6 +4,69 @@
 
 #include <madbfs-common/log.hpp>
 
+// NOTE: writing all this just for me to be able to write a short, nice, parallel_group spawner wrapper. what
+// a joke. maybe I should use Rust after all. it has an actual type inference and it is very powerful, unlike
+// C++ who almost has to nothing (auto and decltype is just too insignificant)
+namespace
+{
+    template <typename Sig>
+    struct AExpectFnTraits;
+
+    // only works on non-mutable lambda with noexcept specifier
+    template <typename C, typename R, typename... Args>
+    struct AExpectFnTraits<madbfs::AExpect<R> (C::*)(Args...) const noexcept>
+    {
+        static constexpr auto void_ret = std::same_as<void, R>;
+
+        using Ret = std::conditional_t<void_ret, madbfs::Unit, R>;
+
+        template <template <typename...> typename Tmpl>
+        using RetAsInner = madbfs::AExpect<std::conditional_t<void_ret, madbfs::Unit, Tmpl<Ret>>>;
+    };
+
+    // only works on non-mutable lambda with noexcept specifier
+    template <typename Fn>
+        requires std::is_class_v<std::decay_t<Fn>>
+    struct AExpectFnTraits<Fn> : AExpectFnTraits<decltype(&std::decay_t<Fn>::operator())>
+    {
+    };
+
+    template <typename Fn, template <typename...> typename Tmpl>
+    using AExpectInnerFromFn = AExpectFnTraits<Fn>::template RetAsInner<Tmpl>;
+}
+
+namespace madbfs::data
+{
+    template <VRange R, Invocable<RangeValue<R>> Fn>
+    AExpectInnerFromFn<Fn, Vec> spawn_parallel(Fn&& fn_coro, R&& args)
+    {
+        auto exec  = co_await asio::this_coro::executor;
+        auto defer = [&]<typename Arg>(Arg&& arg) {
+            return async::spawn(exec, std::forward<Fn>(fn_coro)(std::forward<Arg>(arg)), asio::deferred);
+        };
+
+        auto works = args | sv::transform(defer) | sr::to<std::vector>();
+        auto grp   = asio::experimental::make_parallel_group(std::move(works));
+
+        auto [ord, e, res] = co_await grp.async_wait(asio::experimental::wait_for_all{}, asio::use_awaitable);
+        assert(sr::all_of(e, [](auto e) { return e == nullptr; }));
+
+        for (auto i : ord) {
+            if (not res[i]) {
+                co_return Unexpect{ res[i].error() };
+            }
+        }
+
+        if constexpr (AExpectFnTraits<Fn>::void_ret) {
+            co_return Unit{};
+        } else {
+            co_return std::move(res)                                              //
+                | sv::transform([](auto&& v) { return std::move(v).value(); })    //
+                | sr::to<std::vector>();
+        }
+    }
+}
+
 namespace madbfs::data
 {
     Page::Page(PageKey key, Uniq<char[]> buf, u32 size, u32 page_size)
@@ -63,13 +126,14 @@ namespace madbfs::data
         auto first = static_cast<usize>(offset) / m_page_size;
         auto last  = (static_cast<usize>(offset) + out.size() - 1) / m_page_size;
 
+        log_d({ "{}: start [id={}|idx={} - {}]" }, __func__, id.inner(), first, last);
+
         auto work = [&](usize index) noexcept -> AExpect<usize> {
             log_d({ "read: [id={}|idx={}]" }, id.inner(), index);
 
             auto key = PageKey{ id, index };
 
-            auto queued = m_queue.find(key);
-            if (queued != m_queue.end()) {
+            if (auto queued = m_queue.find(key); queued != m_queue.end()) {
                 auto fut = queued->second;
                 co_await fut.async_wait();
                 if (auto err = fut.get(); static_cast<bool>(err)) {
@@ -145,40 +209,28 @@ namespace madbfs::data
             co_return read;
         };
 
-        auto exec  = co_await asio::this_coro::executor;
-        auto defer = [&](usize index) { return asio::co_spawn(exec, work(index), asio::deferred); };
-        auto works = sv::iota(first, last + 1) | sv::transform(defer);
-        auto grp   = asio::experimental::make_parallel_group(works | sr::to<std::vector>());
-
-        auto [ord, _, res] = co_await grp.async_wait(asio::experimental::wait_for_all{}, asio::use_awaitable);
-        auto total_read    = 0uz;
-        for (auto i : ord) {
-            if (not res[i]) {
-                log_e({ "{}: failed to read page index={} of id={}" }, __func__, first + i, id.inner());
-                co_return Unexpect{ res[i].error() };
-            }
-            total_read += res[i].value();
+        auto res = co_await spawn_parallel(work, sv::iota(first, last + 1));
+        if (not res) {
+            log_e({ "{}: failed to read page of id={}" }, __func__, id.inner());
+            co_return Unexpect{ res.error() };
         }
 
-        co_return total_read;
+        co_return sr::fold_left(res.value(), 0uz, std::plus{});
     }
 
     AExpect<usize> Cache::write(Id id, path::Path path, Span<const char> in, off_t offset)
     {
-        auto start = static_cast<usize>(offset) / m_page_size;
+        auto first = static_cast<usize>(offset) / m_page_size;
         auto last  = (static_cast<usize>(offset) + in.size() - 1) / m_page_size;
 
-        auto total_written = 0uz;
+        log_d({ "{}: start [id={}|idx={} - {}]" }, __func__, id.inner(), first, last);
 
-        // TODO: use parallel group
-
-        for (auto index : sv::iota(start, last + 1)) {
-            log_d({ "{}: write [id={}|idx={}]" }, __func__, id.inner(), index);
+        auto work = [&](usize index) noexcept -> AExpect<usize> {
+            log_d({ "write: [id={}|idx={}]" }, id.inner(), index);
 
             auto key = PageKey{ id, index };
 
-            auto queued = m_queue.find(key);
-            if (queued != m_queue.end()) {
+            if (auto queued = m_queue.find(key); queued != m_queue.end()) {
                 auto fut = queued->second;
                 co_await fut.async_wait();
                 if (auto err = fut.get(); static_cast<bool>(err)) {
@@ -198,48 +250,65 @@ namespace madbfs::data
                 m_lru.emplace_front(key, std::make_unique<char[]>(m_page_size), 0, m_page_size);
                 auto [p, _] = m_table.emplace(key, m_lru.begin());
                 entry       = p;
+
+                if (m_table.size() > m_max_pages) {
+                    co_await evict(m_table.size() - m_max_pages);
+                }
             }
 
             const auto& [_, page] = *entry;
-
-            auto local_offset = 0uz;
-            if (index == start) {
-                local_offset = static_cast<usize>(offset) % m_page_size;
-            }
-
-            auto write      = std::min(m_page_size - local_offset, in.size() - total_written);
-            auto write_span = Span{ in.data() + total_written, write };
-
-            page->write(write_span, local_offset);
-            page->set_dirty(true);
 
             if (page != m_lru.begin()) {
                 m_lru.splice(m_lru.begin(), m_lru, page);
             }
 
-            total_written += write;
+            auto local_offset = 0uz;
+            auto local_size   = m_page_size;
 
-            if (m_table.size() > m_max_pages) {
-                co_await evict(m_table.size() > m_max_pages);
+            if (index == first) {
+                local_offset = static_cast<usize>(offset) % m_page_size;
+                local_size   = local_size - local_offset;
             }
+
+            if (index == last) {
+                auto off    = static_cast<usize>(offset) % m_page_size;
+                local_size  = (in.size() + off - 1) % m_page_size + 1;
+                local_size -= local_offset;
+            }
+
+            auto in_off = 0uz;
+            if (index >= first + 1) {
+                in_off = (index - first) * m_page_size - static_cast<usize>(offset) % m_page_size;
+            }
+
+            auto in_span = Span{ in.data() + in_off, local_size };
+            auto written = page->write(in_span, local_offset);
+
+            page->set_dirty(true);
+
+            co_return written;
+        };
+
+        auto res = co_await spawn_parallel(work, sv::iota(first, last + 1));
+        if (not res) {
+            log_e({ "{}: failed to read page of id={}" }, __func__, id.inner());
+            co_return Unexpect{ res.error() };
         }
 
-        co_return total_written;
+        co_return sr::fold_left(res.value(), 0uz, std::plus{});
     }
 
     AExpect<void> Cache::flush(Id id, usize size)
     {
         auto num_pages = size / m_page_size + (size % m_page_size != 0);
 
-        // TODO: use parallel group
-
-        for (auto index : sv::iota(0uz, num_pages)) {
-            log_d({ "{}: flush [id={}|idx={}]" }, __func__, id.inner(), index);
+        // for (auto index : sv::iota(0uz, num_pages)) {
+        auto work = [&](usize index) noexcept -> AExpect<void> {
+            log_d({ "flush: flush [id={}|idx={}]" }, id.inner(), index);
 
             auto key = PageKey{ id, index };
 
-            auto queued = m_queue.find(key);
-            if (queued != m_queue.end()) {
+            if (auto queued = m_queue.find(key); queued != m_queue.end()) {
                 auto fut = queued->second;
                 co_await fut.async_wait();
                 if (auto err = fut.get(); static_cast<bool>(err)) {
@@ -247,23 +316,29 @@ namespace madbfs::data
                 }
             }
 
-            auto entry = m_table.find(key);
-            if (entry == m_table.end()) {
-                log_c({ "{}: page skipped [id={}|idx={}]" }, __func__, id.inner(), index);
-                continue;
+            if (auto entry = m_table.find(key); entry != m_table.end()) {
+                if (auto page = entry->second; page->is_dirty()) {
+                    auto data = std::make_unique<char[]>(m_page_size);
+                    auto read = page->read({ data.get(), m_page_size }, 0);
+                    page->set_dirty(false);
+
+                    auto span = Span{ data.get(), read };
+                    auto res  = co_await on_flush(id, span, static_cast<off_t>(index * m_page_size));
+                    if (not res.has_value()) {
+                        co_return Unexpect{ res.error() };
+                    }
+                }
+            } else {
+                log_i({ "flush: page skipped [id={}|idx={}]" }, id.inner(), index);
             }
 
-            auto page = entry->second;
-            if (page->is_dirty()) {
-                auto data = std::make_unique<char[]>(m_page_size);
-                auto read = page->read({ data.get(), m_page_size }, 0);
-                page->set_dirty(false);
+            co_return Expect<void>{};
+        };
 
-                auto span = Span{ data.get(), read };
-                auto res  = co_await on_flush(id, span, static_cast<off_t>(index * m_page_size));
-                if (not res.has_value()) {
-                    co_return Unexpect{ res.error() };
-                }
+        // writing in parallel is not a good idea :P
+        for (auto work : sv::iota(0uz, num_pages) | sv::transform(work)) {
+            if (auto res = co_await std::move(work); not res) {
+                co_return Unexpect{ res.error() };
             }
         }
 
@@ -340,7 +415,7 @@ namespace madbfs::data
             }
 
             auto [id, idx] = page.key();
-            log_w({ "{}: force push page [id={}|idx={}]" }, __func__, id.inner(), idx);
+            log_i({ "{}: force push page [id={}|idx={}]" }, __func__, id.inner(), idx);
 
             auto offset = static_cast<off_t>(idx * m_page_size);
             if (auto res = co_await on_flush(id, page.buf(), offset); not res) {
