@@ -60,15 +60,11 @@ namespace madbfs::data
 
     AExpect<usize> Cache::read(Id id, path::Path path, Span<char> out, off_t offset)
     {
-        auto start = static_cast<usize>(offset) / m_page_size;
+        auto first = static_cast<usize>(offset) / m_page_size;
         auto last  = (static_cast<usize>(offset) + out.size() - 1) / m_page_size;
 
-        auto total_read = 0uz;
-
-        // TODO: use parallel group
-
-        for (auto index : sv::iota(start, last + 1)) {
-            log_d({ "{}: read [id={}|idx={}]" }, __func__, id.inner(), index);
+        auto work = [&](usize index) noexcept -> AExpect<usize> {
+            log_d({ "read: [id={}|idx={}]" }, id.inner(), index);
 
             auto key = PageKey{ id, index };
 
@@ -125,12 +121,43 @@ namespace madbfs::data
             }
 
             auto local_offset = 0uz;
-            if (index == start) {
+            auto local_size   = m_page_size;
+
+            if (index == first) {
                 local_offset = static_cast<usize>(offset) % m_page_size;
+                local_size   = local_size - local_offset;
             }
 
-            auto out_sub  = Span{ out.data() + total_read, out.size() - total_read };
-            total_read   += page->read(out_sub, local_offset);
+            if (index == last) {
+                auto off    = static_cast<usize>(offset) % m_page_size;
+                local_size  = (out.size() + off - 1) % m_page_size + 1;
+                local_size -= local_offset;
+            }
+
+            auto out_off = 0uz;
+            if (index >= first + 1) {
+                out_off = (index - first) * m_page_size - static_cast<usize>(offset) % m_page_size;
+            }
+
+            auto out_span = Span{ out.data() + out_off, local_size };
+            auto read     = page->read(out_span, local_offset);
+
+            co_return read;
+        };
+
+        auto exec  = co_await asio::this_coro::executor;
+        auto defer = [&](usize index) { return asio::co_spawn(exec, work(index), asio::deferred); };
+        auto works = sv::iota(first, last + 1) | sv::transform(defer);
+        auto grp   = asio::experimental::make_parallel_group(works | sr::to<std::vector>());
+
+        auto [ord, _, res] = co_await grp.async_wait(asio::experimental::wait_for_all{}, asio::use_awaitable);
+        auto total_read    = 0uz;
+        for (auto i : ord) {
+            if (not res[i]) {
+                log_e({ "{}: failed to read page index={} of id={}" }, __func__, first + i, id.inner());
+                co_return Unexpect{ res[i].error() };
+            }
+            total_read += res[i].value();
         }
 
         co_return total_read;
