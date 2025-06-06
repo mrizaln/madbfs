@@ -89,6 +89,24 @@ namespace madbfs
         namespace sv = std::views;
     }
 
+    inline namespace concepts
+    {
+        template <typename T>
+        concept Range = std::ranges::range<T>;
+
+        template <typename T>
+        concept VRange = std::ranges::viewable_range<T>;
+
+        template <Range T>
+        using RangeValue = std::ranges::range_value_t<T>;
+
+        template <typename Fn, typename... Args>
+        concept Invocable = std::invocable<Fn, Args...>;
+
+        template <typename Fn, typename... Args>
+        using InvokeResult = std::invoke_result_t<Fn, Args...>;
+    }
+
     inline namespace util_functions
     {
         inline constexpr auto sink_void = [](auto&&) { };
