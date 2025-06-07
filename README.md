@@ -264,7 +264,7 @@ $ ./madbfs --log-file=- --log-level=debug -d <mountpoint> 2> /dev/null        # 
 
 ### IPC
 
-> see [this python script](./test/ipc.py) for an example of an IPC client.
+> see [this python script](./madbfs/test/ipc.py) for an example of an IPC client.
 
 Filesystem parameters can be reconfigured and queried during runtime though IPC using unix socket. The supported operations are:
 
