@@ -5,10 +5,7 @@ import struct
 import sys
 import time
 from argparse import ArgumentParser
-from collections import deque
-from contextlib import contextmanager
 from socket import AF_UNIX, SOCK_STREAM, socket
-from statistics import mean
 
 
 class Protocol:
@@ -48,46 +45,6 @@ class Protocol:
             data.extend(packet)
             packet_count += 1
         return data, packet_count
-
-
-class TransferRateTracker:
-    def __init__(self, window_size: int = 10):
-        self.__last_ten_transfer = deque([0] * window_size, window_size)
-
-    def update(self, new_data_len: int, time_elapsed: float) -> str:
-        self.__last_ten_transfer.append(new_data_len)
-        average = mean(self.__last_ten_transfer) / time_elapsed
-        return format_bytes(average) + "/s"
-
-
-@contextmanager
-def posix_file_output(filename=None):
-    if filename and filename != "-":
-        fh = open(filename, "w")
-    else:
-        fh = sys.stdout
-
-    try:
-        yield fh
-    finally:
-        if fh is not sys.stdout:
-            fh.close()
-
-
-def format_bytes(bytes: float) -> str:
-    orderNames = {0: "B", 3: "kB", 6: "MB", 9: "GB", 12: "TB"}
-
-    order = 0
-    while bytes > 1023:
-        bytes /= 1024
-        order += 3
-
-    if order < 6:
-        bytes = int(bytes)
-    else:
-        bytes = round(bytes, 1)
-
-    return str(bytes) + " " + orderNames[order]
 
 
 def try_connect(serial: str, retry_attempt: int, retry_delay: int) -> socket | None:
@@ -146,10 +103,10 @@ def main() -> int:
     # op = {"op": "set_cache_size", "value": {"mib": 128}}
 
     # op = {"op": "get_page_size"}
-    # op = {"op": "set_page_size", "value": {"kib": 64}}
+    # op = {"op": "set_page_size", "value": {"kib": 128}}
     #
-    # op = {"op": "invalidate_cache"}
-    op = {"op": "help"}
+    op = {"op": "invalidate_cache"}
+    # op = {"op": "help"}
 
     Protocol.send(sock, json.dumps(op))
     resp = Protocol.receive(sock)
