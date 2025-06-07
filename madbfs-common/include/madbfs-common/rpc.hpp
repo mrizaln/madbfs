@@ -12,7 +12,7 @@ namespace madbfs::rpc
 {
     using Socket = async::tcp::Socket;
 
-    // NOTE: if you decided to add/remove one or more entries, do update domain check in peek_req
+    // NOTE: if you decided to add/remove one or more entries, do update domain check in read_procedure
     enum class Procedure : u8
     {
         Listdir,
@@ -30,8 +30,6 @@ namespace madbfs::rpc
         CopyFileRange,
     };
 
-    // NOTE: network error won't overlap with procedure error. procedure error are only limited to the
-    // integral values defined by Status
     enum class Status : u8
     {
         Success               = 0,

@@ -121,7 +121,25 @@ namespace madbfs::rpc
 
         Opt<Procedure> read_procedure()
         {
-            return read_int<u8>().transform([](u8 v) { return Procedure{ v }; });
+            return read_int<u8>().and_then([](u8 v) -> Opt<Procedure> {
+                auto proc = Procedure{ v };
+                switch (proc) {
+                case Procedure::Listdir:
+                case Procedure::Stat:
+                case Procedure::Readlink:
+                case Procedure::Mknod:
+                case Procedure::Mkdir:
+                case Procedure::Unlink:
+                case Procedure::Rmdir:
+                case Procedure::Rename:
+                case Procedure::Truncate:
+                case Procedure::Read:
+                case Procedure::Write:
+                case Procedure::Utimens:
+                case Procedure::CopyFileRange: return proc;
+                }
+                return std::nullopt;
+            });
         }
 
         Opt<Status> read_status()
@@ -340,16 +358,22 @@ namespace madbfs::rpc
 
                 auto reader = PayloadReader{ header };
                 auto id     = reader.read_id().value();
-                auto proc   = reader.read_procedure().value();
+                auto proc   = reader.read_procedure();    // can fail, invalid procedure
                 auto status = reader.read_status().value();
                 auto size   = reader.read_int<u64>().value();
 
-                log_d({ "receiver: RESP RECV {} [{}]" }, id.inner(), to_string(proc));
+                if (not proc) {
+                    log_d({ "receiver: RESP RECV {} [invalid procedure]" }, id.inner());
+                    auto buffer = Vec<u8>(size);
+                    std::ignore = co_await async::read_exact<u8>(m_socket, buffer);
+                    continue;
+                }
+
+                log_d({ "receiver: RESP RECV {} [{}]" }, id.inner(), to_string(*proc));
 
                 auto req = m_requests.extract(id);
                 if (req.empty()) {
                     log_e({ "receiver: response incoming for id {} but no promise registered" }, id.inner());
-                    // clean the socket
                     auto buffer = Vec<u8>(size);
                     std::ignore = co_await async::read_exact<u8>(m_socket, buffer);
                     continue;
@@ -377,7 +401,7 @@ namespace madbfs::rpc
                     continue;
                 };
 
-                auto response = parse_response(buffer, proc);
+                auto response = parse_response(buffer, *proc);
                 if (not response) {
                     log_e({ "receiver: [{}] failed to parse response" }, id.inner());
                     promise.set_value(Unexpect{ Errc::bad_message });
@@ -635,10 +659,17 @@ namespace madbfs::rpc
 
             auto reader = PayloadReader{ header };
             auto id     = reader.read_id().value();
-            auto proc   = reader.read_procedure().value();
+            auto proc   = reader.read_procedure();    // can fail, invalid procedure
             auto size   = reader.read_int<u64>().value();
 
-            log_d({ "{}: recv req: id={} | proc={} | size={}" }, __func__, id.inner(), to_string(proc), size);
+            if (not proc) {
+                log_d({ "{}: recv req: id={} | proc=[invalid] | size={}" }, __func__, id.inner(), size);
+                auto buffer = Vec<u8>(size);
+                std::ignore = co_await async::read_exact<u8>(m_socket, buffer);
+                continue;
+            }
+
+            log_d({ "{}: recv req id={} | proc={} | size={}" }, __func__, id.inner(), to_string(*proc), size);
 
             auto buffer    = Vec<u8>(size);
             auto [ec1, n1] = co_await async::read_exact<u8>(m_socket, buffer);
@@ -647,7 +678,7 @@ namespace madbfs::rpc
             // str = Str{ reinterpret_cast<const char*>(buffer.data()), buffer.size() };
             // log_d({ "{}: [{}] payload: {:?}" }, __func__, id.inner(), str);
 
-            auto request = parse_request(buffer, proc);
+            auto request = parse_request(buffer, *proc);
             if (not request) {
                 log_e({ "{}: [{}] failed to parse request" }, __func__, id.inner());
                 continue;
@@ -656,7 +687,7 @@ namespace madbfs::rpc
             auto exec = co_await async::this_coro::executor;
             auto coro = [&, id, proc, r = std::move(request), b = std::move(buffer)] mutable -> Await<void> {
                 auto response = co_await handler(b, std::move(r).value());
-                std::ignore   = co_await send_resp(id, proc, std::move(response));
+                std::ignore   = co_await send_resp(id, *proc, std::move(response));
             };
 
             async::spawn(exec, coro(), async::detached);
@@ -748,7 +779,6 @@ namespace madbfs::rpc
     Str to_string(Procedure procedure)
     {
         switch (procedure) {
-
         case Procedure::Listdir: return "Listdir";
         case Procedure::Stat: return "Stat";
         case Procedure::Readlink: return "Readlink";
