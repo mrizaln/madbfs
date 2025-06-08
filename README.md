@@ -415,3 +415,4 @@ The `<value>` then will be different depending on the operation performed:
 - [ ] Rewrite the server app in Kotlin, using the Android runtime instead as native binary.
 - [x] Use persistent TCP connection to the server instead of making connection per request.
 - [ ] Fix open/close semantics.
+- [ ] Add limit to open file descriptor (for adb query it using `ulimit -n`, for server query it using `getrlimit`)
