@@ -228,6 +228,8 @@ namespace madbfs::rpc
 
         using Inflight = std::unordered_map<Id, Promise, Id::Hash>;
 
+        AExpect<void> receive();
+
         Socket    m_socket;
         Inflight  m_requests;
         Id::Inner m_counter = 0;

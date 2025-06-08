@@ -347,74 +347,10 @@ namespace madbfs::rpc
 
     Await<void> Client::start()
     {
-        m_running     = true;
-        auto receiver = [&] -> AExpect<void> {
-            while (m_running) {
-                constexpr auto header_len = sizeof(Id) + sizeof(Procedure) + sizeof(Status) + sizeof(u64);
-
-                auto header  = Array<u8, header_len>{};
-                auto [ec, n] = co_await async::read_exact<u8>(m_socket, header);
-                HANDLE_ERROR(ec, n, header_len, "failed to read response header");
-
-                auto reader = PayloadReader{ header };
-                auto id     = reader.read_id().value();
-                auto proc   = reader.read_procedure();    // can fail, invalid procedure
-                auto status = reader.read_status().value();
-                auto size   = reader.read_int<u64>().value();
-
-                if (not proc) {
-                    log_d({ "receiver: RESP RECV {} [invalid procedure]" }, id.inner());
-                    auto buffer = Vec<u8>(size);
-                    std::ignore = co_await async::read_exact<u8>(m_socket, buffer);
-                    continue;
-                }
-
-                log_d({ "receiver: RESP RECV {} [{}]" }, id.inner(), to_string(*proc));
-
-                auto req = m_requests.extract(id);
-                if (req.empty()) {
-                    log_e({ "receiver: response incoming for id {} but no promise registered" }, id.inner());
-                    auto buffer = Vec<u8>(size);
-                    std::ignore = co_await async::read_exact<u8>(m_socket, buffer);
-                    continue;
-                }
-
-                auto& [buffer, promise] = req.mapped();
-                if (status != Status::Success) {
-                    promise.set_value(Unexpect{ static_cast<Errc>(status) });
-                    continue;
-                }
-
-                buffer.resize(size);
-                auto [ec1, n1] = co_await async::read_exact<u8>(m_socket, buffer);
-                if (ec1) {
-                    auto i   = id.inner();
-                    auto msg = ec1.message();
-                    log_e({ "receiver: [{}] failed to read response payload: {}" }, i, msg);
-                    promise.set_value(Unexpect{ async::to_generic_err(ec1, Errc::not_connected) });
-                    continue;
-                } else if (n1 != buffer.size()) {
-                    auto i  = id.inner();
-                    auto nn = buffer.size();
-                    log_e({ "receiver: [{}] mismatched response length [{} vs {}]" }, i, n1, nn);
-                    promise.set_value(Unexpect{ Errc::broken_pipe });
-                    continue;
-                };
-
-                auto response = parse_response(buffer, *proc);
-                if (not response) {
-                    log_e({ "receiver: [{}] failed to parse response" }, id.inner());
-                    promise.set_value(Unexpect{ Errc::bad_message });
-                    continue;
-                }
-
-                promise.set_value(std::move(response).value());
-            }
-            co_return Expect<void>{};
-        };
+        m_running = true;
 
         auto exec = co_await async::this_coro::executor;
-        asio::co_spawn(exec, receiver(), [&](std::exception_ptr e, Expect<void> res) {
+        asio::co_spawn(exec, receive(), [&](std::exception_ptr e, Expect<void> res) {
             m_running = false;
 
             if (e) {
@@ -434,6 +370,72 @@ namespace madbfs::rpc
             }
             m_requests.clear();
         });
+    }
+
+    AExpect<void> Client::receive()
+    {
+        while (m_running) {
+            constexpr auto header_len = sizeof(Id) + sizeof(Procedure) + sizeof(Status) + sizeof(u64);
+
+            auto header  = Array<u8, header_len>{};
+            auto [ec, n] = co_await async::read_exact<u8>(m_socket, header);
+            HANDLE_ERROR(ec, n, header_len, "failed to read response header");
+
+            auto reader = PayloadReader{ header };
+            auto id     = reader.read_id().value();
+            auto proc   = reader.read_procedure();    // can fail, invalid procedure
+            auto status = reader.read_status().value();
+            auto size   = reader.read_int<u64>().value();
+
+            if (not proc) {
+                log_d({ "{}: RESP RECV {} [invalid procedure]" }, __func__, id.inner());
+                auto buffer = Vec<u8>(size);
+                std::ignore = co_await async::read_exact<u8>(m_socket, buffer);
+                continue;
+            }
+
+            log_d({ "{}: RESP RECV {} [{}]" }, __func__, id.inner(), to_string(*proc));
+
+            auto req = m_requests.extract(id);
+            if (req.empty()) {
+                log_e({ "{}: response incoming for id {} but no promise registered" }, __func__, id.inner());
+                auto buffer = Vec<u8>(size);
+                std::ignore = co_await async::read_exact<u8>(m_socket, buffer);
+                continue;
+            }
+
+            auto& [buffer, promise] = req.mapped();
+            if (status != Status::Success) {
+                promise.set_value(Unexpect{ static_cast<Errc>(status) });
+                continue;
+            }
+
+            buffer.resize(size);
+            auto [ec1, n1] = co_await async::read_exact<u8>(m_socket, buffer);
+            if (ec1) {
+                auto i   = id.inner();
+                auto msg = ec1.message();
+                log_e({ "{}: [{}] failed to read response payload: {}" }, __func__, i, msg);
+                promise.set_value(Unexpect{ async::to_generic_err(ec1, Errc::not_connected) });
+                continue;
+            } else if (n1 != buffer.size()) {
+                auto i  = id.inner();
+                auto nn = buffer.size();
+                log_e({ "{}: [{}] mismatched response length [{} vs {}]" }, __func__, i, n1, nn);
+                promise.set_value(Unexpect{ Errc::broken_pipe });
+                continue;
+            };
+
+            auto response = parse_response(buffer, *proc);
+            if (not response) {
+                log_e({ "{}: [{}] failed to parse response" }, __func__, id.inner());
+                promise.set_value(Unexpect{ Errc::bad_message });
+                continue;
+            }
+
+            promise.set_value(std::move(response).value());
+        }
+        co_return Expect<void>{};
     }
 
     void Client::stop()
