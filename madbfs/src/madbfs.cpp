@@ -223,8 +223,14 @@ namespace madbfs
         return std::visit(overload, op);
     }
 
-    void* init(fuse_conn_info*, fuse_config*)
+    void* init(fuse_conn_info* conn, fuse_config*)
     {
+        if (conn->want & FUSE_CAP_ATOMIC_O_TRUNC) {
+            auto msg = "fuse sets atomic O_TRUNC capability, but filesystem doesn't support it, disabling...";
+            log_w({ "{}: {}" }, __func__, msg);
+            conn->want &= ~static_cast<u32>(FUSE_CAP_ATOMIC_O_TRUNC);
+        }
+
         auto* args = static_cast<args::ParsedOpt*>(::fuse_get_context()->private_data);
         assert(args != nullptr and "data should not be empty!");
 
@@ -396,7 +402,7 @@ namespace madbfs
 
     i32 open(const char* path, fuse_file_info* fi)
     {
-        log_i({ "{}: {:?}" }, __func__, path);
+        log_i({ "{}: {:?} [flags={:#08o}]" }, __func__, path, fi->flags);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([&](path::Path p) { return tree_blocking(&tree::FileTree::open, p, fi->flags); })
