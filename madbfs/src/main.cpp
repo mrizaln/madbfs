@@ -50,12 +50,15 @@ void unexpected_program_end(const char* msg, bool is_sigsegv)
         std::signal(SIGSEGV, SIG_DFL);
         std::raise(SIGSEGV);
     }
+
+    madbfs::log::shutdown();
 }
 
 int main(int argc, char** argv)
 {
-    std::signal(SIGSEGV, [](int) { unexpected_program_end("SIGSEGV", true); });
     std::set_terminate([] { unexpected_program_end("std::terminate", false); });
+    std::signal(SIGSEGV, [](int) { unexpected_program_end("SIGSEGV", true); });
+    std::signal(SIGTERM, [](int) { madbfs::log::shutdown(); });
 
     auto ctx = madbfs::async::Context{};
     auto fut = madbfs::async::spawn(ctx, madbfs::args::parse(argc, argv), madbfs::async::use_future);

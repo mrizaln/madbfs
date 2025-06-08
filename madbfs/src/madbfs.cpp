@@ -260,6 +260,9 @@ namespace madbfs
         } else [[unlikely]] {
             log_i({ "madbfs succesfully terminated" });
         }
+
+        // to force flushing remaining logs in queue
+        log::shutdown();
     }
 
     i32 getattr(const char* path, struct stat* stbuf, [[maybe_unused]] fuse_file_info* fi)

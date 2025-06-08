@@ -67,6 +67,20 @@ namespace madbfs::log
     }
 
     /**
+     * @brief Shut down logger.
+     *
+     * This function explicitly flushes the logger.
+     */
+    inline void shutdown()
+    {
+        auto logger = spdlog::get("logger-file");
+        if (logger) {
+            logger->flush();
+        }
+        spdlog::shutdown();
+    }
+
+    /**
      * @brief Log a message with a specific log level.
      *
      * This functions must be called in the form of
