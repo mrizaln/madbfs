@@ -156,7 +156,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Mknod req)
     {
         const auto& [path, mode, dev] = req;
-        log_d({ "mknod: path={:?}" }, path.data());
+        log_d({ "mknod: path={:?} mode={:#08o} dev={:#04x}" }, path.data(), mode, dev);
 
         if (::mknod(path.data(), mode, dev) < 0) {
             return status_from_errno(__func__, path, "failed to create file");
@@ -168,7 +168,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Mkdir req)
     {
         const auto& [path, mode] = req;
-        log_d({ "mkdir: path={:?}" }, path.data());
+        log_d({ "mkdir: path={:?} mode={:#08o}" }, path.data(), mode);
 
         if (::mkdir(path.data(), mode) < 0) {
             return status_from_errno(__func__, path, "failed to create directory");
@@ -225,7 +225,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Truncate req)
     {
         const auto& [path, size] = req;
-        log_d({ "truncate: path={:?}" }, path.data());
+        log_d({ "truncate: path={:?} size={}" }, path.data(), size);
 
         if (::truncate(path.data(), size) < 0) {
             return status_from_errno(__func__, path, "failed to truncate file");
@@ -237,7 +237,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Read req)
     {
         const auto& [path, offset, size] = req;
-        log_d({ "read: path={:?} size={}" }, path.data(), size);
+        log_d({ "read: path={:?} offset={} size={}" }, path.data(), offset, size);
 
         auto fd = ::open(path.data(), O_RDONLY);
         if (fd < 0) {
@@ -269,7 +269,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Write req)
     {
         const auto& [path, offset, in] = req;
-        log_d({ "write: path={:?} size={}" }, path.data(), in.size());
+        log_d({ "write: path={:?} offset={}, size={}" }, path.data(), offset, in.size());
 
         auto fd = ::open(path.data(), O_WRONLY);
         if (fd < 0) {
@@ -297,7 +297,8 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Utimens req)
     {
         const auto& [path, atime, mtime] = req;
-        log_d({ "utimens: path={:?}" }, path.data());
+        auto to_pair = [](timespec time) { return std::pair{ time.tv_sec, time.tv_nsec }; };
+        log_d({ "utimens: path={:?} atime={} mtime={}" }, path.data(), to_pair(atime), to_pair(mtime));
 
         auto times = Array{ atime, mtime };
         if (::utimensat(0, path.data(), times.data(), AT_SYMLINK_NOFOLLOW) < 0) {
