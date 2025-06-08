@@ -86,14 +86,23 @@ namespace madbfs::data
 
     usize Page::write(Span<const char> in, usize offset)
     {
-        if (offset >= m_page_size) {
-            log_w({ "{}: offset exceed page size [{} vs {}]" }, __func__, offset, m_page_size);
+        if (offset >= m_page_size) [[unlikely]] {
+            // NOTE: getting here is a bug in implementation
+            log_c({ "{}: [BUG] offset exceed page size [{} vs {}]" }, __func__, offset, m_page_size);
             return 0;
         }
-        auto size = std::min(static_cast<u32>(offset + in.size()), m_page_size);
-        std::copy_n(in.data(), in.size(), m_data.get() + offset);
-        m_size = size;
-        return in.size();
+
+        auto end = static_cast<u32>(offset + in.size());
+        if (end > m_page_size) [[unlikely]] {
+            // NOTE: getting here is a bug in implementation
+            log_c({ "{}: [BUG] offset + size exceed page size [{} vs {}]" }, __func__, end, m_page_size);
+            end = std::min(end, m_page_size);
+        }
+
+        std::copy_n(in.data(), end - offset, m_data.get() + offset);
+        m_size = std::max(end, m_size);
+
+        return end - offset;
     }
 
     usize Page::size() const
