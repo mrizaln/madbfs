@@ -1,5 +1,6 @@
 #pragma once
 
+#include "madbfs-common/util/split.hpp"
 #include "madbfs/connection/connection.hpp"
 
 #define FUSE_USE_VERSION 31
@@ -179,34 +180,53 @@ namespace madbfs::args
     {
         namespace fs = std::filesystem;
 
-        auto path = fs::current_path() / "madbfs-server";
-        if (fs::exists(path) and fs::is_regular_file(path)) {
-            return path;
-        }
-        fmt::println("[madbfs] no server in current working directory {}", path.c_str());
+        constexpr auto server_name = "madbfs-server";
 
-        path = exec_path / "madbfs-server";
-        if (fs::exists(path) and fs::is_regular_file(path)) {
-            return path;
-        }
-        fmt::println("[madbfs] no server in executable parent directory {}", path.c_str());
+        auto candidates = Vec<fs::path>{};
+        candidates.push_back(fs::current_path() / server_name);
 
-        if (not fs::is_symlink(exec_path)) {
-            return std::nullopt;
+        // search in PATH
+        if (exec_path.filename() == exec_path and not exec_path.string().starts_with("./")) {
+            auto path_env = ::getenv("PATH");
+            if (path_env != nullptr) {
+                auto splitter = util::StringSplitter{ path_env, ':' };
+                while (auto path = splitter.next()) {
+                    auto file = std::filesystem::path{ *path } / exec_path.filename();
+                    if (not fs::exists(file)) {
+                        continue;
+                    }
+                    candidates.push_back(file.parent_path() / server_name);
+                    while (fs::is_symlink(file)) {
+                        auto read = fs::read_symlink(file);
+                        if (read.is_relative()) {
+                            read = file.parent_path() / read;
+                        }
+                        file = read;
+                        candidates.push_back(file.parent_path() / server_name);
+                    }
+                }
+            }
+        } else {
+            auto file = fs::absolute(exec_path);
+            candidates.push_back(file.parent_path() / server_name);
+            while (fs::is_symlink(file)) {
+                auto read = fs::read_symlink(file);
+                if (read.is_relative()) {
+                    read = file.parent_path() / read;
+                }
+                file = read;
+                candidates.push_back(file.parent_path() / server_name);
+            }
         }
 
-        path = fs::read_symlink(exec_path);
-        fmt::println("[madbfs] executable is a symlink to {}", path.c_str());
-
-        if (not path.has_parent_path()) {
-            return std::nullopt;
+        auto file = fs::path{};
+        for (auto candidate : candidates) {
+            if (fs::exists(candidate) and fs::is_regular_file(candidate)) {
+                file = candidate;
+                return file;
+            }
+            fmt::println("[madbfs] candidate not exist or not regular file: {}", candidate.c_str());
         }
-
-        path = path.parent_path() / "madbfs-server";
-        if (fs::exists(path) and fs::is_regular_file(path)) {
-            return path;
-        }
-        fmt::println("[madbfs] no server in executable parent directory (real) {}", path.c_str());
 
         return std::nullopt;
     }
@@ -302,8 +322,7 @@ namespace madbfs::args
             fmt::println("[madbfs] no-server flag specified, won't launch server");
         } else if (madbfs_opt.server == nullptr) {
             fmt::println("[madbfs] server is not specified, attempting to search...");
-            auto exec_path = std::filesystem::path{ argv[0] == nullptr ? "." : argv[0] };
-            exec_path      = std::filesystem::absolute(exec_path);
+            auto exec_path = std::filesystem::path{ argv[0] == nullptr ? "madbfs" : argv[0] };
             server         = get_server_path(exec_path);
             if (server) {
                 fmt::println("[madbfs] server is found: {}", server->c_str());
