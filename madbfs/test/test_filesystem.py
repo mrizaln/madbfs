@@ -520,8 +520,8 @@ def test_filesystem(environ):
         call(tst_chown)
         call(tst_utimens)
         call(tst_link)
-        # call(tst_truncate_path)   # FIX: cache should handle truncation also
-        # call(tst_truncate_fd)     # FIX: cache should handle truncation also
+        call(tst_truncate_path)
+        call(tst_truncate_fd)
         # call(tst_open_unlink)     # FIX: cache should be aware of rename operation (unlink while opening rename the file into .fuse_hiddenXXXX...)
     except:
         # NOTE: if tests are failing, the work_dir might not be cleaned up correctly. I

@@ -38,6 +38,7 @@ namespace madbfs::data
 
         usize read(Span<char> out, usize offset);
         usize write(Span<const char> in, usize offset);
+        usize truncate(usize size);
 
         usize size() const;
 
@@ -77,7 +78,12 @@ namespace madbfs::data
         AExpect<usize> write(Id id, path::Path path, Span<const char> in, off_t offset);
         AExpect<void>  flush(Id id, usize size);
 
-        void invalidate();
+        AExpect<void> truncate(Id id, usize old_size, usize new_size);
+        AExpect<void> rename(Id id, path::Path new_name);
+
+        void invalidate_one(Id id);
+        void invalidate_all();
+
         void set_page_size(usize new_page_size);
         void set_max_pages(usize new_max_pages);
 

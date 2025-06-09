@@ -351,10 +351,21 @@ namespace madbfs::tree
         if (auto may_file = regular_file_prelude(); not may_file) {
             co_return Unexpect{ may_file.error() };
         }
-        co_return (co_await context.connection.truncate(context.path, size)).transform([&] {
-            m_stat.size = size;
-            refresh_stat({ .tv_sec = 0, .tv_nsec = UTIME_OMIT }, { .tv_sec = 0, .tv_nsec = UTIME_NOW });
-        });
+
+        if (auto res = co_await context.connection.truncate(context.path, size); not res) {
+            co_return Unexpect{ res.error() };
+        }
+
+        auto old_size = static_cast<usize>(m_stat.size);
+        auto new_size = static_cast<usize>(size);
+
+        // error from Cache::truncate are from eviction only, which should not matter for this file
+        std::ignore = co_await context.cache.truncate(id(), old_size, new_size);
+
+        m_stat.size = size;
+        refresh_stat({ .tv_sec = 0, .tv_nsec = UTIME_OMIT }, { .tv_sec = 0, .tv_nsec = UTIME_NOW });
+
+        co_return Expect<void>{};
     }
 
     AExpect<u64> Node::open(Context context, int flags)

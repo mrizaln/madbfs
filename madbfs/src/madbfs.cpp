@@ -177,7 +177,7 @@ namespace madbfs
                 return boost::json::value{ json };
             },
             [&](ipc::InvalidateCache) {
-                m_cache.invalidate();
+                m_cache.invalidate_all();
                 return boost::json::value{};
             },
             [&](ipc::SetPageSize size) {

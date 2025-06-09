@@ -105,6 +105,11 @@ namespace madbfs::data
         return end - offset;
     }
 
+    usize Page::truncate(usize size)
+    {
+        return m_size = std::min(static_cast<u32>(size), m_page_size);
+    }
+
     usize Page::size() const
     {
         return m_size;
@@ -311,7 +316,8 @@ namespace madbfs::data
     {
         auto num_pages = size / m_page_size + (size % m_page_size != 0);
 
-        // for (auto index : sv::iota(0uz, num_pages)) {
+        log_d({ "{}: start flush [id={}|idx={} - {}]" }, __func__, id.inner(), 0, num_pages - 1);
+
         auto work = [&](usize index) noexcept -> AExpect<void> {
             log_d({ "flush: flush [id={}|idx={}]" }, id.inner(), index);
 
@@ -354,7 +360,71 @@ namespace madbfs::data
         co_return Expect<void>{};
     }
 
-    void Cache::invalidate()
+    AExpect<void> Cache::truncate(Id id, usize old_size, usize new_size)
+    {
+        auto map_entry = m_path_map.find(id);
+        if (map_entry == m_path_map.end()) {
+            co_return Expect<void>{};
+        }
+
+        auto old_num_pages = old_size / m_page_size + (old_size % m_page_size != 0);
+        auto new_num_pages = new_size / m_page_size + (new_size % m_page_size != 0);
+
+        map_entry->second.count += old_size > new_size ? old_num_pages - new_num_pages
+                                                       : new_num_pages - old_num_pages;
+
+        auto num_pages = std::max(old_num_pages, new_num_pages);
+        auto off_pages = std::min(old_num_pages, new_num_pages);
+
+        log_d(
+            { "{}: start [id={}|idx={} - {}|old_pages={}|new_pages={}]" },
+            __func__,
+            id.inner(),
+            off_pages > 0 ? off_pages - 1 : 0,
+            num_pages - 1,
+            old_num_pages,
+            new_num_pages
+        );
+
+        for (auto index : sv::iota(off_pages > 0 ? off_pages - 1 : 0, num_pages)) {
+            log_d({ "{}: [id={}|idx={}]" }, __func__, id.inner(), index);
+
+            auto key = PageKey{ id, index };
+            if (index < old_num_pages - 1) {    // shrink
+                if (auto entry = m_table.extract(key); entry) {
+                    auto [_, page] = *entry;
+                    m_lru.erase(page);
+                }
+            } else if (index > old_num_pages - 1) {    // grow
+                auto rem_size = new_size - index * m_page_size;
+                if (rem_size > m_page_size) {
+                    rem_size = m_page_size;
+                }
+                m_lru.emplace_front(key, std::make_unique<char[]>(m_page_size), rem_size, m_page_size);
+                m_table.emplace(key, m_lru.begin());
+
+                if (m_table.size() > m_max_pages) {
+                    co_await evict(m_table.size() - m_max_pages);
+                }
+            } else {
+                auto entry = m_table.find(key);
+                if (entry == m_table.end()) {
+                    break;
+                }
+
+                const auto& [_, page] = *entry;
+                if (index == num_pages - 1) {
+                    page->truncate((new_size - 1) % m_page_size + 1);
+                } else {
+                    page->truncate(m_page_size);
+                }
+            }
+        }
+
+        co_return Expect<void>{};
+    }
+
+    void Cache::invalidate_all()
     {
         m_table.clear();
         m_lru.clear();
