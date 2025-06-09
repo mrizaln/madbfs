@@ -5,11 +5,10 @@
 #include "madbfs/data/stat.hpp"
 #include "madbfs/path/path.hpp"
 
-#include <ankerl/unordered_dense.h>
-
 #include <algorithm>
 #include <atomic>
 #include <functional>
+#include <unordered_set>
 
 namespace madbfs::tree
 {
@@ -87,16 +86,14 @@ namespace madbfs::tree
         struct NodeHash
         {
             using is_transparent = void;
-            using is_avalanching = void;
 
-            u64 operator()(Str str) const { return ankerl::unordered_dense::hash<Str>{}(str); }
-            u64 operator()(const Uniq<Node>& node) const;
+            usize operator()(Str str) const { return std::hash<Str>{}(str); }
+            usize operator()(const Uniq<Node>& node) const;
         };
 
         struct NodeEq
         {
             using is_transparent = void;
-            using is_avalanching = void;
 
             bool operator()(Str lhs, Str rhs) const { return lhs == rhs; }
             bool operator()(Str lhs, const Uniq<Node>& rhs) const;
@@ -105,7 +102,7 @@ namespace madbfs::tree
         };
 
         // NOTE: use with caution, Node::m_name field must not be modified unless the node is extracted
-        using List = ankerl::unordered_dense::set<Uniq<Node>, NodeHash, NodeEq>;
+        using List = std::unordered_set<Uniq<Node>, NodeHash, NodeEq>;
 
         Directory() = default;
 

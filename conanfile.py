@@ -11,7 +11,6 @@ class Recipe(ConanFile):
         "libfuse/3.16.2",
         "rapidhash/1.0",
         "spdlog/1.15.1",
-        "unordered_dense/4.5.0",
     ]
     test_requires = ["boost-ext-ut/1.1.9"]
 

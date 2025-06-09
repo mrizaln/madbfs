@@ -5,12 +5,12 @@
 
 #include <madbfs-common/async/async.hpp>
 
-#include <ankerl/unordered_dense.h>
 #include <saf.hpp>
 
 #include <cassert>
 #include <list>
 #include <map>
+#include <unordered_map>
 
 namespace madbfs::connection
 {
@@ -63,8 +63,8 @@ namespace madbfs::data
         struct LookupEntry;
 
         using Lru    = std::list<Page>;
-        using Lookup = ankerl::unordered_dense::map<Id, LookupEntry>;
-        using Queue  = ankerl::unordered_dense::map<PageKey, saf::shared_future<Errc>>;
+        using Lookup = std::unordered_map<Id, LookupEntry>;
+        using Queue  = std::unordered_map<PageKey, saf::shared_future<Errc>>;
 
         struct LookupEntry
         {

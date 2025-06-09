@@ -26,16 +26,19 @@ namespace madbfs::tree
 
     Expect<Ref<Node>> Directory::find(Str name) const
     {
-        auto found = m_children.find(name);
-        if (found == m_children.end()) {
-            return Unexpect{ Errc::no_such_file_or_directory };
+        if (auto found = m_children.find(name); found != m_children.end()) {
+            return *found->get();
         }
-        return *found->get();
+        return Unexpect{ Errc::no_such_file_or_directory };
     }
 
     bool Directory::erase(Str name)
     {
-        return m_children.erase(name) > 0;
+        if (auto found = m_children.find(name); found != m_children.end()) {
+            m_children.erase(found);
+            return true;
+        }
+        return false;
     }
 
     Expect<Pair<Ref<Node>, Uniq<Node>>> Directory::insert(Uniq<Node> node, bool overwrite)
@@ -47,7 +50,7 @@ namespace madbfs::tree
 
         auto released = Uniq<Node>{};
         if (found != m_children.end()) {
-            released = m_children.extract(found);
+            released = std::move(m_children.extract(found).value());
         }
 
         auto [back, _] = m_children.emplace(std::move(node));
@@ -56,11 +59,10 @@ namespace madbfs::tree
 
     Expect<Uniq<Node>> Directory::extract(Str name)
     {
-        auto found = m_children.find(name);
-        if (found == m_children.end()) {
-            return Unexpect{ Errc::no_such_file_or_directory };
+        if (auto found = m_children.find(name); found != m_children.end()) {
+            return std::move(m_children.extract(found).value());
         }
-        return m_children.extract(found);
+        return Unexpect{ Errc::no_such_file_or_directory };
     }
 }
 

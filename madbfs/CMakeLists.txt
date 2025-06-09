@@ -23,12 +23,7 @@ target_sources(
 )
 target_link_libraries(
     madbfs-lib
-    PUBLIC
-        madbfs-common
-        fetch::linr
-        boost::boost
-        libfuse::libfuse
-        unordered_dense::unordered_dense
+    PUBLIC madbfs-common fetch::linr boost::boost libfuse::libfuse
 )
 target_include_directories(madbfs-lib PUBLIC include)
 

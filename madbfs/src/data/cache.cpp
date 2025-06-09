@@ -442,7 +442,7 @@ namespace madbfs::data
     Await<void> Cache::invalidate_one(Id id, bool should_flush)
     {
         auto entry = m_table.extract(id);
-        if (not entry) {
+        if (entry.empty()) {
             co_return;
         }
 
@@ -453,7 +453,7 @@ namespace madbfs::data
             }
         }
 
-        for (auto [_, page] : entry->second.pages) {
+        for (auto [_, page] : entry.mapped().pages) {
             m_lru.erase(page);
         }
     }
@@ -478,6 +478,7 @@ namespace madbfs::data
         log_i({ "{}: max pages can be stored changed to: {}" }, __func__, new_max_pages);
     }
 
+    // NOTE: std::unordered_map guarantees reference of its element valid even if new value inserted
     Opt<Ref<Cache::LookupEntry>> Cache::lookup(Id id, Opt<path::Path> path)
     {
         auto entries = m_table.find(id);
