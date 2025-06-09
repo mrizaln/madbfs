@@ -78,10 +78,9 @@ namespace madbfs::data
         AExpect<usize> read(Id id, path::Path path, Span<char> out, off_t offset);
         AExpect<usize> write(Id id, path::Path path, Span<const char> in, off_t offset);
         AExpect<void>  flush(Id id);
+        AExpect<void>  truncate(Id id, usize old_size, usize new_size);
 
-        AExpect<void> truncate(Id id, usize old_size, usize new_size);
-        AExpect<void> rename(Id id, path::Path new_name);
-
+        Await<void> rename(Id id, path::Path new_name);
         Await<void> invalidate_one(Id id, bool should_flush);
         Await<void> invalidate_all();
         Await<void> shutdown();

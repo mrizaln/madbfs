@@ -313,7 +313,13 @@ namespace madbfs::tree
         if (not res) {
             co_return Unexpect{ res.error() };
         }
-        co_return co_await context.connection.unlink(context.path);
+
+        if (auto res = co_await context.connection.unlink(context.path); not res) {
+            co_return Unexpect{ res.error() };
+        }
+
+        co_await context.cache.invalidate_one(id(), false);
+        co_return Expect<void>{};
     }
 
     AExpect<void> Node::rmdir(Context context)

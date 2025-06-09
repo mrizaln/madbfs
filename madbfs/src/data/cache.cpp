@@ -420,6 +420,15 @@ namespace madbfs::data
         co_return Expect<void>{};
     }
 
+    Await<void> Cache::rename(Id id, path::Path new_name)
+    {
+        // TODO: wait queue if any
+        if (auto found = m_table.find(id); found != m_table.end()) {
+            found->second.path = new_name.into_buf();
+        }
+        co_return;
+    }
+
     Await<void> Cache::shutdown()
     {
         for (auto id : m_table | sv::keys) {

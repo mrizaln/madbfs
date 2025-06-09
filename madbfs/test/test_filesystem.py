@@ -522,7 +522,7 @@ def test_filesystem(environ):
         call(tst_link)
         call(tst_truncate_path)
         call(tst_truncate_fd)
-        # call(tst_open_unlink)     # FIX: cache should be aware of rename operation (unlink while opening rename the file into .fuse_hiddenXXXX...)
+        call(tst_open_unlink)
     except:
         # NOTE: if tests are failing, the work_dir might not be cleaned up correctly. I
         # won't clean them up here since I might want to inspect the file in the work_dir

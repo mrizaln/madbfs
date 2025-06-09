@@ -242,6 +242,11 @@ namespace madbfs::tree
             co_return Unexpect{ from_node.error() };
         }
 
+        auto to_parent = co_await traverse_or_build(to.parent_path());
+        if (not to_parent.has_value()) {
+            co_return Unexpect{ to_parent.error() };
+        }
+
         if ((flags & RENAME_EXCHANGE) != 0) {
             auto to_node = co_await traverse_or_build(to);
             if (not to_node.has_value()) {
@@ -256,27 +261,34 @@ namespace madbfs::tree
             }
         }
 
-        co_return (co_await m_connection.rename(from, to, flags))
-            .transform([&] { return std::ref(*from_node->get().parent()); })    // non-root (always exists)
-            .and_then(proj(&Node::extract, from.filename()))
-            .and_then([&](Uniq<Node>&& node) {
-                return traverse(to.parent_path()).and_then([&](Node& to_parent) {
-                    node->set_name(to.filename());
-                    node->set_parent(&to_parent);
-                    return to_parent.insert(std::move(node), true);
-                });
-            })
-            .transform([&](Pair<Ref<Node>, Uniq<Node>> overwritten) {
-                if ((flags & RENAME_EXCHANGE) != 0) {
-                    assert(overwritten.second != nullptr);
-                    auto parent = from_node->get().parent();
-                    auto node   = std::move(overwritten).second;
-                    node->set_name(from.filename());
-                    node->set_parent(parent);
-                    auto res = parent->insert(std::move(node), false);
-                    assert(res->second == nullptr);    // has extracted before
-                }
-            });
+        auto res = co_await m_connection.rename(from, to, flags);
+        if (not res) {
+            co_return Unexpect{ res.error() };
+        }
+
+        auto node = from_node->get().parent()->extract(from.filename()).value();
+        co_await m_cache.rename(node->id(), to);
+
+        node->set_name(to.filename());
+        node->set_parent(&to_parent->get());
+        auto overwritten = to_parent->get().insert(std::move(node), true).value();
+
+        if ((flags & RENAME_EXCHANGE) != 0) {
+            assert(overwritten.second != nullptr);
+            auto parent = from_node->get().parent();
+            auto node   = std::move(overwritten).second;
+
+            co_await m_cache.rename(node->id(), from);
+            node->set_name(from.filename());
+            node->set_parent(parent);
+
+            auto res = parent->insert(std::move(node), false);
+            assert(res->second == nullptr);    // has extracted before
+        } else if (overwritten.second != nullptr) {
+            co_await m_cache.invalidate_one(overwritten.second->id(), false);
+        }
+
+        co_return Expect<void>{};
     }
 
     AExpect<void> FileTree::truncate(path::Path path, off_t size)
