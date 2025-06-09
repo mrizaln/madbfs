@@ -10,6 +10,7 @@
 
 #include <cassert>
 #include <list>
+#include <map>
 
 namespace madbfs::connection
 {
@@ -59,29 +60,29 @@ namespace madbfs::data
     class Cache
     {
     public:
-        struct PathEntry;
+        struct LookupEntry;
 
-        using Lru     = std::list<Page>;
-        using Lookup  = ankerl::unordered_dense::map<PageKey, Lru::iterator>;
-        using Queue   = ankerl::unordered_dense::map<PageKey, saf::shared_future<Errc>>;
-        using PathMap = ankerl::unordered_dense::map<Id, PathEntry>;
+        using Lru    = std::list<Page>;
+        using Lookup = ankerl::unordered_dense::map<Id, LookupEntry>;
+        using Queue  = ankerl::unordered_dense::map<PageKey, saf::shared_future<Errc>>;
 
-        struct PathEntry
+        struct LookupEntry
         {
-            usize         count;
-            path::PathBuf path;
+            std::map<usize, Lru::iterator> pages;
+            path::PathBuf                  path;
+            bool                           dirty = false;
         };
 
         Cache(connection::Connection& connection, usize page_size, usize max_pages);
 
         AExpect<usize> read(Id id, path::Path path, Span<char> out, off_t offset);
         AExpect<usize> write(Id id, path::Path path, Span<const char> in, off_t offset);
-        AExpect<void>  flush(Id id, usize size);
+        AExpect<void>  flush(Id id);
 
         AExpect<void> truncate(Id id, usize old_size, usize new_size);
         AExpect<void> rename(Id id, path::Path new_name);
 
-        Await<void> invalidate_one(Id id);
+        Await<void> invalidate_one(Id id, bool should_flush);
         Await<void> invalidate_all();
         Await<void> shutdown();
 
@@ -92,6 +93,8 @@ namespace madbfs::data
         usize max_pages() const { return m_max_pages; }
 
     private:
+        Opt<Ref<LookupEntry>> lookup(Id id, Opt<path::Path> path);
+
         AExpect<usize> on_miss(Id id, Span<char> out, off_t offset);
         AExpect<usize> on_flush(Id id, Span<const char> in, off_t offset);
 
@@ -99,10 +102,9 @@ namespace madbfs::data
 
         connection::Connection& m_connection;
 
-        Lru     m_lru;      // most recently used is at the front
-        Lookup  m_table;    // lookup table for fast page access
-        Queue   m_queue;    // pages that are still pulling data, reader/writer should wait using this
-        PathMap m_path_map;
+        Lru    m_lru;      // most recently used is at the front
+        Lookup m_table;    // lookup table for fast page access
+        Queue  m_queue;    // pages that are still pulling data, reader/writer should wait using this
 
         usize m_page_size = 0;
         usize m_max_pages = 0;

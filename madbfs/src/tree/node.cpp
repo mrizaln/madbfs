@@ -440,8 +440,7 @@ namespace madbfs::tree
         }
 
         file.set_dirty(false);
-        auto filesize = static_cast<usize>(stat()->get().size);
-        co_return co_await context.cache.flush(id(), filesize);
+        co_return co_await context.cache.flush(id());
     }
 
     AExpect<void> Node::release(Context context, u64 fd)
@@ -459,8 +458,7 @@ namespace madbfs::tree
             co_return Expect<void>{};    // no write, do nothing
         }
         file.set_dirty(false);
-        auto filesize = static_cast<usize>(stat()->get().size);
-        co_return co_await context.cache.flush(id(), filesize);
+        co_return co_await context.cache.flush(id());
     }
 
     AExpect<void> Node::utimens(Context context, timespec atime, timespec mtime)
