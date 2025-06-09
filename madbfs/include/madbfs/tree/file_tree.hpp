@@ -66,6 +66,8 @@ namespace madbfs::tree
         // this function only used to link already existing files, user can't use it
         Expect<void> symlink(path::Path path, path::Path target);
 
+        Await<void> shutdown();
+
         const Node& root() const { return m_root; }
 
     private:

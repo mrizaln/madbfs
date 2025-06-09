@@ -81,11 +81,12 @@ namespace madbfs::data
         AExpect<void> truncate(Id id, usize old_size, usize new_size);
         AExpect<void> rename(Id id, path::Path new_name);
 
-        void invalidate_one(Id id);
-        void invalidate_all();
+        Await<void> invalidate_one(Id id);
+        Await<void> invalidate_all();
+        Await<void> shutdown();
 
-        void set_page_size(usize new_page_size);
-        void set_max_pages(usize new_max_pages);
+        Await<void> set_page_size(usize new_page_size);
+        Await<void> set_max_pages(usize new_max_pages);
 
         usize page_size() const { return m_page_size; }
         usize max_pages() const { return m_max_pages; }

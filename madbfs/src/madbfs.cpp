@@ -154,6 +154,9 @@ namespace madbfs
 
     Madbfs::~Madbfs()
     {
+        auto fut = async::spawn(m_async_ctx, m_tree.shutdown(), async::use_future);
+        fut.wait();
+
         m_work_guard.reset();
         m_async_ctx.stop();
         m_work_thread.join();
@@ -177,19 +180,22 @@ namespace madbfs
                 return boost::json::value{ json };
             },
             [&](ipc::InvalidateCache) {
-                m_cache.invalidate_all();
+                auto fut = async::spawn(m_async_ctx, m_cache.invalidate_all(), async::use_future);
+                fut.wait();
                 return boost::json::value{};
             },
             [&](ipc::SetPageSize size) {
                 auto old_size = m_cache.page_size();
                 auto new_size = std::bit_ceil(size.kib * 1024);
                 new_size      = std::clamp(new_size, lowest_page_size, highest_page_size);
-                m_cache.set_page_size(new_size);
+                auto fut      = async::spawn(m_async_ctx, m_cache.set_page_size(new_size), async::use_future);
+                fut.wait();
 
                 auto old_max = m_cache.max_pages();
                 auto new_max = std::bit_ceil(old_max * old_size / new_size);
                 new_max      = std::max(new_max, lowest_max_pages);
-                m_cache.set_max_pages(new_max);
+                fut          = async::spawn(m_async_ctx, m_cache.set_max_pages(new_max), async::use_future);
+                fut.wait();
 
                 auto json              = boost::json::object{};
                 json["old_page_size"]  = old_size / 1024;
@@ -207,7 +213,8 @@ namespace madbfs
                 auto old_max = m_cache.max_pages();
                 auto new_max = std::bit_ceil(size.mib * 1024 * 1024 / page);
                 new_max      = std::max(new_max, lowest_max_pages);
-                m_cache.set_max_pages(new_max);
+                auto fut     = async::spawn(m_async_ctx, m_cache.set_max_pages(new_max), async::use_future);
+                fut.wait();
 
                 auto json              = boost::json::object{};
                 json["old_cache_size"] = old_max * page / 1024 / 1024;

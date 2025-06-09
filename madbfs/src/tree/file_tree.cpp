@@ -384,4 +384,9 @@ namespace madbfs::tree
             .and_then(proj(&Node::symlink, path.filename(), &target_node->get()))
             .transform(sink_void);
     }
+
+    Await<void> FileTree::shutdown()
+    {
+        co_await m_cache.shutdown();
+    }
 }

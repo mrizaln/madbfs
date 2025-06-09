@@ -161,8 +161,7 @@ namespace madbfs::data
                 auto future  = promise.get_future().share();
                 m_queue.emplace(key, std::move(future));
 
-                auto map_entry = m_path_map.find(id);
-                if (map_entry == m_path_map.end()) {
+                if (auto map_entry = m_path_map.find(id); map_entry == m_path_map.end()) {
                     m_path_map.emplace(id, PathEntry{ 1uz, path.into_buf() });
                 } else {
                     ++map_entry->second.count;
@@ -252,8 +251,7 @@ namespace madbfs::data
                 }
             }
 
-            auto map_entry = m_path_map.find(id);
-            if (map_entry == m_path_map.end()) {
+            if (auto map_entry = m_path_map.find(id); map_entry == m_path_map.end()) {
                 m_path_map.emplace(id, PathEntry{ 1uz, path.into_buf() });
             } else {
                 ++map_entry->second.count;
@@ -316,10 +314,10 @@ namespace madbfs::data
     {
         auto num_pages = size / m_page_size + (size % m_page_size != 0);
 
-        log_d({ "{}: start flush [id={}|idx={} - {}]" }, __func__, id.inner(), 0, num_pages - 1);
+        log_d({ "{}: start [id={}|idx={} - {}]" }, __func__, id.inner(), 0, num_pages - 1);
 
         auto work = [&](usize index) noexcept -> AExpect<void> {
-            log_d({ "flush: flush [id={}|idx={}]" }, id.inner(), index);
+            log_d({ "flush: [id={}|idx={}]" }, id.inner(), index);
 
             auto key = PageKey{ id, index };
 
@@ -362,16 +360,12 @@ namespace madbfs::data
 
     AExpect<void> Cache::truncate(Id id, usize old_size, usize new_size)
     {
-        auto map_entry = m_path_map.find(id);
-        if (map_entry == m_path_map.end()) {
+        if (auto map_entry = m_path_map.find(id); map_entry == m_path_map.end()) {
             co_return Expect<void>{};
         }
 
         auto old_num_pages = old_size / m_page_size + (old_size % m_page_size != 0);
         auto new_num_pages = new_size / m_page_size + (new_size % m_page_size != 0);
-
-        map_entry->second.count += old_size > new_size ? old_num_pages - new_num_pages
-                                                       : new_num_pages - old_num_pages;
 
         auto num_pages = std::max(old_num_pages, new_num_pages);
         auto off_pages = std::min(old_num_pages, new_num_pages);
@@ -394,6 +388,11 @@ namespace madbfs::data
                 if (auto entry = m_table.extract(key); entry) {
                     auto [_, page] = *entry;
                     m_lru.erase(page);
+
+                    auto map_entry = m_path_map.find(id);
+                    if (map_entry != m_path_map.end() and --map_entry->second.count == 0) {
+                        m_path_map.erase(map_entry);
+                    }
                 }
             } else if (index > old_num_pages - 1) {    // grow
                 auto rem_size = new_size - index * m_page_size;
@@ -402,6 +401,10 @@ namespace madbfs::data
                 }
                 m_lru.emplace_front(key, std::make_unique<char[]>(m_page_size), rem_size, m_page_size);
                 m_table.emplace(key, m_lru.begin());
+
+                auto map_entry = m_path_map.find(id);
+                assert(map_entry != m_path_map.end());
+                ++map_entry->second.count;
 
                 if (m_table.size() > m_max_pages) {
                     co_await evict(m_table.size() - m_max_pages);
@@ -424,35 +427,47 @@ namespace madbfs::data
         co_return Expect<void>{};
     }
 
-    void Cache::invalidate_all()
+    Await<void> Cache::shutdown()
     {
-        m_table.clear();
-        m_lru.clear();
+        for (const auto& [id, entry] : m_path_map) {
+            if (auto res = co_await flush(id, entry.count * m_page_size); not res) {
+                auto msg = std::make_error_code(res.error()).message();
+                log_e({ "{}: failed to flush {}: {}" }, __func__, id.inner(), msg);
+            }
+        }
+        co_await evict(m_lru.size());
         m_queue.clear();
-        m_path_map.clear();
 
+        log_d({ "{}: m_path_map size: {}" }, __func__, m_path_map.size());
+        for (const auto& [id, entry] : m_path_map) {
+            auto path = entry.path.as_path().fullpath();
+            log_d({ "{}:     {}: [{}] {}" }, __func__, id.inner(), entry.count, path);
+        }
+    }
+
+    Await<void> Cache::invalidate_one(Id id)
+    {
+        // TODO: implement
+        std::terminate();
+    }
+
+    Await<void> Cache::invalidate_all()
+    {
+        co_await shutdown();
         log_i({ "{}: cache invalidated" }, __func__);
     }
 
-    void Cache::set_page_size(usize new_page_size)
+    Await<void> Cache::set_page_size(usize new_page_size)
     {
+        co_await shutdown();
         m_page_size = new_page_size;
-        m_table.clear();
-        m_lru.clear();
-        m_queue.clear();
-        m_path_map.clear();
-
         log_i({ "{}: page size changed to: {}" }, __func__, new_page_size);
     }
 
-    void Cache::set_max_pages(usize new_max_pages)
+    Await<void> Cache::set_max_pages(usize new_max_pages)
     {
+        co_await shutdown();
         m_max_pages = new_max_pages;
-        m_table.clear();
-        m_lru.clear();
-        m_queue.clear();
-        m_path_map.clear();
-
         log_i({ "{}: max pages can be stored changed to: {}" }, __func__, new_max_pages);
     }
 
@@ -486,19 +501,19 @@ namespace madbfs::data
     {
         while (size-- > 0 and not m_lru.empty()) {
             auto page = std::move(m_lru.back());
+
             m_lru.pop_back();
             m_table.erase(page.key());
 
-            if (not page.is_dirty()) {
-                continue;
-            }
-
             auto [id, idx] = page.key();
-            log_i({ "{}: force push page [id={}|idx={}]" }, __func__, id.inner(), idx);
 
-            auto offset = static_cast<off_t>(idx * m_page_size);
-            if (auto res = co_await on_flush(id, page.buf(), offset); not res) {
-                log_c({ "{}: failed to force push page [id={}|idx={}" }, __func__, id.inner(), idx);
+            if (page.is_dirty()) {
+                log_i({ "{}: force push page [id={}|idx={}]" }, __func__, id.inner(), idx);
+
+                auto offset = static_cast<off_t>(idx * m_page_size);
+                if (auto res = co_await on_flush(id, page.buf(), offset); not res) {
+                    log_c({ "{}: failed to force push page [id={}|idx={}" }, __func__, id.inner(), idx);
+                }
             }
 
             auto found = m_path_map.find(id);
