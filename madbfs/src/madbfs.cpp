@@ -162,7 +162,7 @@ namespace madbfs
         m_work_thread.join();
     }
 
-    boost::json::value Madbfs::ipc_handler(data::ipc::Op op)
+    Await<boost::json::value> Madbfs::ipc_handler(data::ipc::Op op)
     {
         namespace ipc = data::ipc;
 
@@ -171,63 +171,60 @@ namespace madbfs
         constexpr usize lowest_max_pages  = 128;
 
         auto overload = util::Overload{
-            [&](ipc::Help) {
+            [&](ipc::Help) -> Await<boost::json::value> {
                 auto json          = boost::json::object{};
                 json["operations"] = {
                     "help",          "invalidate_cache", "set_page_size",
                     "get_page_size", "set_cache_size",   "get_cache_size",
                 };
-                return boost::json::value{ json };
+                co_return boost::json::value{ json };
             },
-            [&](ipc::InvalidateCache) {
-                auto fut = async::spawn(m_async_ctx, m_cache.invalidate_all(), async::use_future);
-                fut.wait();
-                return boost::json::value{};
+            [&](ipc::InvalidateCache) -> Await<boost::json::value> {
+                co_await m_cache.invalidate_all();
+                co_return boost::json::value{};
             },
-            [&](ipc::SetPageSize size) {
+            [&](ipc::SetPageSize size) -> Await<boost::json::value> {
                 auto old_size = m_cache.page_size();
                 auto new_size = std::bit_ceil(size.kib * 1024);
                 new_size      = std::clamp(new_size, lowest_page_size, highest_page_size);
-                auto fut      = async::spawn(m_async_ctx, m_cache.set_page_size(new_size), async::use_future);
-                fut.wait();
+                co_await m_cache.set_page_size(new_size);
 
                 auto old_max = m_cache.max_pages();
                 auto new_max = std::bit_ceil(old_max * old_size / new_size);
                 new_max      = std::max(new_max, lowest_max_pages);
-                fut          = async::spawn(m_async_ctx, m_cache.set_max_pages(new_max), async::use_future);
-                fut.wait();
+                co_await m_cache.set_max_pages(new_max);
 
                 auto json              = boost::json::object{};
                 json["old_page_size"]  = old_size / 1024;
                 json["old_cache_size"] = old_max * old_size / 1024 / 1024;
                 json["new_page_size"]  = new_size / 1024;
                 json["new_cache_size"] = new_max * new_size / 1024 / 1024;
-                return boost::json::value{ json };
+                co_return boost::json::value{ json };
             },
-            [&](ipc::GetPageSize) {
+            [&](ipc::GetPageSize) -> Await<boost::json::value> {
                 auto size = m_cache.page_size();
-                return boost::json::value(size);
+                co_return boost::json::value(size);
             },
-            [&](ipc::SetCacheSize size) {
+            [&](ipc::SetCacheSize size) -> Await<boost::json::value> {
                 auto page    = m_cache.page_size();
                 auto old_max = m_cache.max_pages();
                 auto new_max = std::bit_ceil(size.mib * 1024 * 1024 / page);
                 new_max      = std::max(new_max, lowest_max_pages);
-                auto fut     = async::spawn(m_async_ctx, m_cache.set_max_pages(new_max), async::use_future);
-                fut.wait();
+                co_await m_cache.set_max_pages(new_max);
 
                 auto json              = boost::json::object{};
                 json["old_cache_size"] = old_max * page / 1024 / 1024;
                 json["new_cache_size"] = new_max * page / 1024 / 1024;
-                return boost::json::value{ json };
+                co_return boost::json::value{ json };
             },
-            [&](ipc::GetCacheSize) {
+            [&](ipc::GetCacheSize) -> Await<boost::json::value> {
                 auto page      = m_cache.page_size();
                 auto num_pages = m_cache.max_pages();
-                return boost::json::value(page * num_pages / 1024 / 1024);
+                co_return boost::json::value(page * num_pages / 1024 / 1024);
             },
         };
-        return std::visit(overload, op);
+
+        co_return co_await std::visit(overload, op);
     }
 
     void* init(fuse_conn_info* conn, fuse_config*)

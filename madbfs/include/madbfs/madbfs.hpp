@@ -41,7 +41,7 @@ namespace madbfs
         Uniq<data::Ipc>              create_ipc();
         void                         work_thread_function();
 
-        boost::json::value ipc_handler(data::ipc::Op op);
+        Await<boost::json::value> ipc_handler(data::ipc::Op op);
 
         async::Context   m_async_ctx;
         async::WorkGuard m_work_guard;    // to prevent `io_context` from returning immediately

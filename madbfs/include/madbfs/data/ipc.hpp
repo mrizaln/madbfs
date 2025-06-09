@@ -30,7 +30,7 @@ namespace madbfs::data
     public:
         using Acceptor = async::unix_socket::Acceptor;
         using Socket   = async::unix_socket::Socket;
-        using OnOp     = std::move_only_function<boost::json::value(ipc::Op op)>;
+        using OnOp     = std::move_only_function<Await<boost::json::value>(ipc::Op op)>;
 
         // Uniq to make it std::movable
         static Expect<Uniq<Ipc>> create(async::Context& context);

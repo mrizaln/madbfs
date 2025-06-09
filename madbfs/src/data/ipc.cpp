@@ -185,7 +185,7 @@ namespace madbfs::data
         if (op.has_value()) {
             auto response      = boost::json::object{};
             response["status"] = "success";
-            response["value"]  = m_on_op(*op);
+            response["value"]  = co_await m_on_op(*op);
 
             auto msg = boost::json::serialize(response);
             if (auto res = co_await send(sock, msg); not res) {
