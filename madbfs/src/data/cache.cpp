@@ -88,14 +88,14 @@ namespace madbfs::data
     {
         if (offset >= m_page_size) [[unlikely]] {
             // NOTE: getting here is a bug in implementation
-            log_c({ "{}: [BUG] offset exceed page size [{} vs {}]" }, __func__, offset, m_page_size);
+            log_c("{}: [BUG] offset exceed page size [{} vs {}]", __func__, offset, m_page_size);
             return 0;
         }
 
         auto end = static_cast<u32>(offset + in.size());
         if (end > m_page_size) [[unlikely]] {
             // NOTE: getting here is a bug in implementation
-            log_c({ "{}: [BUG] offset + size exceed page size [{} vs {}]" }, __func__, end, m_page_size);
+            log_c("{}: [BUG] offset + size exceed page size [{} vs {}]", __func__, end, m_page_size);
             end = std::min(end, m_page_size);
         }
 
@@ -140,12 +140,12 @@ namespace madbfs::data
         auto first = static_cast<usize>(offset) / m_page_size;
         auto last  = (static_cast<usize>(offset) + out.size() - 1) / m_page_size;
 
-        log_d({ "{}: start [id={}|idx={} - {}]" }, __func__, id.inner(), first, last);
+        log_d("{}: start [id={}|idx={} - {}]", __func__, id.inner(), first, last);
 
         auto& entry = lookup(id, path)->get();
 
         auto work = [&](usize index) noexcept -> AExpect<usize> {
-            log_t({ "read: [id={}|idx={}]" }, id.inner(), index);
+            log_t("read: [id={}|idx={}]", id.inner(), index);
 
             auto key = PageKey{ id, index };
 
@@ -220,7 +220,8 @@ namespace madbfs::data
 
         auto res = co_await spawn_parallel(work, sv::iota(first, last + 1));
         if (not res) {
-            log_e({ "{}: failed to read page of id={}" }, __func__, id.inner());
+            auto msg = std::make_error_code(res.error()).message();
+            log_e("{}: failed to read [{}] {:?}: {}", __func__, id.inner(), path.fullpath(), msg);
             co_return Unexpect{ res.error() };
         }
 
@@ -232,14 +233,14 @@ namespace madbfs::data
         auto first = static_cast<usize>(offset) / m_page_size;
         auto last  = (static_cast<usize>(offset) + in.size() - 1) / m_page_size;
 
-        log_d({ "{}: start [id={}|idx={} - {}]" }, __func__, id.inner(), first, last);
+        log_d("{}: start [id={}|idx={} - {}]", __func__, id.inner(), first, last);
 
         auto& entry = lookup(id, path)->get();
 
         m_table[id].dirty = true;
 
         auto work = [&](usize index) noexcept -> AExpect<usize> {
-            log_t({ "write: [id={}|idx={}]" }, id.inner(), index);
+            log_t("write: [id={}|idx={}]", id.inner(), index);
 
             auto key = PageKey{ id, index };
 
@@ -297,7 +298,7 @@ namespace madbfs::data
 
         auto res = co_await spawn_parallel(work, sv::iota(first, last + 1));
         if (not res) {
-            log_e({ "{}: failed to read page of id={}" }, __func__, id.inner());
+            log_e("{}: failed to read page of id={}", __func__, id.inner());
             co_return Unexpect{ res.error() };
         }
 
@@ -315,10 +316,10 @@ namespace madbfs::data
             co_return Expect<void>{};
         }
 
-        log_d({ "flush: start [id={}|idx={}]" }, id.inner(), may_entry->get().pages | sv::keys);
+        log_d("flush: start [id={}|idx={}]", id.inner(), may_entry->get().pages | sv::keys);
 
         auto work = [&](Page& page) noexcept -> AExpect<void> {
-            log_t({ "flush: [id={}|idx={}]" }, id.inner(), page.key().index);
+            log_t("flush: [id={}|idx={}]", id.inner(), page.key().index);
 
             if (auto queued = m_queue.find(page.key()); queued != m_queue.end()) {
                 auto fut = queued->second;
@@ -393,7 +394,7 @@ namespace madbfs::data
                 continue;
             }
 
-            log_t({ "{}: [id={}|idx={}]" }, __func__, id.inner(), index);
+            log_t("{}: [id={}|idx={}]", __func__, id.inner(), index);
 
             auto key = PageKey{ id, index };
             if (index < old_num_pages - 1) {    // shrink
@@ -434,17 +435,17 @@ namespace madbfs::data
         for (auto id : m_table | sv::keys) {
             if (auto res = co_await flush(id); not res) {
                 auto msg = std::make_error_code(res.error()).message();
-                log_e({ "{}: failed to flush {}: {}" }, __func__, id.inner(), msg);
+                log_e("{}: failed to flush {}: {}", __func__, id.inner(), msg);
             }
         }
 
         co_await evict(m_lru.size());
         m_queue.clear();
 
-        log_d({ "{}: m_table size: {}" }, __func__, m_table.size());
+        log_d("{}: m_table size: {}", __func__, m_table.size());
         for (auto [id, entry] : m_table) {
             auto path = entry.path.as_path().fullpath();
-            log_t({ "{}:     {}: {} {}" }, __func__, id.inner(), entry.pages | sv::keys, path);
+            log_t("{}:     {}: {} {}", __func__, id.inner(), entry.pages | sv::keys, path);
         }
     }
 
@@ -458,7 +459,7 @@ namespace madbfs::data
         if (should_flush) {
             if (auto res = co_await flush(id); not res) {
                 auto msg = std::make_error_code(res.error()).message();
-                log_e({ "{}: failed to flush {}: {}" }, __func__, id.inner(), msg);
+                log_e("{}: failed to flush {}: {}", __func__, id.inner(), msg);
             }
         }
 
@@ -470,21 +471,21 @@ namespace madbfs::data
     Await<void> Cache::invalidate_all()
     {
         co_await shutdown();
-        log_i({ "{}: cache invalidated" }, __func__);
+        log_i("{}: cache invalidated", __func__);
     }
 
     Await<void> Cache::set_page_size(usize new_page_size)
     {
         co_await shutdown();
         m_page_size = new_page_size;
-        log_i({ "{}: page size changed to: {}" }, __func__, new_page_size);
+        log_i("{}: page size changed to: {}", __func__, new_page_size);
     }
 
     Await<void> Cache::set_max_pages(usize new_max_pages)
     {
         co_await shutdown();
         m_max_pages = new_max_pages;
-        log_i({ "{}: max pages can be stored changed to: {}" }, __func__, new_max_pages);
+        log_i("{}: max pages can be stored changed to: {}", __func__, new_max_pages);
     }
 
     // NOTE: std::unordered_map guarantees reference of its element valid even if new value inserted
@@ -511,7 +512,7 @@ namespace madbfs::data
         auto path = found->second.path;
         auto idx  = static_cast<usize>(offset) / m_page_size;
 
-        log_d({ "{}: [id={}|idx={}] cache miss, read from device..." }, __func__, id.inner(), idx, offset);
+        log_d("{}: [id={}|idx={}] cache miss, read from device...", __func__, id.inner(), idx, offset);
         co_return co_await m_connection.read(path, out, offset);
     }
 
@@ -524,7 +525,7 @@ namespace madbfs::data
         auto path = found->second.path;
         auto idx  = static_cast<usize>(offset) / m_page_size;
 
-        log_d({ "{}: [id={}|idx={}] flush, write to device..." }, __func__, id.inner(), idx, offset);
+        log_d("{}: [id={}|idx={}] flush, write to device...", __func__, id.inner(), idx, offset);
         co_return co_await m_connection.write(path, in, offset);
     }
 
@@ -537,11 +538,11 @@ namespace madbfs::data
             m_lru.pop_back();
 
             if (page.is_dirty()) {
-                log_i({ "{}: force push page [id={}|idx={}]" }, __func__, id.inner(), idx);
+                log_i("{}: force push page [id={}|idx={}]", __func__, id.inner(), idx);
 
                 auto offset = static_cast<off_t>(idx * m_page_size);
                 if (auto res = co_await on_flush(id, page.buf(), offset); not res) {
-                    log_c({ "{}: failed to force push page [id={}|idx={}" }, __func__, id.inner(), idx);
+                    log_c("{}: failed to force push page [id={}|idx={}", __func__, id.inner(), idx);
                 }
             }
 

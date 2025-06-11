@@ -1,5 +1,6 @@
 #pragma once
 
+#include "madbfs-common/log.hpp"
 #include "madbfs-common/util/split.hpp"
 #include "madbfs/connection/connection.hpp"
 
@@ -7,7 +8,6 @@
 #include <fuse3/fuse.h>
 #include <fuse3/fuse_lowlevel.h>
 #include <linr/read.hpp>
-#include <spdlog/spdlog.h>
 
 #include <filesystem>
 #include <limits>
@@ -33,7 +33,7 @@ namespace madbfs::args
     {
         String                     serial;
         Opt<std::filesystem::path> server;
-        spdlog::level::level_enum  log_level;
+        log::Level                 log_level;
         String                     log_file;
         usize                      cachesize;
         usize                      pagesize;
@@ -111,16 +111,16 @@ namespace madbfs::args
         );
     };
 
-    inline Opt<spdlog::level::level_enum> parse_level_str(Str level)
+    inline Opt<log::Level> parse_level_str(Str level)
     {
         // clang-format off
-        if      (level == "trace")      return spdlog::level::trace;
-        else if (level == "debug")      return spdlog::level::debug;
-        else if (level == "info")       return spdlog::level::info;
-        else if (level == "warn")       return spdlog::level::warn;
-        else if (level == "error")      return spdlog::level::err;
-        else if (level == "critical")   return spdlog::level::critical;
-        else if (level == "off")        return spdlog::level::off;
+        if      (level == "trace")      return log::Level::trace;
+        else if (level == "debug")      return log::Level::debug;
+        else if (level == "info")       return log::Level::info;
+        else if (level == "warn")       return log::Level::warn;
+        else if (level == "error")      return log::Level::err;
+        else if (level == "critical")   return log::Level::critical;
+        else if (level == "off")        return log::Level::off;
         else                            return std::nullopt;
         // clang-format on
     }

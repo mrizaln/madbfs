@@ -22,7 +22,7 @@ namespace madbfs::data
         auto len_buffer  = LenInfo{};
         auto [ec, count] = co_await async::read_exact<char>(sock, len_buffer);
         if (ec) {
-            log_w({ "{}: failed to read from peer: {}" }, __func__, ec.message());
+            log_w("{}: failed to read from peer: {}", __func__, ec.message());
             co_return Unexpect{ async::to_generic_err(ec) };
         } else if (count != len_buffer.size()) {
             co_return Unexpect{ Errc::connection_reset };
@@ -36,7 +36,7 @@ namespace madbfs::data
         auto buffer        = String(len, '\0');
         auto [ec1, count1] = co_await async::read_exact<char>(sock, buffer);
         if (ec1) {
-            log_w({ "{}: failed to read from peer: {}" }, __func__, ec1.message());
+            log_w("{}: failed to read from peer: {}", __func__, ec1.message());
             co_return Unexpect{ async::to_generic_err(ec1) };
         } else if (count1 != len) {
             co_return Unexpect{ Errc::connection_reset };
@@ -50,13 +50,13 @@ namespace madbfs::data
         auto len     = std::bit_cast<LenInfo>(::htonl(static_cast<u32>(msg.size())));
         auto len_str = Str{ len.data(), len.size() };
         if (auto [ec, _] = co_await async::write_exact<char>(sock, len_str); ec) {
-            log_w({ "{}: failed to write to peer: {}" }, __func__, ec.message());
+            log_w("{}: failed to write to peer: {}", __func__, ec.message());
             co_return Unexpect{ async::to_generic_err(ec) };
         }
 
         auto [ec, count] = co_await async::write_exact<char>(sock, msg);
         if (ec) {
-            log_w({ "{}: failed to write to peer: {}" }, __func__, ec.message());
+            log_w("{}: failed to write to peer: {}", __func__, ec.message());
             co_return Unexpect{ async::to_generic_err(ec) };
         } else if (count != msg.size()) {
             co_return Unexpect{ Errc::connection_reset };
@@ -104,7 +104,7 @@ namespace madbfs::data
             stop();
             auto sock = m_socket_path.as_path().fullpath();    // underlying is an std::string
             if (::unlink(sock.data()) < 0) {
-                log_e({ "{}: failed to unlink socket: {} [{}]" }, __func__, sock, strerror(errno));
+                log_e("{}: failed to unlink socket: {} [{}]", __func__, sock, strerror(errno));
             }
         }
     }
@@ -138,14 +138,14 @@ namespace madbfs::data
             auto acc = Acceptor{ context, ep };    // may throw
             return Uniq<Ipc>{ new Ipc{ std::move(*path), std::move(acc) } };
         } catch (const boost::system::system_error& e) {
-            log_e({ "{}: failed to construct acceptor {:?}: {}" }, __func__, name, e.code().message());
+            log_e("{}: failed to construct acceptor {:?}: {}", __func__, name, e.code().message());
             return Unexpect{ async::to_generic_err(e.code(), Errc::address_not_available) };
         }
     }
 
     Await<void> Ipc::launch(OnOp on_op)
     {
-        log_d({ "{}: ipc launched!" }, __func__);
+        log_d("{}: ipc launched!", __func__);
         m_running = true;
         m_on_op   = std::move(on_op);
         co_await run();
@@ -163,11 +163,11 @@ namespace madbfs::data
         while (m_running) {
             auto res = co_await m_socket.async_accept();
             if (not res) {
-                log_e({ "{}: socket accept failed: {}" }, __func__, res.error().message());
+                log_e("{}: socket accept failed: {}", __func__, res.error().message());
                 continue;
             }
 
-            log_i({ "{}: new ipc connection from peer" }, __func__);
+            log_i("{}: new ipc connection from peer", __func__);
             co_await handle_peer(std::move(res).value());
         }
     }
@@ -179,7 +179,7 @@ namespace madbfs::data
             co_return;
         }
 
-        log_d({ "{}: op sent by peer: {:?}" }, __func__, *op_str);
+        log_d("{}: op sent by peer: {:?}", __func__, *op_str);
         auto op = parse_msg(op_str.value());
 
         if (op.has_value()) {
@@ -190,7 +190,7 @@ namespace madbfs::data
             auto msg = boost::json::serialize(response);
             if (auto res = co_await send(sock, msg); not res) {
                 const auto msg = std::make_error_code(res.error()).message();
-                log_w({ "{}: failed to send message: {}" }, __func__, msg);
+                log_w("{}: failed to send message: {}", __func__, msg);
             }
         } else {
             auto json       = boost::json::object{};
@@ -200,7 +200,7 @@ namespace madbfs::data
             auto msg = boost::json::serialize(json);
             if (auto res = co_await send(sock, msg); not res) {
                 const auto msg = std::make_error_code(res.error()).message();
-                log_w({ "{}: failed to send message: {}" }, __func__, msg);
+                log_w("{}: failed to send message: {}", __func__, msg);
             }
         }
     }

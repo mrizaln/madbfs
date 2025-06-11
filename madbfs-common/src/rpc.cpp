@@ -5,10 +5,10 @@
 
 #define HANDLE_ERROR(Ec, Size, Want, Msg)                                                                    \
     if (Ec) {                                                                                                \
-        madbfs::log_e({ "{}: " Msg ": {}" }, __func__, Ec.message());                                        \
+        madbfs::log_e("{}: " Msg ": {}", __func__, Ec.message());                                            \
         co_return madbfs::Unexpect{ madbfs::async::to_generic_err(Ec, Errc::not_connected) };                \
     } else if (Size != Want) {                                                                               \
-        madbfs::log_e({ "{}: " Msg ": message length mismatch [{} vs {}]" }, __func__, Size, Want);          \
+        madbfs::log_e("{}: " Msg ": message length mismatch [{} vs {}]", __func__, Size, Want);              \
         co_return madbfs::Unexpect{ madbfs::Errc::broken_pipe };                                             \
     }
 
@@ -205,7 +205,7 @@ namespace madbfs::rpc
             sr::copy_n(arr.begin(), arr.size(), buf.begin() + header_len - sizeof(u64));
 
             // auto str = Str{ reinterpret_cast<const char*>(buf.data()), buf.size() };
-            // log_d({ "{}: request built: {:?}" }, __func__, str);
+            // log_d("{}: request built: {:?}", __func__, str);
 
             return buf;
         }
@@ -235,7 +235,7 @@ namespace madbfs::rpc
             sr::copy_n(arr.begin(), arr.size(), buf.begin() + header_len - sizeof(u64));
 
             // auto str = Str{ reinterpret_cast<const char*>(buf.data()), buf.size() };
-            // log_d({ "{}: response built: {:?}" }, __func__, str);
+            // log_d("{}: response built: {:?}", __func__, str);
 
             return buf;
         }
@@ -357,14 +357,14 @@ namespace madbfs::rpc
                 try {
                     std::rethrow_exception(e);
                 } catch (std::exception& e) {
-                    log_c({ "receiver: exception occurred: {}" }, e.what());
+                    log_c("receiver: exception occurred: {}", e.what());
                 }
             } else if (not res) {
                 auto msg = std::make_error_code(res.error()).message();
-                log_e({ "receiver: finished with error: {}" }, msg);
+                log_e("receiver: finished with error: {}", msg);
             }
 
-            log_e({ "receiver: there are {} promises unhandled" }, m_requests.size());
+            log_e("receiver: there are {} promises unhandled", m_requests.size());
             for (auto& [id, promise] : m_requests) {
                 promise.promise.set_value(Unexpect{ e ? Errc::state_not_recoverable : Errc::not_connected });
             }
@@ -388,17 +388,17 @@ namespace madbfs::rpc
             auto size   = reader.read_int<u64>().value();
 
             if (not proc) {
-                log_d({ "{}: RESP RECV {} [invalid procedure]" }, __func__, id.inner());
+                log_d("{}: RESP RECV {} [invalid procedure]", __func__, id.inner());
                 auto buffer = Vec<u8>(size);
                 std::ignore = co_await async::read_exact<u8>(m_socket, buffer);
                 continue;
             }
 
-            log_d({ "{}: RESP RECV {} [{}]" }, __func__, id.inner(), to_string(*proc));
+            log_d("{}: RESP RECV {} [{}]", __func__, id.inner(), to_string(*proc));
 
             auto req = m_requests.extract(id);
             if (req.empty()) {
-                log_e({ "{}: response incoming for id {} but no promise registered" }, __func__, id.inner());
+                log_e("{}: response incoming for id {} but no promise registered", __func__, id.inner());
                 auto buffer = Vec<u8>(size);
                 std::ignore = co_await async::read_exact<u8>(m_socket, buffer);
                 continue;
@@ -415,20 +415,20 @@ namespace madbfs::rpc
             if (ec1) {
                 auto i   = id.inner();
                 auto msg = ec1.message();
-                log_e({ "{}: [{}] failed to read response payload: {}" }, __func__, i, msg);
+                log_e("{}: [{}] failed to read response payload: {}", __func__, i, msg);
                 promise.set_value(Unexpect{ async::to_generic_err(ec1, Errc::not_connected) });
                 continue;
             } else if (n1 != buffer.size()) {
                 auto i  = id.inner();
                 auto nn = buffer.size();
-                log_e({ "{}: [{}] mismatched response length [{} vs {}]" }, __func__, i, n1, nn);
+                log_e("{}: [{}] mismatched response length [{} vs {}]", __func__, i, n1, nn);
                 promise.set_value(Unexpect{ Errc::broken_pipe });
                 continue;
             };
 
             auto response = parse_response(buffer, *proc);
             if (not response) {
-                log_e({ "{}: [{}] failed to parse response" }, __func__, id.inner());
+                log_e("{}: [{}] failed to parse response", __func__, id.inner());
                 promise.set_value(Unexpect{ Errc::bad_message });
                 continue;
             }
@@ -457,7 +457,7 @@ namespace madbfs::rpc
         auto proc    = static_cast<Procedure>(req.index());
         auto builder = RequestBuilder{ buffer, id, proc };
 
-        log_d({ "{}: REQ  SENT {} [{}]" }, __func__, id.inner(), to_string(proc));
+        log_d("{}: REQ  SENT {} [{}]", __func__, id.inner(), to_string(proc));
 
         auto overload = util::Overload{
             [&](req::Mknod&& req) {
@@ -657,7 +657,7 @@ namespace madbfs::rpc
             HANDLE_ERROR(ec, n, header_len, "failed to read request header");
 
             // auto str = Str{ reinterpret_cast<const char*>(header.data()), header.size() };
-            // log_d({ "{}: header: {:?}" }, __func__, str);
+            // log_d("{}: header: {:?}", __func__, str);
 
             auto reader = PayloadReader{ header };
             auto id     = reader.read_id().value();
@@ -665,24 +665,24 @@ namespace madbfs::rpc
             auto size   = reader.read_int<u64>().value();
 
             if (not proc) {
-                log_d({ "{}: recv req: id={} | proc=[invalid] | size={}" }, __func__, id.inner(), size);
+                log_d("{}: recv req: id={} | proc=[invalid] | size={}", __func__, id.inner(), size);
                 auto buffer = Vec<u8>(size);
                 std::ignore = co_await async::read_exact<u8>(m_socket, buffer);
                 continue;
             }
 
-            log_d({ "{}: recv req id={} | proc={} | size={}" }, __func__, id.inner(), to_string(*proc), size);
+            log_d("{}: recv req id={} | proc={} | size={}", __func__, id.inner(), to_string(*proc), size);
 
             auto buffer    = Vec<u8>(size);
             auto [ec1, n1] = co_await async::read_exact<u8>(m_socket, buffer);
             HANDLE_ERROR(ec1, n1, buffer.size(), "failed to read request payload");
 
             // str = Str{ reinterpret_cast<const char*>(buffer.data()), buffer.size() };
-            // log_d({ "{}: [{}] payload: {:?}" }, __func__, id.inner(), str);
+            // log_d("{}: [{}] payload: {:?}", __func__, id.inner(), str);
 
             auto request = parse_request(buffer, *proc);
             if (not request) {
-                log_e({ "{}: [{}] failed to parse request" }, __func__, id.inner());
+                log_e("{}: [{}] failed to parse request", __func__, id.inner());
                 continue;
             }
 
@@ -763,7 +763,7 @@ namespace madbfs::rpc
 
         auto resp = std::get<Response>(std::move(response));
         if (auto actual = static_cast<Procedure>(resp.index()); actual != proc) {
-            log_e({ "{}: mismatched procedure: [{} vs {}]" }, __func__, to_string(actual), to_string(proc));
+            log_e("{}: mismatched procedure: [{} vs {}]", __func__, to_string(actual), to_string(proc));
             co_return Unexpect{ Errc::bad_message };
         }
 

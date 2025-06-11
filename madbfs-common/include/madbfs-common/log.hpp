@@ -12,17 +12,19 @@
 
 namespace madbfs::log
 {
+    using Level = spdlog::level::level_enum;
+
+    constexpr static spdlog::source_loc to_spdlog_source_loc(const std::source_location& loc) noexcept
+    {
+        return { loc.file_name(), static_cast<int>(loc.line()), loc.function_name() };
+    }
+
     // inspired by this issue on spdlog: https://github.com/gabime/spdlog/issues/1959
     template <typename... Args>
     struct FmtWithLoc
     {
         fmt::format_string<Args...> fmt;
         spdlog::source_loc          loc;
-
-        consteval static spdlog::source_loc to_spdlog_source_loc(const std::source_location& loc)
-        {
-            return { loc.file_name(), static_cast<int>(loc.line()), loc.function_name() };
-        }
 
         template <typename Str>
         consteval FmtWithLoc(Str&& fmt, const std::source_location& loc = std::source_location::current())
@@ -48,7 +50,7 @@ namespace madbfs::log
      * @param level The log level to use.
      * @param log_file The log file to write to. If set to "-", the logger will write to stdout.
      */
-    inline void init(spdlog::level::level_enum level, Str log_file)
+    inline void init(spdlog::level::level_enum level, Str log_file) noexcept
     {
         constexpr auto max_size  = 10 * 1000 * 1000_usize;    // 10 MB
         constexpr auto max_files = 3_usize;
@@ -71,7 +73,7 @@ namespace madbfs::log
      *
      * This function explicitly flushes the logger.
      */
-    inline void shutdown()
+    inline void shutdown() noexcept
     {
         auto logger = spdlog::get("logger-file");
         if (logger) {
@@ -80,22 +82,36 @@ namespace madbfs::log
         spdlog::shutdown();
     }
 
+    inline Level get_level() noexcept
+    {
+        return spdlog::get_level();
+    }
+
     /**
      * @brief Log a message with a specific log level.
      *
-     * This functions must be called in the form of
-     *
-     * ```
-     * madbfs::log::log(spdlog::level::info, { "this is a test log: {} + {} = {}" }, 1, 2, 3);
-       madbfs::log::log(spdlog::level::info, { "akdjhaksdfjh" });
-     * ```
-     *
-     * Notice the curly braces around the format string. If you don't use them, the compiler will complain.
+     * NOTE: The type identity is needed to allow CTAD for FmtWithLoc:
+     * https://stackoverflow.com/a/79155521/16506263
      */
     template <typename... Args>
-    inline void log(spdlog::level::level_enum level, FmtWithLoc<Args...> fmt, Args&&... args)
+    inline void log(
+        spdlog::level::level_enum                 level,
+        FmtWithLoc<std::type_identity_t<Args>...> fmt,
+        Args&&... args
+    )
     {
         spdlog::log(fmt.loc, level, fmt.fmt, std::forward<Args>(args)...);
+    }
+
+    template <typename... Args>
+    inline void log_loc(
+        std::source_location        loc,
+        spdlog::level::level_enum   level,
+        fmt::format_string<Args...> fmt,
+        Args&&... args
+    )
+    {
+        spdlog::log(to_spdlog_source_loc(loc), level, fmt, std::forward<Args>(args)...);
     }
 }
 
@@ -103,7 +119,7 @@ namespace madbfs
 {
 #define MADBFS_LOG_LOG_ENTRY(Name, Level)                                                                    \
     template <typename... Args>                                                                              \
-    inline void Name(log::FmtWithLoc<Args...> fmt, Args&&... args)                                           \
+    inline void Name(log::FmtWithLoc<std::type_identity_t<Args>...> fmt, Args&&... args)                     \
     {                                                                                                        \
         log::log(spdlog::level::Level, std::move(fmt), std::forward<Args>(args)...);                         \
     }

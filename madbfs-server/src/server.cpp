@@ -18,10 +18,18 @@ namespace
         return std::make_error_code(errc).message();
     }
 
-    madbfs::rpc::Status status_from_errno(madbfs::Str name, madbfs::Str path, madbfs::Str msg)
+    madbfs::rpc::Status status_from_errno(
+        madbfs::Str          name,
+        madbfs::Str          path,
+        madbfs::Str          msg,
+        std::source_location loc = std::source_location::current()
+    )
     {
+        using madbfs::log::Level;
+        using madbfs::log::log_loc;
+
         auto err = errno;
-        madbfs::log_e({ "{}: {} {:?}: {}" }, name, msg, path, strerror(err));
+        log_loc(loc, Level::err, "{}: {} {:?}: {}", name, msg, path, strerror(err));
         auto status = static_cast<madbfs::rpc::Status>(err);
 
         switch (status) {
@@ -45,7 +53,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Listdir req)
     {
         const auto& [path] = req;
-        log_d({ "listdir: path={:?}" }, path.data());
+        log_d("listdir: path={:?}", path.data());
 
         auto dir = ::opendir(path.data());
         if (dir == nullptr) {
@@ -117,7 +125,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Stat req)
     {
         const auto& [path] = req;
-        log_d({ "stat: path={:?}" }, path.data());
+        log_d("stat: path={:?}", path.data());
 
         struct stat filestat = {};
         if (auto res = ::lstat(path.data(), &filestat); res < 0) {
@@ -139,7 +147,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Readlink req)
     {
         const auto& [path] = req;
-        log_d({ "readlink: path={:?}" }, path.data());
+        log_d("readlink: path={:?}", path.data());
 
         // NOTE: can't use server's buffer as destination since using it will invalidate path.
         // PERF: since the buffer won't change anyway, making it static reduces memory usage
@@ -156,7 +164,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Mknod req)
     {
         const auto& [path, mode, dev] = req;
-        log_d({ "mknod: path={:?} mode={:#08o} dev={:#04x}" }, path.data(), mode, dev);
+        log_d("mknod: path={:?} mode={:#08o} dev={:#04x}", path.data(), mode, dev);
 
         if (::mknod(path.data(), mode, dev) < 0) {
             return status_from_errno(__func__, path, "failed to create file");
@@ -168,7 +176,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Mkdir req)
     {
         const auto& [path, mode] = req;
-        log_d({ "mkdir: path={:?} mode={:#08o}" }, path.data(), mode);
+        log_d("mkdir: path={:?} mode={:#08o}", path.data(), mode);
 
         if (::mkdir(path.data(), mode) < 0) {
             return status_from_errno(__func__, path, "failed to create directory");
@@ -180,7 +188,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Unlink req)
     {
         const auto& [path] = req;
-        log_d({ "unlink: path={:?}" }, path.data());
+        log_d("unlink: path={:?}", path.data());
 
         if (::unlink(path.data()) < 0) {
             return status_from_errno(__func__, path, "failed to remove file");
@@ -192,7 +200,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Rmdir req)
     {
         const auto& [path] = req;
-        log_d({ "rmdir: path={:?}" }, path.data());
+        log_d("rmdir: path={:?}", path.data());
 
         if (::rmdir(path.data()) < 0) {
             return status_from_errno(__func__, path, "failed to remove directory");
@@ -204,7 +212,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Rename req)
     {
         const auto& [from, to, flags] = req;
-        log_d({ "rename: from={:?} -> to={:?} [flags={}]" }, from, to, flags);
+        log_d("rename: from={:?} -> to={:?} [flags={}]", from, to, flags);
 
         // NOTE: renameat2 is not exposed directly by Android's linux kernel apparently (or not supported).
         // workaround: https://stackoverflow.com/a/41655792/16506263 (https://lwn.net/Articles/655028/).
@@ -225,7 +233,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Truncate req)
     {
         const auto& [path, size] = req;
-        log_d({ "truncate: path={:?} size={}" }, path.data(), size);
+        log_d("truncate: path={:?} size={}", path.data(), size);
 
         if (::truncate(path.data(), size) < 0) {
             return status_from_errno(__func__, path, "failed to truncate file");
@@ -237,7 +245,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Read req)
     {
         const auto& [path, offset, size] = req;
-        log_d({ "read: path={:?} offset={} size={}" }, path.data(), offset, size);
+        log_d("read: path={:?} offset={} size={}", path.data(), offset, size);
 
         auto fd = ::open(path.data(), O_RDONLY);
         if (fd < 0) {
@@ -269,7 +277,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Write req)
     {
         const auto& [path, offset, in] = req;
-        log_d({ "write: path={:?} offset={}, size={}" }, path.data(), offset, in.size());
+        log_d("write: path={:?} offset={}, size={}", path.data(), offset, in.size());
 
         auto fd = ::open(path.data(), O_WRONLY);
         if (fd < 0) {
@@ -298,7 +306,7 @@ namespace madbfs::server
     {
         const auto& [path, atime, mtime] = req;
         auto to_pair = [](timespec time) { return std::pair{ time.tv_sec, time.tv_nsec }; };
-        log_d({ "utimens: path={:?} atime={} mtime={}" }, path.data(), to_pair(atime), to_pair(mtime));
+        log_d("utimens: path={:?} atime={} mtime={}", path.data(), to_pair(atime), to_pair(mtime));
 
         auto times = Array{ atime, mtime };
         if (::utimensat(0, path.data(), times.data(), AT_SYMLINK_NOFOLLOW) < 0) {
@@ -311,7 +319,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::CopyFileRange req)
     {
         const auto& [in, in_off, out, out_off, size] = req;
-        log_d({ "copy_file_range: from={:?} -> to={:?}" }, in.data(), out.data());
+        log_d("copy_file_range: from={:?} -> to={:?}", in.data(), out.data());
 
         auto in_fd = ::open(in.data(), O_RDONLY);
         if (in_fd < 0) {
@@ -383,13 +391,13 @@ namespace madbfs::server
 
     AExpect<void> Server::run()
     {
-        log_i({ "{}: launching tcp server on port: {}" }, __func__, m_acceptor.local_endpoint().port());
+        log_i("{}: launching tcp server on port: {}", __func__, m_acceptor.local_endpoint().port());
         m_running = true;
 
         while (m_running) {
             auto sock = co_await m_acceptor.async_accept();
             if (not sock) {
-                log_e({ "{}: failed to accept connection: {}" }, __func__, sock.error().message());
+                log_e("{}: failed to accept connection: {}", __func__, sock.error().message());
                 break;
             }
 
@@ -406,7 +414,7 @@ namespace madbfs::server
             auto rpc = rpc::Server{ std::move(*sock) };
             auto res = co_await rpc.listen(handler);
             if (not res) {
-                log_e({ "{}: rpc::Server::listen return with an error: {}" }, __func__, err_msg(res.error()));
+                log_e("{}: rpc::Server::listen return with an error: {}", __func__, err_msg(res.error()));
             }
         }
 

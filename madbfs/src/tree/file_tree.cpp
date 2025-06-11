@@ -107,7 +107,7 @@ namespace madbfs::tree
 
             co_return (co_await traverse_or_build(target.as_path()))
                 .transform_error([&](Errc err) {
-                    log_e({ "{}: can't found target: {:?}" }, __func__, target.as_path().fullpath());
+                    log_e("traverse_or_build: target not found: {:?}", __func__, target.as_path().fullpath());
                     return err;
                 })
                 .and_then([&](Node& node) { return current->build(name, *stat, Link{ &node }); });
@@ -147,7 +147,7 @@ namespace madbfs::tree
         for (auto [stat, name] : may_stats.value()) {
             auto renamed = pathbuf.rename(name);
             if (not renamed) {
-                log_w({ "{}: failed to extend {:?} with {:?}" }, __func__, path.fullpath(), name);
+                log_w("{}: failed to extend {:?} with {:?}", __func__, path.fullpath(), name);
                 continue;
             }
 
@@ -170,7 +170,7 @@ namespace madbfs::tree
 
             if (not built.has_value()) {
                 auto msg = std::make_error_code(built->error()).message();
-                log_e({ "readdir: {} [{}/{}]" }, msg, path.fullpath(), name);
+                log_e("readdir: {} [{}/{}]", msg, path.fullpath(), name);
             }
 
             filler(pathbuf.as_path().filename().data());

@@ -17,7 +17,7 @@ namespace madbfs::connection
         auto endpoint = asio::ip::tcp::endpoint{ address, port };
 
         if (auto res = co_await socket.async_connect(endpoint); not res) {
-            log_e({ "{}: failed to connect to server at port {}" }, __func__, port);
+            log_e("{}: failed to connect to server at port {}", __func__, port);
             auto errc = async::to_generic_err(res.error(), Errc::not_connected);
             co_return Unexpect{ errc };
         }
@@ -32,14 +32,14 @@ namespace madbfs::connection
     AExpect<rpc::Response> ServerConnection::try_send(Vec<u8>& buf, rpc::Request req)
     {
         if (m_client == nullptr) {
-            log_i({ "{}: client is not connected, trying to reestablish connection" }, __func__);
+            log_i("{}: client is not connected, trying to reestablish connection", __func__);
             auto client = co_await try_make_client(m_port);
             if (not client) {
-                log_e({ "{}: reconnection failed" }, __func__);
+                log_e("{}: reconnection failed", __func__);
                 co_return Unexpect{ client.error() };
             }
             m_client = std::move(*client);
-            log_i({ "{}: reconnection successful" }, __func__);
+            log_i("{}: reconnection successful", __func__);
         }
 
         if (not m_client->running()) {
@@ -49,7 +49,7 @@ namespace madbfs::connection
         auto fut = co_await m_client->send_req(buf, std::move(req));
         if (not fut) {
             if (fut.error() == Errc::not_connected or fut.error() == Errc::broken_pipe) {
-                log_e({ "{}: client is disconnected, releasing client" }, __func__);
+                log_e("{}: client is disconnected, releasing client", __func__);
                 m_client.reset();
             }
             co_return Unexpect{ fut.error() };
@@ -58,7 +58,7 @@ namespace madbfs::connection
         auto res = co_await fut->async_extract();
         if (not res) {
             if (res.error() == Errc::not_connected or res.error() == Errc::broken_pipe) {
-                log_e({ "{}: client is disconnected, releasing client" }, __func__);
+                log_e("{}: client is disconnected, releasing client", __func__);
                 m_client.reset();
             }
             co_return Unexpect{ res.error() };
@@ -79,28 +79,28 @@ namespace madbfs::connection
         auto forward_args = Array<Str, 3>{ "forward", forward, forward };
         if (auto res = co_await exec_async("adb", forward_args, "", true, false); not res) {
             auto msg = std::make_error_code(res.error()).message();
-            log_e({ "{}: failed to enable port forwarding at port {}: {}" }, __func__, port, msg);
+            log_e("{}: failed to enable port forwarding at port {}: {}", __func__, port, msg);
             co_return Unexpect{ res.error() };
         }
 
         if (not server) {
-            log_i({ "{}: server path not set, try connect" }, __func__);
+            log_i("{}: server path not set, try connect", __func__);
             auto client = co_await try_make_client(port);
             if (not client) {
                 co_return Unexpect{ client.error() };
             }
 
-            log_i({ "{}: server is already running, continue normally" }, __func__);
+            log_i("{}: server is already running, continue normally", __func__);
             co_return Uniq<ServerConnection>{ new ServerConnection{ port, std::move(*client) } };
         }
 
-        log_i({ "{}: server path set to {}, pushing server normally" }, __func__, server->fullpath());
+        log_i("{}: server path set to {}, pushing server normally", __func__, server->fullpath());
 
         // push server executable to device
         auto push_args = Array<Str, 3>{ "push", server->fullpath(), serv_file };
         if (auto res = co_await exec_async("adb", push_args, "", true, false); not res) {
             auto msg = std::make_error_code(res.error()).message();
-            log_e({ "{}: failed to push 'madbfs-server' to device: {}" }, __func__, msg);
+            log_e("{}: failed to push 'madbfs-server' to device: {}", __func__, msg);
             co_return Unexpect{ res.error() };
         }
 
@@ -108,11 +108,11 @@ namespace madbfs::connection
         auto chmod_args = Array<Str, 4>{ "shell", "chmod", "+x", serv_file };
         if (auto res = co_await exec_async("adb", chmod_args, "", true, false); not res) {
             auto msg = std::make_error_code(res.error()).message();
-            log_e({ "{}: failed to update 'madbfs-server' permission: {}" }, __func__, msg);
+            log_e("{}: failed to update 'madbfs-server' permission: {}", __func__, msg);
             co_return Unexpect{ res.error() };
         }
 
-        log_i({ "{}: trying to run server" }, __func__);
+        log_i("{}: trying to run server", __func__);
 
         // run server
         auto cmd      = bp::environment::find_executable("adb");
@@ -125,7 +125,7 @@ namespace madbfs::connection
         };
 
         auto cmds = args | sv::transform([](auto s) { return Str{ s.data(), s.size() }; });
-        log_d({ "{}: executing adb {}" }, __func__, cmds);
+        log_d("{}: executing adb {}", __func__, cmds);
 
         auto out  = Pipe{ exec };
         auto err  = Pipe{ exec };
@@ -140,18 +140,18 @@ namespace madbfs::connection
         auto waitd = co_await (timer.async_wait() || async::read_exact<char>(out, buf));
 
         if (waitd.index() == 0) {
-            log_e({ "{}: waited for 5 seconds, server is timed out" }, __func__);
+            log_e("{}: waited for 5 seconds, server is timed out", __func__);
             co_return Unexpect{ Errc::timed_out };
         } else {
             auto [ec, n] = std::get<1>(waitd);
             if (ec) {
-                log_e({ "{}: failed to read output: {}" }, __func__, ec.message());
+                log_e("{}: failed to read output: {}", __func__, ec.message());
                 co_return Unexpect{ async::to_generic_err(ec, Errc::not_connected) };
             } else if (n != buf.size()) {
-                log_e({ "{}: server process broken pipe" }, __func__);
+                log_e("{}: server process broken pipe", __func__);
                 co_return Unexpect{ Errc::broken_pipe };
             } else if (buf != rpc::server_ready_string) {
-                log_e({ "{}: server process is responding, but incorrect response: {:?}" }, __func__, buf);
+                log_e("{}: server process is responding, but incorrect response: {:?}", __func__, buf);
                 co_return Unexpect{ Errc::broken_pipe };
             }
         }
@@ -161,7 +161,7 @@ namespace madbfs::connection
             co_return Unexpect{ client.error() };
         }
 
-        log_i({ "{}: server is running and ready to be used" }, __func__);
+        log_i("{}: server is running and ready to be used", __func__);
 
         co_return Uniq<ServerConnection>{ new ServerConnection{
             port,
@@ -185,16 +185,16 @@ namespace madbfs::connection
         auto ec      = error_code{};
         auto running = m_server_proc->running(ec);
         if (ec) {
-            log_w({ "{}: error terminating server: {}" }, __func__, ec.message());
+            log_w("{}: error terminating server: {}", __func__, ec.message());
             return;
         }
 
         if (running) {
             m_server_proc->terminate(ec);
             if (ec) {
-                log_w({ "{}: error terminating server: {}" }, __func__, ec.message());
+                log_w("{}: error terminating server: {}", __func__, ec.message());
             } else {
-                log_i({ "{}: successfully terminating server" }, __func__);
+                log_i("{}: successfully terminating server", __func__);
             }
         }
     }

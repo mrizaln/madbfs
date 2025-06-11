@@ -35,10 +35,10 @@ void unexpected_program_end(const char* msg, bool is_sigsegv)
     auto array = std::array<void*, 10>{};
     auto size  = ::backtrace(array.data(), array.size());
 
-    madbfs::log_c({ "> Backtrace:" });
+    madbfs::log_c("> Backtrace:");
     auto names = ::backtrace_symbols(array.data(), size);
     for (auto i : madbfs::sv::iota(0, size)) {
-        madbfs::log_c({ "\t{}" }, names[i]);
+        madbfs::log_c("\t{}", names[i]);
     }
     fmt::println("> Backtrace:");
     for (auto i : madbfs::sv::iota(0, size)) {
@@ -72,7 +72,7 @@ int main(int argc, char** argv)
 
     madbfs::log::init(opt.log_level, opt.log_file);
     madbfs::log_i(
-        { "mount device '{}' with cache size {}MiB and page size {}kiB" },
+        "mount device '{}' with cache size {}MiB and page size {}kiB",    //
         opt.serial,
         opt.cachesize,
         opt.pagesize

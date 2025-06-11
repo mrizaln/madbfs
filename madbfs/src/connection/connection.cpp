@@ -132,7 +132,7 @@ namespace madbfs::connection
         namespace bp    = boost::process::v2;
         namespace async = madbfs::async;
 
-        madbfs::log_d({ "{}: run {} {}" }, __func__, exe, args);
+        madbfs::log_d("{}: run {} {}", __func__, exe, args);
 
         auto exec = co_await async::this_coro::executor;
 
@@ -151,7 +151,7 @@ namespace madbfs::connection
         // that is what happen on multiple dd command to the same file with disjoint offset with fixed size.
 
         // if (auto [ec, _] = co_await async::write_exact(pipe_in, in); ec) {
-        //     madbfs::log_e({ "{}: failed to write to stdin: {}" }, __func__, ec.message());
+        //     madbfs::log_e("{}: failed to write to stdin: {}", __func__, ec.message());
         //     co_return madbfs::Unexpect{ async::to_generic_err(ec) };
         // }
         // pipe_in.close();
@@ -161,7 +161,7 @@ namespace madbfs::connection
 
         auto ec = boost::system::error_code{};
         if (auto n = asio::write(pipe_in, async::buffer(in), ec); ec) {
-            madbfs::log_e({ "{}: failed to write to stdin: {}" }, __func__, ec.message());
+            madbfs::log_e("{}: failed to write to stdin: {}", __func__, ec.message());
             co_return madbfs::Unexpect{ async::to_generic_err(ec) };
         } else if (n < in.size()) {
             co_return madbfs::Unexpect{ madbfs::Errc::broken_pipe };
@@ -170,20 +170,20 @@ namespace madbfs::connection
 
         auto out = std::string{};
         if (auto ec = co_await drain_pipe(pipe_out, out); ec and ec != asio::error::eof) {
-            madbfs::log_e({ "{}: failed to read from stdout: {}" }, __func__, ec.message());
+            madbfs::log_e("{}: failed to read from stdout: {}", __func__, ec.message());
             co_return madbfs::Unexpect{ async::to_generic_err(ec) };
         }
 
         auto err = std::string{};
         if (auto ec = co_await drain_pipe(pipe_err, err); ec and ec != asio::error::eof) {
-            madbfs::log_e({ "{}: failed to read from stderr: {}" }, __func__, ec.message());
+            madbfs::log_e("{}: failed to read from stderr: {}", __func__, ec.message());
             co_return madbfs::Unexpect{ async::to_generic_err(ec) };
         }
 
         auto ret = co_await proc.async_wait();
         if (check and ret != 0) {
             auto errmsg = not err.empty() ? madbfs::util::strip(err) : madbfs::util::strip(out);
-            madbfs::log_w({ "non-zero command status ({}) {} {}: err: [{}]" }, ret, exe, args, errmsg);
+            madbfs::log_w("non-zero command status ({}) {} {}: err: [{}]", ret, exe, args, errmsg);
             co_return madbfs::Unexpect{ to_errc(parse_stderr(errmsg)) };
         }
 

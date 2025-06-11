@@ -110,7 +110,7 @@ namespace madbfs::connection
             return ok_or(parse_file_stat(util::strip(out)), Errc::io_error)
                 .transform([](ParsedStat parsed) { return parsed.stat; })
                 .transform_error([&](auto err) {
-                    log_e({ "Connection::stat: parsing stat failed [{}]" }, path.fullpath());
+                    log_e("Connection::stat: parsing stat failed [{}]", path.fullpath());
                     return err;
                 });
         });
@@ -290,7 +290,7 @@ namespace madbfs::connection
          */
 
         co_return (co_await exec_async("adb", args, "", true, true)).transform([&](String str) {
-            log_d({ "copy_file_range: {:?}" }, str);
+            log_d("copy_file_range: {:?}", str);
             return util::split_n<4>(str, '\n')
                 .and_then([](util::SplitResult<4> r) { return util::split_n<1>(r.result[3], ' '); })
                 .and_then([](util::SplitResult<1> r) { return parse_fundamental<usize>(r.result[0], 10); })

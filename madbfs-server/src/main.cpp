@@ -11,7 +11,7 @@ std::atomic<bool> g_interrupt = false;
 
 void sig_handler(int sig)
 {
-    madbfs::log_i({ "signal {} raised!" }, sig);
+    madbfs::log_i("signal {} raised!", sig);
 
     g_interrupt = true;
     g_interrupt.notify_all();
@@ -25,7 +25,9 @@ try {
     std::signal(SIGINT, sig_handler);
     std::signal(SIGTERM, sig_handler);
 
-    auto log_level = spdlog::level::warn;
+    using Level = madbfs::log::Level;
+
+    auto log_level = Level::warn;
     auto port      = madbfs::u16{ 12345 };
 
     for (auto i = 1; i < argc; ++i) {
@@ -36,9 +38,9 @@ try {
             fmt::println("  --debug           Enable debug logging.");
             return 0;
         } else if (arg == "--debug") {
-            log_level = spdlog::level::debug;
+            log_level = Level::debug;
         } else if (arg == "--verbose") {
-            log_level = spdlog::level::info;
+            log_level = Level::info;
         } else if (arg == "--port") {
             if (i + 1 >= argc) {
                 fmt::println(stderr, "expecting port number after '--port' argument");
@@ -78,10 +80,10 @@ try {
     server.stop();
     thread.join();
 
-    spdlog::info("server exited normally");
+    madbfs::log_i("server exited normally");
 
     return 0;
 } catch (std::exception& e) {
-    spdlog::critical("exception: {}", e.what());
+    madbfs::log_c("exception: {}", e.what());
     return 1;
 }
