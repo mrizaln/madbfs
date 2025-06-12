@@ -21,7 +21,7 @@ namespace madbfs::args
         const char* server     = nullptr;
         const char* log_level  = nullptr;
         const char* log_file   = nullptr;
-        int         cache_size = 512;    // in MiB
+        int         cache_size = 256;    // in MiB
         int         page_size  = 128;    // in KiB
         int         port       = 12345;
         int         no_server  = false;
@@ -93,7 +93,7 @@ namespace madbfs::args
             "    --log-level=<l>      log level to use (default: warn)\n"
             "    --log-file=<f>       log file to write to (default: - for stdout)\n"
             "    --cache-size=<n>     maximum size of the cache in MiB\n"
-            "                           (default: 512)\n"
+            "                           (default: 256)\n"
             "                           (minimum: 128)\n"
             "                           (value will be rounded to the next power of 2)\n"
             "    --page-size=<n>      page size for cache & transfer in KiB\n"

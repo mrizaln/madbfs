@@ -175,7 +175,7 @@ Options for madbfs:
     --log-level=<l>      log level to use (default: warn)
     --log-file=<f>       log file to write to (default: - for stdout)
     --cache-size=<n>     maximum size of the cache in MiB
-                           (default: 512)
+                            (default: 256)
                            (minimum: 128)
                            (value will be rounded to the next power of 2)
     --page-size=<n>      page size for cache & transfer in KiB
@@ -230,10 +230,10 @@ The proxy runs communicates with `madbfs` over TCP enabled by port forwarding an
 
 ### Cache size
 
-`madbfs` caches all the read/write operations on the files on the device. This cache is stored in memory. You can control the size of this cache using `--cache-size` option (in MiB). The default value is `512` (512MiB).
+`madbfs` caches all the read/write operations on the files on the device. This cache is stored in memory. You can control the size of this cache using `--cache-size` option (in MiB). The default value is `256` (256MiB).
 
 ```sh
-$ ./madbfs --cache-size=512<mountpoint>    # using 512MiB of cache
+$ ./madbfs --cache-size=256 <mountpoint>    # using 256MiB of cache
 ```
 
 ### Page size
@@ -241,7 +241,7 @@ $ ./madbfs --cache-size=512<mountpoint>    # using 512MiB of cache
 In the cache, each file is divided into pages. The `--page-size` option dictates the size of this page (in KiB). Page size also dictates the size of the buffer used to read/write into the file on the device. You can adjust this value according to your use. From my testing, `page-size` of value `128` (means 128KiB) works well when using USB cable for the `adb` connection. You may want to decrease or increase this value for your use case. The default value is `128` (128KiB).
 
 ```sh
-$ ./madbfs --page-size=128<mountpoint>    # using 128KiB of page size
+$ ./madbfs --page-size=128 <mountpoint>    # using 128KiB of page size
 
 ```
 
