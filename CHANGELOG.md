@@ -9,17 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Filesytem capability and correctness test.
+- Filesytem's capability and correctness test.
 
 ### Fixed
 
 - Add procedure validity check on RPC payload parsing.
-- `open` operation on a file with `O_TRUNC` flag not truncate said file.
-- Coroutine lambda on `rpc::Client::start` not live long enough for resumption.
+- `open` operation on a file with `O_TRUNC` flag won't truncate said file.
+- Coroutine lambda on `rpc::Client::start` not live long enough for resumption which leads to use-after-free bug.
 - Logger not flushed correctly at the end of program.
 - `truncate`, `unlink`, and `rename` operations not handled on `Cache`.
 - Server file discovery logic not working as intended.
-- Logging functions template argument deduction.
+- Logging functions' template argument deduction not working.
 
 ### Changed
 
@@ -53,15 +53,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `copy_file_range` operation.
-- Proxy transport implemented as a TCP server that runs on Android device as alternative to pure `adb shell` commands for `Connection`.
+- Proxy transport, implemented as a TCP server that runs on Android device, as better alternative to pure `adb shell` commands for `Connection`.
 - `ServerConnection` that abstracts the connection with TCP server.
 - Custom RPC for communication between TCP server and `madbfs`.
 - New program arguments controlling server.
-- Rename function on `Path`.
+- `rename` function on `Path`.
 
 ### Fixed
 
-- Prompt error state not handled correctly.
+- Prompt's error state not handled correctly.
 - Apply rule of five to non-trivial classes.
 
 ### Changed
@@ -98,7 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Add a check for no file found error.
+- Add a check for no device found error.
 - Structural mutex not held on file operations.
 
 ### Changed
@@ -112,8 +112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `FileTree`, a trie, to simulate the filesystem.
 - `Node` of `FileTree` that store files metadata, effectively caching it.
-- cross-file LRU page caching for file read/write.
-- `Path` and `PathBuf` class to separate `madbfs`'s virtual paths from read paths (`std::filesystem`).
+- Cross-file LRU page caching for file read/write.
+- `Path` and `PathBuf` class to separate `madbfs`'s virtual paths from real paths (`std::filesystem`).
 
 [unreleased]: https://github.com/mrizaln/madbfs/compare/v0.5.0...HEAD
 [0.5.0]: https://github.com/mrizaln/madbfs/compare/v0.4.0...v0.5.0
