@@ -1,5 +1,5 @@
 #include "madbfs/args.hpp"
-#include "madbfs/madbfs.hpp"
+#include "madbfs/operations.hpp"
 
 #include <madbfs-common/log.hpp>
 
@@ -91,7 +91,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    auto ret = fuse_main(args.argc, args.argv, &madbfs::operations, (void*)&opt);
+    auto ret = fuse_main(args.argc, args.argv, &madbfs::operations::operations, (void*)&opt);
     ::fuse_opt_free_args(&args);
 
     // on invalid argument (1) and no mount point specified (2)

@@ -11,6 +11,7 @@ target_sources(
     madbfs-lib
     PRIVATE
         src/madbfs.cpp
+        src/operations.cpp
         src/connection/connection.cpp
         src/connection/adb_connection.cpp
         src/connection/server_connection.cpp
