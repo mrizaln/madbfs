@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2025-06-17
+
 ### Added
 
-- Filesytem's capability and correctness test.
+- Filesytem capability and correctness test.
 
 ### Fixed
 
@@ -115,7 +117,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-file LRU page caching for file read/write.
 - `Path` and `PathBuf` class to separate `madbfs`'s virtual paths from real paths (`std::filesystem`).
 
-[unreleased]: https://github.com/mrizaln/madbfs/compare/v0.5.0...HEAD
+[unreleased]: https://github.com/mrizaln/madbfs/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/mrizaln/madbfs/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/mrizaln/madbfs/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/mrizaln/madbfs/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/mrizaln/madbfs/compare/v0.2.0...v0.3.0
