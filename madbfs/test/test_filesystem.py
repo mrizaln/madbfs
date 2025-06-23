@@ -479,6 +479,29 @@ def tst_open_unlink(work_dir: Path):
         assert fh.read() == data1 + data2
 
 
+def tst_open_rename(work_dir: Path):
+    file = work_dir / name_generator()
+    logging.getLogger(__name__).debug(f"file: {file}")
+
+    file2 = work_dir / name_generator()
+
+    data1 = b"foo"
+    data2 = b"bar"
+    with open(file, "wb+", buffering=0) as fh:
+        fh.write(data1)
+        file.rename(file2)
+        with pytest.raises(OSError) as exc_info:
+            file.stat()
+        assert exc_info.value.errno == errno.ENOENT
+        assert file.name not in os.listdir(work_dir)
+        fh.write(data2)
+        fh.seek(0)
+        assert file.name not in os.listdir(work_dir)
+        assert fh.read() == data1 + data2
+
+    file2.unlink()
+
+
 def test_filesystem(environ):
     logger = logging.getLogger(__name__)
 
@@ -523,6 +546,7 @@ def test_filesystem(environ):
         call(tst_truncate_path)
         call(tst_truncate_fd)
         call(tst_open_unlink)
+        call(tst_open_rename)
     except:
         # NOTE: if tests are failing, the work_dir might not be cleaned up correctly. I
         # won't clean them up here since I might want to inspect the file in the work_dir
