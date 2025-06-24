@@ -2,7 +2,6 @@ include(cmake/prelude.cmake)
 
 find_package(Boost REQUIRED)
 find_package(libfuse REQUIRED)
-find_package(unordered_dense REQUIRED)
 
 include(cmake/fetched-libs.cmake) # linr, saf
 
