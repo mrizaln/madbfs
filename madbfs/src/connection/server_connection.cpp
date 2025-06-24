@@ -10,7 +10,7 @@ namespace madbfs::connection
 {
     AExpect<Uniq<rpc::Client>> ServerConnection::try_make_client(u16 port)
     {
-        auto exec   = co_await async::this_coro::executor;
+        auto exec   = co_await async::current_executor();
         auto socket = async::tcp::Socket{ exec };
 
         auto address  = asio::ip::address_v4{ { 127, 0, 0, 1 } };    // localhost
@@ -71,7 +71,7 @@ namespace madbfs::connection
     {
         namespace bp = boost::process::v2;
 
-        auto exec      = co_await async::this_coro::executor;
+        auto exec      = co_await async::current_executor();
         auto serv_file = Str{ "/data/local/tmp/madbfs-server" };
 
         // enable port forwarding

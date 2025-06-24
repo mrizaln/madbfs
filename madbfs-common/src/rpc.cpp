@@ -349,7 +349,7 @@ namespace madbfs::rpc
     {
         m_running = true;
 
-        auto exec = co_await async::this_coro::executor;
+        auto exec = co_await async::current_executor();
         asio::co_spawn(exec, receive(), [&](std::exception_ptr e, Expect<void> res) {
             m_running = false;
 
@@ -524,7 +524,7 @@ namespace madbfs::rpc
             },
         };
 
-        auto promise = saf::promise<Expect<Response>>{ co_await async::this_coro::executor };
+        auto promise = saf::promise<Expect<Response>>{ co_await async::current_executor() };
         auto future  = promise.get_future();
 
         m_requests.emplace(id, Promise{ buffer, std::move(promise) });
@@ -686,7 +686,7 @@ namespace madbfs::rpc
                 continue;
             }
 
-            auto exec = co_await async::this_coro::executor;
+            auto exec = co_await async::current_executor();
             auto coro = [&, id, proc, r = std::move(request), b = std::move(buffer)] mutable -> Await<void> {
                 auto response = co_await handler(b, std::move(r).value());
                 std::ignore   = co_await send_resp(id, *proc, std::move(response));

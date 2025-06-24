@@ -40,7 +40,7 @@ namespace madbfs::data
     template <VRange R, Invocable<RangeValue<R>> Fn>
     AExpectInnerFromFn<Fn, Vec> spawn_parallel(Fn&& fn_coro, R&& args)
     {
-        auto exec  = co_await asio::this_coro::executor;
+        auto exec  = co_await async::current_executor();
         auto defer = [&]<typename Arg>(Arg&& arg) {
             return async::spawn(exec, std::forward<Fn>(fn_coro)(std::forward<Arg>(arg)), asio::deferred);
         };
@@ -159,7 +159,7 @@ namespace madbfs::data
 
             auto page_entry = entry.pages.find(index);
             if (page_entry == entry.pages.end()) {
-                auto promise = saf::promise<Errc>{ co_await async::this_coro::executor };
+                auto promise = saf::promise<Errc>{ co_await async::current_executor() };
                 auto future  = promise.get_future().share();
                 m_queue.emplace(key, std::move(future));
 

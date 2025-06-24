@@ -65,7 +65,7 @@ namespace madbfs::data
         co_return Expect<void>{};
     }
 
-    std::expected<ipc::Op, std::string> parse_msg(Str msg) noexcept(false)
+    std::expected<ipc::Op, std::string> parse_msg(Str msg)
     {
         try {
             const auto json = boost::json::parse(msg);
@@ -109,7 +109,7 @@ namespace madbfs::data
         }
     }
 
-    Expect<Uniq<Ipc>> Ipc::create(async::Context& context) noexcept(false)
+    Expect<Uniq<Ipc>> Ipc::create(async::Context& context)
     {
         auto socket_path = [] -> String {
             const auto* res = std::getenv("XDG_RUNTIME_DIR");

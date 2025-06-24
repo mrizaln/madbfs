@@ -134,7 +134,7 @@ namespace madbfs::connection
 
         madbfs::log_d("{}: run {} {}", __func__, exe, args);
 
-        auto exec = co_await async::this_coro::executor;
+        auto exec = co_await async::current_executor();
 
         auto pipe_in  = async::pipe::Write{ exec };
         auto pipe_out = async::pipe::Read{ exec };
