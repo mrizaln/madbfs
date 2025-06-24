@@ -3,12 +3,12 @@
 #include "madbfs-common/log.hpp"
 #include "madbfs-common/util/overload.hpp"
 
-#define HANDLE_ERROR(Ec, Size, Want, Msg)                                                                    \
-    if (Ec) {                                                                                                \
-        madbfs::log_e("{}: " Msg ": {}", __func__, Ec.message());                                            \
-        co_return madbfs::Unexpect{ madbfs::async::to_generic_err(Ec, Errc::not_connected) };                \
-    } else if (Size != Want) {                                                                               \
-        madbfs::log_e("{}: " Msg ": message length mismatch [{} vs {}]", __func__, Size, Want);              \
+#define HANDLE_ERROR(Res, Want, Msg)                                                                         \
+    if (not(Res)) {                                                                                          \
+        madbfs::log_e("{}: " Msg ": {}", __func__, Res.error().message());                                   \
+        co_return madbfs::Unexpect{ madbfs::async::to_generic_err(Res.error(), Errc::not_connected) };       \
+    } else if (Res.value() != Want) {                                                                        \
+        madbfs::log_e("{}: " Msg ": message length mismatch [{} vs {}]", __func__, Res.value(), Want);       \
         co_return madbfs::Unexpect{ madbfs::Errc::broken_pipe };                                             \
     }
 
@@ -377,9 +377,9 @@ namespace madbfs::rpc
         while (m_running) {
             constexpr auto header_len = sizeof(Id) + sizeof(Procedure) + sizeof(Status) + sizeof(u64);
 
-            auto header  = Array<u8, header_len>{};
-            auto [ec, n] = co_await async::read_exact<u8>(m_socket, header);
-            HANDLE_ERROR(ec, n, header_len, "failed to read response header");
+            auto header = Array<u8, header_len>{};
+            auto n      = co_await async::read_exact<u8>(m_socket, header);
+            HANDLE_ERROR(n, header_len, "failed to read response header");
 
             auto reader = PayloadReader{ header };
             auto id     = reader.read_id().value();
@@ -411,17 +411,17 @@ namespace madbfs::rpc
             }
 
             buffer.resize(size);
-            auto [ec1, n1] = co_await async::read_exact<u8>(m_socket, buffer);
-            if (ec1) {
+            auto n1 = co_await async::read_exact<u8>(m_socket, buffer);
+            if (not n1) {
                 auto i   = id.inner();
-                auto msg = ec1.message();
+                auto msg = n1.error().message();
                 log_e("{}: [{}] failed to read response payload: {}", __func__, i, msg);
-                promise.set_value(Unexpect{ async::to_generic_err(ec1, Errc::not_connected) });
+                promise.set_value(Unexpect{ async::to_generic_err(n1.error(), Errc::not_connected) });
                 continue;
-            } else if (n1 != buffer.size()) {
+            } else if (n1.value() != buffer.size()) {
                 auto i  = id.inner();
                 auto nn = buffer.size();
-                log_e("{}: [{}] mismatched response length [{} vs {}]", __func__, i, n1, nn);
+                log_e("{}: [{}] mismatched response length [{} vs {}]", __func__, i, n1.value(), nn);
                 promise.set_value(Unexpect{ Errc::broken_pipe });
                 continue;
             };
@@ -532,8 +532,8 @@ namespace madbfs::rpc
         std::visit(std::move(overload), std::move(req));
         auto payload = builder.build();
 
-        auto [ec, n] = co_await async::write_exact(m_socket, payload);
-        HANDLE_ERROR(ec, n, payload.size(), "failed to send request payload");
+        auto n = co_await async::write_exact(m_socket, payload);
+        HANDLE_ERROR(n, payload.size(), "failed to send request payload");
 
         buffer.clear();
 
@@ -652,9 +652,9 @@ namespace madbfs::rpc
         while (m_running) {
             constexpr auto header_len = sizeof(Id) + sizeof(Procedure) + sizeof(u64);
 
-            auto header  = Array<u8, header_len>{};
-            auto [ec, n] = co_await async::read_exact<u8>(m_socket, header);
-            HANDLE_ERROR(ec, n, header_len, "failed to read request header");
+            auto header = Array<u8, header_len>{};
+            auto n      = co_await async::read_exact<u8>(m_socket, header);
+            HANDLE_ERROR(n, header_len, "failed to read request header");
 
             // auto str = Str{ reinterpret_cast<const char*>(header.data()), header.size() };
             // log_d("{}: header: {:?}", __func__, str);
@@ -673,9 +673,9 @@ namespace madbfs::rpc
 
             log_d("{}: recv req id={} | proc={} | size={}", __func__, id.inner(), to_string(*proc), size);
 
-            auto buffer    = Vec<u8>(size);
-            auto [ec1, n1] = co_await async::read_exact<u8>(m_socket, buffer);
-            HANDLE_ERROR(ec1, n1, buffer.size(), "failed to read request payload");
+            auto buffer = Vec<u8>(size);
+            auto n1     = co_await async::read_exact<u8>(m_socket, buffer);
+            HANDLE_ERROR(n1, buffer.size(), "failed to read request payload");
 
             // str = Str{ reinterpret_cast<const char*>(buffer.data()), buffer.size() };
             // log_d("{}: [{}] payload: {:?}", __func__, id.inner(), str);
@@ -710,8 +710,8 @@ namespace madbfs::rpc
 
         if (status != Status::Success) {
             auto payload = builder.build();
-            auto [ec, n] = co_await async::write_exact(m_socket, payload);
-            HANDLE_ERROR(ec, n, payload.size(), "failed to send response payload");
+            auto n       = co_await async::write_exact(m_socket, payload);
+            HANDLE_ERROR(n, payload.size(), "failed to send response payload");
             co_return Expect<void>{};
         }
 
@@ -770,8 +770,8 @@ namespace madbfs::rpc
         std::visit(std::move(overload), std::move(resp));
 
         auto payload = builder.build();
-        auto [ec, n] = co_await async::write_exact(m_socket, payload);
-        HANDLE_ERROR(ec, n, payload.size(), "failed to send response payload");
+        auto n       = co_await async::write_exact(m_socket, payload);
+        HANDLE_ERROR(n, payload.size(), "failed to send response payload");
         co_return Expect<void>{};
     }
 }
@@ -814,27 +814,27 @@ namespace madbfs::rpc
     AExpect<void> handshake(Socket& sock, bool client)
     {
         if (client) {
-            auto [ec, n] = co_await async::write_exact<char>(sock, server_ready_string);
-            HANDLE_ERROR(ec, n, server_ready_string.size(), "failed to send handshake to server");
+            auto n = co_await async::write_exact<char>(sock, server_ready_string);
+            HANDLE_ERROR(n, server_ready_string.size(), "failed to send handshake to server");
 
-            auto buffer    = String(server_ready_string.size(), '\0');
-            auto [ec1, n1] = co_await async::read_exact<char>(sock, buffer);
-            HANDLE_ERROR(ec1, n1, buffer.size(), "failed to read handshake from server");
+            auto buffer = String(server_ready_string.size(), '\0');
+            auto n1     = co_await async::read_exact<char>(sock, buffer);
+            HANDLE_ERROR(n1, buffer.size(), "failed to read handshake from server");
 
             if (buffer != server_ready_string) {
                 co_return Unexpect{ Errc::bad_message };
             }
         } else {
-            auto buffer    = String(server_ready_string.size(), '\0');
-            auto [ec1, n1] = co_await async::read_exact<char>(sock, buffer);
-            HANDLE_ERROR(ec1, n1, buffer.size(), "failed to read handshake from client");
+            auto buffer = String(server_ready_string.size(), '\0');
+            auto n1     = co_await async::read_exact<char>(sock, buffer);
+            HANDLE_ERROR(n1, buffer.size(), "failed to read handshake from client");
 
             if (buffer != server_ready_string) {
                 co_return Unexpect{ Errc::bad_message };
             }
 
-            auto [ec, n] = co_await async::write_exact<char>(sock, server_ready_string);
-            HANDLE_ERROR(ec, n, server_ready_string.size(), "failed to send handshake to client");
+            auto n2 = co_await async::write_exact<char>(sock, server_ready_string);
+            HANDLE_ERROR(n2, server_ready_string.size(), "failed to send handshake to client");
         }
 
         co_return Expect<void>{};

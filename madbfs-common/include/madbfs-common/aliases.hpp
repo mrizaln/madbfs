@@ -67,10 +67,11 @@ namespace madbfs
         template <typename T>
         using Shared = std::shared_ptr<T>;
 
-        template <typename T>
-        using Expect = std::expected<T, std::errc>;
+        template <typename T, typename E = std::errc>
+        using Expect = std::expected<T, E>;
 
-        using Unexpect = std::unexpected<std::errc>;
+        template <typename E = std::errc>
+        using Unexpect = std::unexpected<E>;
 
         using Clock     = std::chrono::system_clock;
         using Timestamp = Clock::time_point;
@@ -121,7 +122,7 @@ namespace madbfs
          * @return New `std::expected` with the value from `opt` or `err`.
          */
         template <typename T>
-        Expect<T> ok_or(Opt<T>&& opt, std::errc err)
+        Expect<T> ok_or(Opt<T>&& opt, std::errc err) noexcept
         {
             if (opt.has_value()) {
                 return std::move(opt).value();
@@ -141,7 +142,7 @@ namespace madbfs
          * This function will convert references into `std::reference_wrapper`
          */
         template <typename T, typename Ret, typename... Args>
-        auto proj(Ret (T::*fn)(Args...) const, std::type_identity_t<Args>... args)
+        auto proj(Ret (T::*fn)(Args...) const, std::type_identity_t<Args>... args) noexcept
         {
             if constexpr (std::is_reference_v<Ret>) {
                 return [fn, ... args = std::forward<Args>(args)](const T& t) mutable {
@@ -165,7 +166,7 @@ namespace madbfs
          * This function will convert references into `std::reference_wrapper`
          */
         template <typename T, typename Ret, typename... Args>
-        auto proj(Ret (T::*fn)(Args...), std::type_identity_t<Args>... args)
+        auto proj(Ret (T::*fn)(Args...), std::type_identity_t<Args>... args) noexcept
         {
             if constexpr (std::is_reference_v<Ret>) {
                 return [fn, ... args = std::forward<Args>(args)](T& t) mutable {
@@ -179,7 +180,7 @@ namespace madbfs
         }
 
         template <typename T, typename C>
-        auto proj(T C::* mem)
+        auto proj(T C::* mem) noexcept
         {
             return [mem]<typename CC>(CC&& c) { return std::forward<CC>(c).*mem; };
         }

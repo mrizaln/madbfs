@@ -143,11 +143,11 @@ namespace madbfs::connection
             log_e("{}: waited for 5 seconds, server is timed out", __func__);
             co_return Unexpect{ Errc::timed_out };
         } else {
-            auto [ec, n] = std::get<1>(waitd);
-            if (ec) {
-                log_e("{}: failed to read output: {}", __func__, ec.message());
-                co_return Unexpect{ async::to_generic_err(ec, Errc::not_connected) };
-            } else if (n != buf.size()) {
+            auto n = std::get<1>(waitd);
+            if (not n) {
+                log_e("{}: failed to read output: {}", __func__, n.error().message());
+                co_return Unexpect{ async::to_generic_err(n.error(), Errc::not_connected) };
+            } else if (n.value() != buf.size()) {
                 log_e("{}: server process broken pipe", __func__);
                 co_return Unexpect{ Errc::broken_pipe };
             } else if (buf != rpc::server_ready_string) {

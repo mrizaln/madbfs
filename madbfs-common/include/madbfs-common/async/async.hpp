@@ -36,8 +36,8 @@ namespace madbfs
     template <typename T>
     using Await = asio::awaitable<T>;
 
-    template <typename T>
-    using AExpect = Await<Expect<T>>;
+    template <typename T, typename E = std::errc>
+    using AExpect = Await<Expect<T, E>>;
 
     template <typename T>
     using AGen = asio::experimental::generator<T>;
@@ -53,7 +53,7 @@ namespace madbfs::async
     using Timer = Token::as_default_on_t<asio::steady_timer>;
 
     template <typename Exec, typename Awaited, typename Completion>
-    auto spawn(Exec&& ex, Awaited&& func, Completion&& completion)
+    auto spawn(Exec&& ex, Awaited&& func, Completion&& completion) noexcept
     {
         return asio::co_spawn(
             std::forward<Exec>(ex), std::forward<Awaited>(func), std::forward<Completion>(completion)
@@ -61,11 +61,13 @@ namespace madbfs::async
     }
 
     template <typename Exec, typename T>
-    Var<T, std::exception_ptr> spawn_block(Exec& exec, Await<T> coro)
+    Var<T, std::exception_ptr> spawn_block(Exec& exec, Await<T> coro) noexcept
     {
         auto ready  = std::atomic<bool>{ false };
         auto result = Opt<Var<T, std::exception_ptr>>{};
 
+        // NOTE: coro need to be wrapped since co_spawn on awaitable<T> requires T to be default constructible
+        // read: https://github.com/chriskohlhoff/asio/issues/1303
         asio::co_spawn(
             exec,
             [&] -> Await<void> { result.emplace(co_await std::move(coro)); },
@@ -82,7 +84,7 @@ namespace madbfs::async
         return std::move(result).value();
     }
 
-    inline Errc to_generic_err(error_code ec, Errc fallback = Errc::io_error)
+    inline Errc to_generic_err(error_code ec, Errc fallback = Errc::io_error) noexcept
     {
         const auto& cat = ec.category();
 #if MADBFS_NON_BOOST_ASIO
@@ -96,41 +98,17 @@ namespace madbfs::async
     }
 
     template <typename Char, typename AStream>
-    Await<Pair<error_code, usize>> write_exact(AStream& stream, Span<const Char> in)
+    AExpect<usize, error_code> write_exact(AStream& stream, Span<const Char> in) noexcept
     {
-        auto written = 0uz;
-        while (written < in.size()) {
-            auto buffer = asio::buffer(in.data() + written, in.size() - written);
-            auto res    = co_await stream.async_write_some(buffer);
-            if (not res) {
-                co_return Pair{ res.error(), written };
-            }
-            auto len = *res;
-            if (len == 0) {
-                co_return Pair{ std::make_error_code(Errc::broken_pipe), written };
-            }
-            written += len;
-        }
-        co_return Pair{ std::error_code{}, written };
+        auto buf = asio::buffer(in);
+        return asio::async_write(stream, buf, as_expected(asio::use_awaitable));
     }
 
     template <typename Char, typename AStream>
-    Await<Pair<error_code, usize>> read_exact(AStream& stream, Span<Char> out)
+    AExpect<usize, error_code> read_exact(AStream& stream, Span<Char> out) noexcept
     {
-        auto read = 0uz;
-        while (read < out.size()) {
-            auto buffer = asio::buffer(out.data() + read, out.size() - read);
-            auto res    = co_await stream.async_read_some(buffer);
-            if (not res) {
-                co_return Pair{ res.error(), read };
-            }
-            auto len = *res;
-            if (len == 0) {
-                co_return Pair{ std::make_error_code(Errc::broken_pipe), read };
-            }
-            read += len;
-        }
-        co_return Pair{ std::error_code{}, read };
+        auto buf = asio::buffer(out.data(), out.size());
+        return asio::async_read(stream, buf, as_expected(asio::use_awaitable));
     }
 
     using asio::buffer;

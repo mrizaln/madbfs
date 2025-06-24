@@ -4,7 +4,6 @@
 #include "madbfs/madbfs.hpp"
 
 #include "madbfs-common/log.hpp"
-#include "madbfs-common/util/overload.hpp"
 
 namespace
 {
@@ -32,28 +31,25 @@ namespace
         std::type_identity_t<Args>... args
     )
     {
-        auto& data = get_data();
-        auto& ctx  = data.async_ctx();
-        auto& tree = data.tree();
+        auto& ctx  = get_data().async_ctx();
+        auto& tree = get_data().tree();
 
         auto coro = (tree.*fn)(std::forward<Args>(args)...);
         auto res  = madbfs::async::spawn_block(ctx, std::move(coro));
 
-        auto overload = madbfs::util::Overload{
-            [](Ret::value_type&& v) -> Ret::value_type { return v; },
-            [](std::exception_ptr e) -> Ret::value_type {
-                try {
-                    std::rethrow_exception(e);
-                } catch (const std::exception& e) {
-                    madbfs::log_c("tree_blocking: exception occurred: {}", e.what());
-                } catch (...) {
-                    madbfs::log_c("tree_blocking: unknown exception occurred");
-                }
-                return madbfs::Unexpect{ madbfs::Errc::io_error };
-            },
-        };
+        if (auto e = std::get_if<std::exception_ptr>(&res); e) {
+            assert(*e and "exception_ptr must be not null if it's engaged");
+            try {
+                std::rethrow_exception(*e);
+            } catch (const std::exception& e) {
+                madbfs::log_c("tree_blocking: exception occurred: {}", e.what());
+            } catch (...) {
+                madbfs::log_c("tree_blocking: unknown exception occurred");
+            }
+            return madbfs::Unexpect{ madbfs::Errc::io_error };
+        }
 
-        return std::visit(std::move(overload), std::move(res));
+        return std::move(*std::get_if<typename Ret::value_type>(&res));
     }
 
     auto fuse_err(

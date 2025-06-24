@@ -150,14 +150,14 @@ namespace madbfs::connection
         // NOTE: if I write to stdin asynchronously, for some reason the write will be corrupted. at least
         // that is what happen on multiple dd command to the same file with disjoint offset with fixed size.
 
-        // if (auto [ec, _] = co_await async::write_exact(pipe_in, in); ec) {
-        //     madbfs::log_e("{}: failed to write to stdin: {}", __func__, ec.message());
-        //     co_return madbfs::Unexpect{ async::to_generic_err(ec) };
+        // if (auto n = co_await async::write_exact(pipe_in, in); not n) {
+        //     madbfs::log_e("{}: failed to write to stdin: {}", __func__, n.error().message());
+        //     co_return madbfs::Unexpect{ async::to_generic_err(n.error()) };
         // }
         // pipe_in.close();
 
         // NOTE: [cont.] switching to writing the data at once with blocking operation fixed the issue.
-        // TODO: make the async code correct (maybe use `conv=sync` on dd)
+        // TODO: make the async code correct
 
         auto ec = boost::system::error_code{};
         if (auto n = asio::write(pipe_in, async::buffer(in), ec); ec) {

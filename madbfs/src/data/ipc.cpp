@@ -19,12 +19,12 @@ namespace madbfs::data
 
     AExpect<String> receive(Ipc::Socket& sock)
     {
-        auto len_buffer  = LenInfo{};
-        auto [ec, count] = co_await async::read_exact<char>(sock, len_buffer);
-        if (ec) {
-            log_w("{}: failed to read from peer: {}", __func__, ec.message());
-            co_return Unexpect{ async::to_generic_err(ec) };
-        } else if (count != len_buffer.size()) {
+        auto len_buffer = LenInfo{};
+        auto count      = co_await async::read_exact<char>(sock, len_buffer);
+        if (not count) {
+            log_w("{}: failed to read from peer: {}", __func__, count.error().message());
+            co_return Unexpect{ async::to_generic_err(count.error()) };
+        } else if (count.value() != len_buffer.size()) {
             co_return Unexpect{ Errc::connection_reset };
         }
 
@@ -33,12 +33,12 @@ namespace madbfs::data
             Unexpect{ Errc::message_size };
         }
 
-        auto buffer        = String(len, '\0');
-        auto [ec1, count1] = co_await async::read_exact<char>(sock, buffer);
-        if (ec1) {
-            log_w("{}: failed to read from peer: {}", __func__, ec1.message());
-            co_return Unexpect{ async::to_generic_err(ec1) };
-        } else if (count1 != len) {
+        auto buffer = String(len, '\0');
+        auto count1 = co_await async::read_exact<char>(sock, buffer);
+        if (not count1) {
+            log_w("{}: failed to read from peer: {}", __func__, count1.error().message());
+            co_return Unexpect{ async::to_generic_err(count1.error()) };
+        } else if (count1.value() != len) {
             co_return Unexpect{ Errc::connection_reset };
         }
 
@@ -49,15 +49,15 @@ namespace madbfs::data
     {
         auto len     = std::bit_cast<LenInfo>(::htonl(static_cast<u32>(msg.size())));
         auto len_str = Str{ len.data(), len.size() };
-        if (auto [ec, _] = co_await async::write_exact<char>(sock, len_str); ec) {
-            log_w("{}: failed to write to peer: {}", __func__, ec.message());
-            co_return Unexpect{ async::to_generic_err(ec) };
+        if (auto n = co_await async::write_exact<char>(sock, len_str); not n) {
+            log_w("{}: failed to write to peer: {}", __func__, n.error().message());
+            co_return Unexpect{ async::to_generic_err(n.error()) };
         }
 
-        auto [ec, count] = co_await async::write_exact<char>(sock, msg);
-        if (ec) {
-            log_w("{}: failed to write to peer: {}", __func__, ec.message());
-            co_return Unexpect{ async::to_generic_err(ec) };
+        auto count = co_await async::write_exact<char>(sock, msg);
+        if (not count) {
+            log_w("{}: failed to write to peer: {}", __func__, count.error().message());
+            co_return Unexpect{ async::to_generic_err(count.error()) };
         } else if (count != msg.size()) {
             co_return Unexpect{ Errc::connection_reset };
         }
