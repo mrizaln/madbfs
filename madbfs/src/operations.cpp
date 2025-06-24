@@ -10,7 +10,7 @@ namespace
     /**
      * @brief Get application instance.
      */
-    madbfs::Madbfs& get_data()
+    madbfs::Madbfs& get_data() noexcept
     {
         auto ctx = ::fuse_get_context()->private_data;
         assert(ctx != nullptr);
@@ -29,27 +29,20 @@ namespace
     Ret::value_type tree_blocking(
         Ret (madbfs::tree::FileTree::*fn)(Args...),
         std::type_identity_t<Args>... args
-    )
+    ) noexcept
     {
         auto& ctx  = get_data().async_ctx();
         auto& tree = get_data().tree();
 
-        auto coro = (tree.*fn)(std::forward<Args>(args)...);
-        auto res  = madbfs::async::spawn_block(ctx, std::move(coro));
-
-        if (auto e = std::get_if<std::exception_ptr>(&res); e) {
-            assert(*e and "exception_ptr must be not null if it's engaged");
-            try {
-                std::rethrow_exception(*e);
-            } catch (const std::exception& e) {
-                madbfs::log_c("tree_blocking: exception occurred: {}", e.what());
-            } catch (...) {
-                madbfs::log_c("tree_blocking: unknown exception occurred");
-            }
-            return madbfs::Unexpect{ madbfs::Errc::io_error };
+        try {
+            auto coro = (tree.*fn)(std::forward<Args>(args)...);
+            return madbfs::async::spawn_block(ctx, std::move(coro));
+        } catch (const std::exception& e) {
+            madbfs::log_c("tree_blocking: exception occurred: {}", e.what());
+        } catch (...) {
+            madbfs::log_c("tree_blocking: unknown exception occurred");
         }
-
-        return std::move(*std::get_if<typename Ret::value_type>(&res));
+        return madbfs::Unexpect{ madbfs::Errc::io_error };
     }
 
     auto fuse_err(
@@ -98,7 +91,7 @@ namespace
 
 namespace madbfs::operations
 {
-    void* init(fuse_conn_info* conn, fuse_config*)
+    void* init(fuse_conn_info* conn, fuse_config*) noexcept
     {
         if (conn->want & FUSE_CAP_ATOMIC_O_TRUNC) {
             auto msg = "fuse sets atomic O_TRUNC capability, but filesystem doesn't support it, disabling...";
@@ -123,7 +116,7 @@ namespace madbfs::operations
         return new Madbfs{ server, port, page_size, max_pages };
     }
 
-    void destroy(void* private_data)
+    void destroy(void* private_data) noexcept
     {
         auto* data = static_cast<Madbfs*>(private_data);
         assert(data != nullptr and "data should not be empty!");
@@ -140,7 +133,7 @@ namespace madbfs::operations
         log::shutdown();
     }
 
-    i32 getattr(const char* path, struct stat* stbuf, [[maybe_unused]] fuse_file_info* fi)
+    i32 getattr(const char* path, struct stat* stbuf, [[maybe_unused]] fuse_file_info* fi) noexcept
     {
         log_i("{}: {:?}", __func__, path);
 
@@ -181,7 +174,7 @@ namespace madbfs::operations
         return 0;
     }
 
-    i32 readlink(const char* path, char* buf, size_t size)
+    i32 readlink(const char* path, char* buf, size_t size) noexcept
     {
         log_i("{}: {:?}", __func__, path);
 
@@ -202,7 +195,7 @@ namespace madbfs::operations
             .error_or(0);
     }
 
-    i32 mknod(const char* path, mode_t mode, dev_t dev)
+    i32 mknod(const char* path, mode_t mode, dev_t dev) noexcept
     {
         log_i("{}: {:?}", __func__, path);
 
@@ -212,7 +205,7 @@ namespace madbfs::operations
             .error_or(0);
     }
 
-    i32 mkdir(const char* path, mode_t mode)
+    i32 mkdir(const char* path, mode_t mode) noexcept
     {
         log_i("{}: {:?}", __func__, path);
 
@@ -222,7 +215,7 @@ namespace madbfs::operations
             .error_or(0);
     }
 
-    i32 unlink(const char* path)
+    i32 unlink(const char* path) noexcept
     {
         log_i("{}: {:?}", __func__, path);
 
@@ -232,7 +225,7 @@ namespace madbfs::operations
             .error_or(0);
     }
 
-    i32 rmdir(const char* path)
+    i32 rmdir(const char* path) noexcept
     {
         log_i("{}: {:?}", __func__, path);
 
@@ -243,7 +236,7 @@ namespace madbfs::operations
     }
 
     // see: man page of rename(2)
-    i32 rename(const char* from, const char* to, u32 flags)
+    i32 rename(const char* from, const char* to, u32 flags) noexcept
     {
         log_i("{}: {:?} -> {:?} [flags={}]", __func__, from, to, flags);
 
@@ -262,7 +255,7 @@ namespace madbfs::operations
             .error_or(0);
     }
 
-    i32 truncate(const char* path, off_t size, [[maybe_unused]] fuse_file_info* fi)
+    i32 truncate(const char* path, off_t size, [[maybe_unused]] fuse_file_info* fi) noexcept
     {
         log_i("{}: [size={}] {:?}", __func__, size, path);
 
@@ -272,7 +265,7 @@ namespace madbfs::operations
             .error_or(0);
     }
 
-    i32 open(const char* path, fuse_file_info* fi)
+    i32 open(const char* path, fuse_file_info* fi) noexcept
     {
         log_i("{}: {:?} [flags={:#08o}]", __func__, path, fi->flags);
 
@@ -283,7 +276,7 @@ namespace madbfs::operations
             .error_or(0);
     }
 
-    i32 read(const char* path, char* buf, size_t size, off_t offset, fuse_file_info* fi)
+    i32 read(const char* path, char* buf, size_t size, off_t offset, fuse_file_info* fi) noexcept
     {
         log_i("{}: [offset={}|size={}] {:?}", __func__, offset, size, path);
 
@@ -293,7 +286,7 @@ namespace madbfs::operations
         return res.has_value() ? static_cast<i32>(res.value()) : fuse_err(__func__, path)(res.error());
     }
 
-    i32 write(const char* path, const char* buf, size_t size, off_t offset, fuse_file_info* fi)
+    i32 write(const char* path, const char* buf, size_t size, off_t offset, fuse_file_info* fi) noexcept
     {
         log_i("{}: [offset={}|size={}] {:?}", __func__, offset, size, path);
 
@@ -303,7 +296,7 @@ namespace madbfs::operations
         return res.has_value() ? static_cast<i32>(res.value()) : fuse_err(__func__, path)(res.error());
     }
 
-    i32 flush(const char* path, fuse_file_info* fi)
+    i32 flush(const char* path, fuse_file_info* fi) noexcept
     {
         log_i("{}: {:?}", __func__, path);
 
@@ -313,7 +306,7 @@ namespace madbfs::operations
             .error_or(0);
     }
 
-    i32 release(const char* path, fuse_file_info* fi)
+    i32 release(const char* path, fuse_file_info* fi) noexcept
     {
         log_i("{}: {:?}", __func__, path);
 
@@ -330,7 +323,7 @@ namespace madbfs::operations
         [[maybe_unused]] off_t              offset,
         [[maybe_unused]] fuse_file_info*    fi,
         [[maybe_unused]] fuse_readdir_flags flags
-    )
+    ) noexcept
     {
         log_i("{}: {:?}", __func__, path);
 
@@ -342,7 +335,7 @@ namespace madbfs::operations
             .error_or(0);
     }
 
-    i32 access([[maybe_unused]] const char* path, [[maybe_unused]] i32 mask)
+    i32 access([[maybe_unused]] const char* path, [[maybe_unused]] i32 mask) noexcept
     {
         log_i("{}: {:?}", __func__, path);
 
@@ -351,7 +344,7 @@ namespace madbfs::operations
         return 0;
     }
 
-    i32 utimens(const char* path, const timespec tv[2], [[maybe_unused]] fuse_file_info* fi)
+    i32 utimens(const char* path, const timespec tv[2], [[maybe_unused]] fuse_file_info* fi) noexcept
     {
         log_i("{}: {:?}", __func__, path);
 
@@ -370,7 +363,7 @@ namespace madbfs::operations
         off_t                  out_off,
         size_t                 size,
         [[maybe_unused]] int   flags
-    )
+    ) noexcept
     {
         log_i(
             "{}: [size={}] | {:?} [off={}] -> {:?} [off={}]",

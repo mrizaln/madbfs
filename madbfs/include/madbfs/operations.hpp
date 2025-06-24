@@ -8,25 +8,25 @@
 
 namespace madbfs::operations
 {
-    void* init(fuse_conn_info*, fuse_config*);
-    void  destroy(void*);
+    void* init(fuse_conn_info*, fuse_config*) noexcept;
+    void  destroy(void*) noexcept;
 
-    i32 getattr(const char*, struct stat*, fuse_file_info*);
-    i32 readlink(const char*, char*, usize);
-    i32 mknod(const char*, mode_t, dev_t);
-    i32 mkdir(const char*, mode_t);
-    i32 unlink(const char*);
-    i32 rmdir(const char*);
-    i32 rename(const char*, const char*, u32);
-    i32 truncate(const char*, off_t, fuse_file_info*);
-    i32 open(const char*, fuse_file_info*);
-    i32 read(const char*, char*, usize, off_t, fuse_file_info*);
-    i32 write(const char*, const char*, usize, off_t, fuse_file_info*);
-    i32 flush(const char*, fuse_file_info*);
-    i32 release(const char*, fuse_file_info*);
-    i32 readdir(const char*, void*, fuse_fill_dir_t, off_t, fuse_file_info*, fuse_readdir_flags);
-    i32 access(const char*, i32);
-    i32 utimens(const char*, const timespec tv[2], fuse_file_info*);
+    i32 getattr(const char*, struct stat*, fuse_file_info*) noexcept;
+    i32 readlink(const char*, char*, usize) noexcept;
+    i32 mknod(const char*, mode_t, dev_t) noexcept;
+    i32 mkdir(const char*, mode_t) noexcept;
+    i32 unlink(const char*) noexcept;
+    i32 rmdir(const char*) noexcept;
+    i32 rename(const char*, const char*, u32) noexcept;
+    i32 truncate(const char*, off_t, fuse_file_info*) noexcept;
+    i32 open(const char*, fuse_file_info*) noexcept;
+    i32 read(const char*, char*, usize, off_t, fuse_file_info*) noexcept;
+    i32 write(const char*, const char*, usize, off_t, fuse_file_info*) noexcept;
+    i32 flush(const char*, fuse_file_info*) noexcept;
+    i32 release(const char*, fuse_file_info*) noexcept;
+    i32 readdir(const char*, void*, fuse_fill_dir_t, off_t, fuse_file_info*, fuse_readdir_flags) noexcept;
+    i32 access(const char*, i32) noexcept;
+    i32 utimens(const char*, const timespec tv[2], fuse_file_info*) noexcept;
 
     isize copy_file_range(
         const char*            path_in,
@@ -37,7 +37,7 @@ namespace madbfs::operations
         off_t                  offset_out,
         size_t                 size,
         int                    flags
-    );
+    ) noexcept;
 
     static constexpr auto operations = fuse_operations{
         .getattr         = madbfs::operations::getattr,
