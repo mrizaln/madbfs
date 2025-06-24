@@ -3,11 +3,12 @@
 #include "madbfs/tree/node.hpp"
 
 #include <madbfs-common/util/overload.hpp>
+#include <madbfs-common/util/split.hpp>
 
 #include <boost/ut.hpp>
 #include <dtl_modern/dtl_modern.hpp>
-#include <dtl_modern/extra/ses_display_pretty.hpp>
 #include <fmt/base.h>
+#include <fmt/color.h>
 #include <fmt/format.h>
 
 #include <source_location>
@@ -132,51 +133,63 @@ public:
 };
 
 template <typename T>
-madbfs::Unit raise_expect_error(std::errc errc, std::source_location loc = std::source_location::current())
+[[noreturn]] madbfs::Unit raise_expect_error(
+    std::errc            errc,
+    std::source_location loc = std::source_location::current()
+)
 {
     throw ExpectError{ errc, loc };
-    return {};
 }
 
 String diff_str(Str str1, Str str2)
 {
-    auto res   = dtl_modern::diff(str1, str2);
-    auto left  = fmt::format("{:l}", dtl_modern::extra::display_pretty(res.m_ses));
-    auto right = fmt::format("{:r}", dtl_modern::extra::display_pretty(res.m_ses));
+    auto lines1 = madbfs::util::split(str1, '\n');
+    auto lines2 = madbfs::util::split(str2, '\n');
 
-    auto sep = [](Str name) { return fmt::format("{:-^80}\n", name); };
-    return '\n' + sep("[ expect ]") + left + sep("[ actual ]") + right;
+    const auto red   = fmt::fg(fmt::color::red);
+    const auto green = fmt::fg(fmt::color::green);
+
+    auto res = dtl_modern::diff(lines1, lines2);
+    auto buf = String{};
+    auto out = std::back_inserter(buf);
+
+    for (auto [elem, info] : res.m_ses.get()) {
+        switch (info.m_type) {
+        case dtl_modern::SesEdit::Delete: fmt::format_to(out, red, "{}\n", elem); break;
+        case dtl_modern::SesEdit::Common: fmt::format_to(out, "{}\n", elem); break;
+        case dtl_modern::SesEdit::Add: fmt::format_to(out, green, "{}\n", elem); break;
+        }
+    }
+
+    return buf;
 }
 
 namespace mock
 {
     using namespace madbfs;
     using namespace madbfs::connection;
+    using data::Stat;
+    using path::Path;
+    using path::PathBuf;
 
     class DummyConnection final : public Connection
     {
     public:
-        AExpect<Gen<ParsedStat>> statdir(path::Path) override { co_return madbfs::Unexpect{ {} }; }
-        AExpect<data::Stat>      stat(path::Path) override { co_return data::Stat{}; }
-        AExpect<path::PathBuf>   readlink(path::Path path) override { co_return path.into_buf(); };
+        using Stats = Gen<ParsedStat>;
 
-        // directory operations
-        AExpect<void> mknod(path::Path, mode_t, dev_t) override { co_return Expect<void>{}; }
-        AExpect<void> mkdir(path::Path, mode_t) override { co_return Expect<void>{}; }
-        AExpect<void> unlink(path::Path) override { co_return Expect<void>{}; }
-        AExpect<void> rmdir(path::Path) override { co_return Expect<void>{}; }
-        AExpect<void> rename(path::Path, path::Path, u32) override { co_return Expect<void>{}; }
-
-        // file operations
-        AExpect<void>  truncate(path::Path, off_t) override { co_return Expect<void>{}; }
-        AExpect<usize> read(path::Path, Span<char>, off_t) override { co_return Expect<usize>{}; }
-        AExpect<usize> write(path::Path, Span<const char>, off_t) override { co_return Expect<usize>{}; }
-        AExpect<void>  utimens(path::Path, timespec, timespec) override { co_return Expect<void>{}; }
-
-        AExpect<usize> copy_file_range(path::Path, off_t, path::Path, off_t, usize size) override
-        {
-            co_return size;
-        }
+        AExpect<Stats>   statdir(Path) override { co_return Unexpect{ {} }; }
+        AExpect<Stat>    stat(Path) override { co_return Stat{}; }
+        AExpect<PathBuf> readlink(Path path) override { co_return path.into_buf(); };
+        AExpect<void>    mknod(Path, mode_t, dev_t) override { co_return Expect<void>{}; }
+        AExpect<void>    mkdir(Path, mode_t) override { co_return Expect<void>{}; }
+        AExpect<void>    unlink(Path) override { co_return Expect<void>{}; }
+        AExpect<void>    rmdir(Path) override { co_return Expect<void>{}; }
+        AExpect<void>    rename(Path, path::Path, u32) override { co_return Expect<void>{}; }
+        AExpect<void>    truncate(Path, off_t) override { co_return Expect<void>{}; }
+        AExpect<usize>   read(Path, Span<char>, off_t) override { co_return Expect<usize>{}; }
+        AExpect<usize>   write(Path, Span<const char>, off_t) override { co_return Expect<usize>{}; }
+        AExpect<void>    utimens(Path, timespec, timespec) override { co_return Expect<void>{}; }
+        AExpect<usize>   copy_file_range(Path, off_t, Path, off_t, usize size) override { co_return size; }
     };
 }
 
