@@ -11,12 +11,12 @@
 #    include <asio.hpp>
 #    include <asio/error.hpp>
 #    include <asio/experimental/awaitable_operators.hpp>
-#    include <asio/experimental/coro.hpp>
+#    include <asio/experimental/parallel_group.hpp>
 #else
 #    include <boost/asio.hpp>
 #    include <boost/asio/error.hpp>
 #    include <boost/asio/experimental/awaitable_operators.hpp>
-#    include <boost/asio/experimental/coro.hpp>
+#    include <boost/asio/experimental/parallel_group.hpp>
 #endif
 
 #include <atomic>
@@ -38,9 +38,6 @@ namespace madbfs
 
     template <typename T, typename E = std::errc>
     using AExpect = Await<Expect<T, E>>;
-
-    template <typename T>
-    using AGen = asio::experimental::generator<T>;
 }
 
 namespace madbfs::async
@@ -61,27 +58,44 @@ namespace madbfs::async
     }
 
     template <typename Exec, typename T>
-    Var<T, std::exception_ptr> spawn_block(Exec& exec, Await<T> coro) noexcept
+    T spawn_block(Exec& exec, Await<T> coro) noexcept(false)
     {
-        auto ready  = std::atomic<bool>{ false };
-        auto result = Opt<Var<T, std::exception_ptr>>{};
+        if constexpr (std::same_as<void, T>) {
+            auto ready  = std::atomic<bool>{ false };
+            auto except = std::exception_ptr{};
 
-        // NOTE: coro need to be wrapped since co_spawn on awaitable<T> requires T to be default constructible
-        // read: https://github.com/chriskohlhoff/asio/issues/1303
-        asio::co_spawn(
-            exec,
-            [&] -> Await<void> { result.emplace(co_await std::move(coro)); },
-            [&](std::exception_ptr e) {
-                if (e) {
-                    result.emplace(e);
-                }
+            asio::co_spawn(exec, std::move(coro), [&](std::exception_ptr e) {
+                except = e;
                 ready.store(true, std::memory_order::release);
                 ready.notify_one();
-            }
-        );
+            });
 
-        ready.wait(false);
-        return std::move(result).value();
+            ready.wait(false);
+            if (except) {
+                std::rethrow_exception(except);
+            }
+        } else {
+            // NOTE: coro needs to be wrapped into a coro that returns void since co_spawn on awaitable<T>
+            // requires T to be default constructible [https://github.com/chriskohlhoff/asio/issues/1303]
+
+            auto ready   = std::atomic<bool>{ false };
+            auto except  = std::exception_ptr{};
+            auto result  = Opt<T>{};
+            auto wrapped = [&] -> Await<void> { result.emplace(co_await std::move(coro)); };
+
+            asio::co_spawn(exec, std::move(wrapped), [&](std::exception_ptr e) {
+                except = e;
+                ready.store(true, std::memory_order::release);
+                ready.notify_one();
+            });
+
+            ready.wait(false);
+            if (except) {
+                std::rethrow_exception(except);
+            }
+
+            return std::move(result).value();
+        }
     }
 
     inline Errc to_generic_err(error_code ec, Errc fallback = Errc::io_error) noexcept
@@ -111,15 +125,17 @@ namespace madbfs::async
         return asio::async_read(stream, buf, as_expected(asio::use_awaitable));
     }
 
+    inline asio::this_coro::executor_t current_executor() noexcept
+    {
+        return asio::this_coro::executor;
+    }
+
     using asio::buffer;
     using asio::dynamic_buffer;
 
     using asio::detached;
     using asio::use_awaitable;
     using asio::use_future;
-
-    namespace this_coro = asio::this_coro;
-    namespace operators = asio::experimental::awaitable_operators;
 
     namespace tcp
     {
@@ -141,5 +157,10 @@ namespace madbfs::async
     {
         using Write = Token::as_default_on_t<asio::writable_pipe>;
         using Read  = Token::as_default_on_t<asio::readable_pipe>;
+    }
+
+    namespace operators
+    {
+        using namespace asio::experimental::awaitable_operators;
     }
 }
