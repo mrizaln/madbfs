@@ -19,6 +19,7 @@
 #    include <boost/asio/experimental/coro.hpp>
 #endif
 
+#include <atomic>
 #include <expected>
 #include <utility>
 
@@ -57,6 +58,28 @@ namespace madbfs::async
         return asio::co_spawn(
             std::forward<Exec>(ex), std::forward<Awaited>(func), std::forward<Completion>(completion)
         );
+    }
+
+    template <typename Exec, typename T>
+    Var<T, std::exception_ptr> spawn_block(Exec& exec, Await<T> coro)
+    {
+        auto ready  = std::atomic<bool>{ false };
+        auto result = Opt<Var<T, std::exception_ptr>>{};
+
+        asio::co_spawn(
+            exec,
+            [&] -> Await<void> { result.emplace(co_await std::move(coro)); },
+            [&](std::exception_ptr e) {
+                if (e) {
+                    result.emplace(e);
+                }
+                ready.store(true, std::memory_order::release);
+                ready.notify_one();
+            }
+        );
+
+        ready.wait(false);
+        return std::move(result).value();
     }
 
     inline Errc to_generic_err(error_code ec, Errc fallback = Errc::io_error)

@@ -4,6 +4,7 @@
 #include "madbfs/madbfs.hpp"
 
 #include "madbfs-common/log.hpp"
+#include "madbfs-common/util/overload.hpp"
 
 namespace
 {
@@ -26,28 +27,33 @@ namespace
      * @return The return value of the member function.
      */
     template <typename Ret, typename... Args>
-    auto tree_blocking(Ret (madbfs::tree::FileTree::*fn)(Args...), std::type_identity_t<Args>... args)
+    Ret::value_type tree_blocking(
+        Ret (madbfs::tree::FileTree::*fn)(Args...),
+        std::type_identity_t<Args>... args
+    )
     {
-        // NOTE: for some reason can't use `use_future` as completion token, so I just implement it manually
-
         auto& data = get_data();
         auto& ctx  = data.async_ctx();
         auto& tree = data.tree();
 
-        auto promise = std::promise<typename Ret::value_type>{};
-        auto fut     = promise.get_future();
+        auto coro = (tree.*fn)(std::forward<Args>(args)...);
+        auto res  = madbfs::async::spawn_block(ctx, std::move(coro));
 
-        madbfs::async::spawn(
-            ctx,
-            [promise = std::move(promise), fn, &tree, ... args = std::forward<Args>(args)] mutable
-                -> madbfs::Await<void> {
-                auto coro = (tree.*fn)(std::forward<Args>(args)...);
-                promise.set_value(co_await std::move(coro));
+        auto overload = madbfs::util::Overload{
+            [](Ret::value_type&& v) -> Ret::value_type { return v; },
+            [](std::exception_ptr e) -> Ret::value_type {
+                try {
+                    std::rethrow_exception(e);
+                } catch (const std::exception& e) {
+                    madbfs::log_c("tree_blocking: exception occurred: {}", e.what());
+                } catch (...) {
+                    madbfs::log_c("tree_blocking: unknown exception occurred");
+                }
+                return madbfs::Unexpect{ madbfs::Errc::io_error };
             },
-            madbfs::async::detached
-        );
+        };
 
-        return fut.get();
+        return std::visit(std::move(overload), std::move(res));
     }
 
     auto fuse_err(
