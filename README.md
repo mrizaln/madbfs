@@ -115,7 +115,7 @@ Since the dependencies are managed by Conan, you need to make sure it's installe
 
 > don't forget to run `conan profile detect` if you use Conan for the first time
 
-- `madbfs`
+- `madbfs` (client)
 
   Navigate to the root of the repository, then you install the dependencies:
 
@@ -136,27 +136,26 @@ Since the dependencies are managed by Conan, you need to make sure it's installe
 
   > you may skip this process if you don't mind not having proxy transport support
 
-  Navigate to the root of the repository then go to `madbfs-server/` subdirectory. You then can proceed by editing the `conan-android-profile.conf` file. This step is necessary to set the Android native app build system and its paramater to better suit your Android device(s). The parameters that you may change are
+  Navigate to the root of the repository then go to `madbfs-server/` subdirectory. You then can proceed by editing the `build_all.sh` script. This step is necessary to set the Android native app build system and its paramater to be able to compile the server. You may change these parameters
 
-  - Android NDK path (`tools.android:ndk_path`),
-  - Android ABI (`arch`),
-  - Android API level (`os.api_level`), and
-  - Compiler version (`compiler.version`).
+  - ANDROID_NDK_PATH
+    > see [this](https://developer.android.com/studio/projects/install-ndk) or [this](https://developer.android.com/ndk/downloads)
+  - API_LEVEL
+    > see [this](https://apilevels.com/)
+  - COMPILER
+    > usually clang
+  - COMPILER_VERSION=20
+    > not ndk version! (check by running the compiler on the NDK path)
 
-  The dependencies installation step is similar to previous one with some additional flags to the command like so:
-
-  ```sh
-  conan install . --build missing -s build_type=Release --profile:build default --profile:host conan-android-profile.conf
-  ```
-
-  The compilation process is the same:
+  The compilation step is simpler than the client code:
 
   ```sh
-  cmake --preset conan-release
-  cmake --build --preset conan-release
+  ./build.sh
   ```
 
-  The binary will be in `build/Release/` directory relative to `madbfs-server/` with the name `madbfs-server`. You may want to place `madbfs-server` in the same directory as `madbfs` to allow `madbfs` find it automatically when you run it unless you don't mind running `madbfs` with `--server` flag (explained in the next section).
+  The script above will build the server for all the currently supported Android ABIs (armeabi-v7a, arm64-v8a, x86, x86_64 (see [this](https://developer.android.com/ndk/guides/abis))). The binaries will be built in its own `build/android-<arch>-release` directory. A stripped version of all the binaries are copied to `build/android-all-release` directory.
+
+  To make sure `madbfs` works correctly you need to place these binaries in the same directory as the client binary. You can skip this part, but as a result you need to specify the server binary yourself using `--server` program argument (explained in the next section). Doing this also means that you need to know your Android device ABI beforehand to select the correct server binary. Failing to do so will result in the server not running and the client will fall back to direct `adb` transport.
 
 ## Usage
 
@@ -226,7 +225,6 @@ In order to use the proxy transport, `madbfs` needs to be able to find the `madb
 If you want the filesystem to use `adb` transport instead then you can use `--no-server` flag. This flag prevents `madbfs` from pushing the server into your phone and running it.
 
 The proxy runs communicates with `madbfs` over TCP enabled by port forwarding and by default it will listen on `12345` port number. If you find this port to be not suitable for your use you can always specify it with `--port` flag.
-
 
 ### Cache size
 
