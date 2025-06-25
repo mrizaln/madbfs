@@ -176,11 +176,9 @@ namespace madbfs::args
         co_return devices[choice - 1].serial;
     }
 
-    inline Opt<std::filesystem::path> get_server_path(std::filesystem::path exec_path)
+    inline Opt<std::filesystem::path> get_server_path(std::filesystem::path exec_path, Str server_name)
     {
         namespace fs = std::filesystem;
-
-        constexpr auto server_name = "madbfs-server";
 
         auto candidates = Vec<fs::path>{};
         candidates.push_back(fs::current_path() / server_name);
@@ -321,16 +319,33 @@ namespace madbfs::args
             }
             fmt::println("[madbfs] no-server flag specified, won't launch server");
         } else if (madbfs_opt.server == nullptr) {
-            fmt::println("[madbfs] server is not specified, attempting to search...");
-            auto exec_path = std::filesystem::path{ argv[0] == nullptr ? "madbfs" : argv[0] };
-            server         = get_server_path(exec_path);
-            if (server) {
-                fmt::println("[madbfs] server is found: {}", server->c_str());
+            auto exe = std::filesystem::path{ argv[0] == nullptr ? "madbfs" : argv[0] };
+
+            auto args = Array<Str, 3>{ "shell", "getprop", "ro.product.cpu.abi" };
+            auto abi  = co_await connection::exec_async("adb", args, "", true);
+
+            if (not abi) {
+                fmt::println("[madbfs] the device's Android ABI can't be queried");
             } else {
-                fmt::println("[madbfs] can't find server, might need to fall back to adb shell calls");
+                fmt::println("[madbfs] the device is running with Android ABI '{}'", util::strip(*abi));
+                auto server_name = fmt::format("madbfs-server-{}", util::strip(*abi));
+                fmt::println("[madbfs] server is not specified, attempting to search '{}'...", server_name);
+                server = get_server_path(exe, server_name);
+            }
+
+            if (not server) {
+                constexpr auto server_name = "madbfs-server";
+                fmt::println("[madbfs] trying to find 'madbfs-server'...");
+                server = get_server_path(exe, server_name);
+            }
+
+            if (not server) {
+                fmt::println("[madbfs] can't find server falling back to direct adb transport");
+            } else {
+                fmt::println("[madbfs] server is found: {}", server->c_str());
             }
         } else {
-            fmt::println("[madbfs] server path is set to {}", madbfs_opt.server);
+            fmt::println("[madbfs] server path is set to {} (see logs for more detail)", madbfs_opt.server);
             server = std::filesystem::absolute(madbfs_opt.server);
         }
 
