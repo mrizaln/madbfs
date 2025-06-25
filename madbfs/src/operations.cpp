@@ -148,28 +148,17 @@ namespace madbfs::operations
 
         std::memset(stbuf, 0, sizeof(struct stat));
 
-        stbuf->st_ino   = static_cast<ino_t>(stat.id.inner());
-        stbuf->st_mode  = stat.mode;
-        stbuf->st_nlink = stat.links;
-        stbuf->st_uid   = stat.uid;
-        stbuf->st_gid   = stat.gid;
-
-        switch (stbuf->st_mode & S_IFMT) {
-        case S_IFBLK:
-        case S_IFCHR: stbuf->st_size = 0; break;
-        case S_IFREG: stbuf->st_size = stat.size; break;
-        case S_IFSOCK:
-        case S_IFIFO:
-        case S_IFDIR:
-        default: stbuf->st_size = 0;
-        }
-
+        stbuf->st_ino     = static_cast<ino_t>(stat.id.inner());
+        stbuf->st_mode    = stat.mode;
+        stbuf->st_nlink   = stat.links;
+        stbuf->st_uid     = stat.uid;
+        stbuf->st_gid     = stat.gid;
+        stbuf->st_size    = stat.size;
         stbuf->st_blksize = static_cast<blksize_t>(get_data().cache().page_size());
         stbuf->st_blocks  = stbuf->st_size / stbuf->st_blksize + (stbuf->st_size % stbuf->st_blksize != 0);
-
-        stbuf->st_atim = stat.atime;
-        stbuf->st_mtim = stat.mtime;
-        stbuf->st_ctim = stat.ctime;
+        stbuf->st_atim    = stat.atime;
+        stbuf->st_mtim    = stat.mtime;
+        stbuf->st_ctim    = stat.ctime;
 
         return 0;
     }
