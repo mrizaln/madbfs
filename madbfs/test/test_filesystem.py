@@ -38,9 +38,9 @@ import pytest
 
 TEST_FILE = __file__
 CURRENT_DIR = Path(os.path.dirname(__file__))
-PROJECT_ROOT = CURRENT_DIR / ".." / ".."
-BINARY_PATH = PROJECT_ROOT / "build" / "Debug" / "madbfs" / "madbfs"
-SERVER_PATH = PROJECT_ROOT / "madbfs-server" / "build" / "Debug" / "madbfs-server"
+PROJECT_ROOT = CURRENT_DIR / "../.."
+BINARY_PATH = PROJECT_ROOT / "build/Release/madbfs/madbfs"
+SERVER_PATH = PROJECT_ROOT / "madbfs-server/build/android-all-release/madbfs-server"
 
 with open(TEST_FILE, "rb") as fh:
     TEST_DATA = fh.read()
@@ -49,6 +49,7 @@ with open(TEST_FILE, "rb") as fh:
 @dataclass
 class Environ:
     serial: str
+    abi: str
     mount_point: Path
     test_dir: Path
     log_path: Path
@@ -64,8 +65,13 @@ def environ():
     if not BINARY_PATH.exists():
         pytest.fail(f"binary path '{BINARY_PATH}' doesn't exists. compile it first!")
 
-    if not SERVER_PATH.exists():
-        pytest.fail(f"server path '{SERVER_PATH}' doesn't exists. compile it first!")
+    cmd = ["adb", "shell", "getprop", "ro.product.cpu.abi"]
+    abi = run(cmd, check=True, stdout=PIPE)
+    abi = abi.stdout.decode("utf-8").strip()
+
+    server_path = SERVER_PATH.parent / f"{SERVER_PATH.name}-{abi}"
+    if not server_path.exists():
+        pytest.fail(f"server path '{server_path}' doesn't exists. compile it first!")
 
     mount_point = CURRENT_DIR / "mount"
 
@@ -76,7 +82,7 @@ def environ():
     elif len(os.listdir(mount_point)) > 0:
         pytest.fail(f"mount point {mount_point} is not empty")
 
-    test_dir = mount_point / "data" / "local" / "tmp"  # testing on /sdcard is risky...
+    test_dir = mount_point / "data/local/tmp"  # testing on /sdcard is risky...
     log_path = CURRENT_DIR / "test_log"
 
     mount_cmd = [
@@ -84,10 +90,11 @@ def environ():
         "-f",
         f"--log-file={log_path}",
         "--log-level=debug",
-        f"--server={SERVER_PATH}",
+        f"--server={server_path}",
     ]
 
     return Environ(
+        abi=abi,
         serial=serial,
         mount_point=mount_point,
         test_dir=test_dir,
@@ -506,14 +513,15 @@ def test_filesystem(environ):
     logger = logging.getLogger(__name__)
 
     serial: str
+    abi: str
     mount_point: Path
     test_dir: Path
     log_file: Path
     cmd_base: list[str]
 
-    serial, mount_point, test_dir, log_file, cmd_base = astuple(environ)
+    serial, abi, mount_point, test_dir, log_file, cmd_base = astuple(environ)
 
-    logger.info(f"test is running on device with serial {serial}")
+    logger.info(f"test is running on device with serial {serial} and ABI {abi}")
 
     cmd = cmd_base + [f"--serial={serial}", str(mount_point)]
     proc = Popen(cmd, stdout=PIPE, universal_newlines=True)
