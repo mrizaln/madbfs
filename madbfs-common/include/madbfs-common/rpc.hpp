@@ -78,11 +78,11 @@ namespace madbfs::rpc
         struct Unlink        { Str path; };
         struct Rmdir         { Str path; };
         struct Rename        { Str from; Str to; u32 flags; };
-        struct Truncate      { Str path; i64 size; };
-        struct Read          { Str path; i64 offset; u64 size; };
-        struct Write         { Str path; i64 offset; Span<const u8> in; };
+        struct Truncate      { Str path; off_t size; };
+        struct Read          { Str path; off_t offset; usize size; };
+        struct Write         { Str path; off_t offset; Span<const u8> in; };
         struct Utimens       { Str path; timespec atime; timespec mtime; };
-        struct CopyFileRange { Str in_path; i64 in_offset; Str out_path; i64 out_offset; u64 size; };
+        struct CopyFileRange { Str in_path; off_t in_offset; Str out_path; off_t out_offset; usize size; };
         // clang-format on
     }
 

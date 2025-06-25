@@ -21,6 +21,13 @@
 
 namespace madbfs::rpc
 {
+    template <std::signed_integral I>
+    timespec to_timespec(time_t sec, I nsec)
+    {
+        using slong = decltype(timespec::tv_nsec);
+        return { .tv_sec = static_cast<time_t>(sec), .tv_nsec = static_cast<slong>(nsec) };
+    }
+
     template <std::integral I>
     std::array<u8, sizeof(I)> to_net_bytes(I value)
     {
@@ -272,14 +279,14 @@ namespace madbfs::rpc
                 entries.emplace_back(
                     *path,
                     resp::Stat{
-                        .size  = *size,
+                        .size  = static_cast<off_t>(*size),
                         .links = static_cast<nlink_t>(*links),
-                        .mtime = { .tv_sec = *mtime_sec, .tv_nsec = *mtime_nsec },
-                        .atime = { .tv_sec = *atime_sec, .tv_nsec = *atime_nsec },
-                        .ctime = { .tv_sec = *ctime_sec, .tv_nsec = *ctime_nsec },
-                        .mode  = *mode,
-                        .uid   = *uid,
-                        .gid   = *gid,
+                        .mtime = to_timespec(*mtime_sec, *mtime_nsec),
+                        .atime = to_timespec(*atime_sec, *atime_nsec),
+                        .ctime = to_timespec(*ctime_sec, *ctime_nsec),
+                        .mode  = static_cast<mode_t>(*mode),
+                        .uid   = static_cast<uid_t>(*uid),
+                        .gid   = static_cast<uid_t>(*gid),
                     }
                 );
             }
@@ -301,14 +308,14 @@ namespace madbfs::rpc
             TRY(gid, reader.read_int<u32>());
 
             return resp::Stat{
-                .size  = *size,
+                .size  = static_cast<off_t>(*size),
                 .links = static_cast<nlink_t>(*links),
-                .mtime = { .tv_sec = *mtime_sec, .tv_nsec = *mtime_nsec },
-                .atime = { .tv_sec = *atime_sec, .tv_nsec = *atime_nsec },
-                .ctime = { .tv_sec = *ctime_sec, .tv_nsec = *ctime_nsec },
-                .mode  = *mode,
-                .uid   = *uid,
-                .gid   = *gid,
+                .mtime = to_timespec(*mtime_sec, *mtime_nsec),
+                .atime = to_timespec(*atime_sec, *atime_nsec),
+                .ctime = to_timespec(*ctime_sec, *ctime_nsec),
+                .mode  = static_cast<mode_t>(*mode),
+                .uid   = static_cast<uid_t>(*uid),
+                .gid   = static_cast<uid_t>(*gid),
             };
         } break;
 
@@ -331,14 +338,14 @@ namespace madbfs::rpc
 
         case Procedure::Write: {
             TRY(size, reader.read_int<u64>());
-            return resp::Write{ .size = *size };
+            return resp::Write{ .size = static_cast<usize>(*size) };
         } break;
 
         case Procedure::Utimens: return resp::Utimens{};
 
         case Procedure::CopyFileRange: {
             TRY(size, reader.read_int<u64>());
-            return resp::CopyFileRange{ .size = *size };
+            return resp::CopyFileRange{ .size = static_cast<usize>(*size) };
         } break;
         }
 
@@ -567,13 +574,17 @@ namespace madbfs::rpc
             TRY(path, reader.read_path());
             TRY(mode, reader.read_int<u32>());
             TRY(dev, reader.read_int<u64>());
-            return req::Mknod{ .path = *path, .mode = *mode, .dev = *dev };
+            return req::Mknod{
+                .path = *path,
+                .mode = static_cast<mode_t>(*mode),
+                .dev  = static_cast<dev_t>(*dev),
+            };
         }
 
         case Procedure::Mkdir: {
             TRY(path, reader.read_path());
             TRY(mode, reader.read_int<u32>());
-            return req::Mkdir{ .path = *path, .mode = *mode };
+            return req::Mkdir{ .path = *path, .mode = static_cast<mode_t>(*mode) };
         }
 
         case Procedure::Unlink: {
@@ -596,21 +607,25 @@ namespace madbfs::rpc
         case Procedure::Truncate: {
             TRY(path, reader.read_path());
             TRY(size, reader.read_int<i64>());
-            return req::Truncate{ .path = *path, .size = *size };
+            return req::Truncate{ .path = *path, .size = static_cast<off_t>(*size) };
         }
 
         case Procedure::Read: {
             TRY(path, reader.read_path());
             TRY(offset, reader.read_int<i64>());
             TRY(size, reader.read_int<u64>());
-            return req::Read{ .path = *path, .offset = *offset, .size = *size };
+            return req::Read{
+                .path   = *path,
+                .offset = static_cast<off_t>(*offset),
+                .size   = static_cast<usize>(*size),
+            };
         }
 
         case Procedure::Write: {
             TRY(path, reader.read_path());
             TRY(offset, reader.read_int<i64>());
             TRY(bytes, reader.read_bytes());
-            return req::Write{ .path = *path, .offset = *offset, .in = *bytes };
+            return req::Write{ .path = *path, .offset = static_cast<off_t>(*offset), .in = *bytes };
         }
 
         case Procedure::Utimens: {
@@ -621,8 +636,8 @@ namespace madbfs::rpc
             TRY(mtime_nsec, reader.read_int<i64>());
             return req::Utimens{
                 .path  = *path,
-                .atime = { .tv_sec = *atime_sec, .tv_nsec = *atime_nsec },
-                .mtime = { .tv_sec = *mtime_sec, .tv_nsec = *mtime_nsec },
+                .atime = to_timespec(*atime_sec, *atime_nsec),
+                .mtime = to_timespec(*mtime_sec, *mtime_nsec),
             };
         }
 
@@ -634,10 +649,10 @@ namespace madbfs::rpc
             TRY(size, reader.read_int<u64>());
             return req::CopyFileRange{
                 .in_path    = *in_path,
-                .in_offset  = *in_offset,
+                .in_offset  = static_cast<off_t>(*in_offset),
                 .out_path   = *out_path,
-                .out_offset = *out_offset,
-                .size       = *size,
+                .out_offset = static_cast<off_t>(*out_offset),
+                .size       = static_cast<usize>(*size),
             };
         } break;
         }

@@ -98,12 +98,12 @@ namespace madbfs::server
 
             auto slice = Slice{ static_cast<isize>(off), name.size() };
             auto stat  = rpc::resp::Stat{
-                 .size  = filestat.st_size,
-                 .links = filestat.st_nlink,
+                 .size  = static_cast<off_t>(filestat.st_size),
+                 .links = static_cast<nlink_t>(filestat.st_nlink),
                  .mtime = filestat.st_mtim,
                  .atime = filestat.st_atim,
                  .ctime = filestat.st_ctim,
-                 .mode  = filestat.st_mode,
+                 .mode  = static_cast<mode_t>(filestat.st_mode),
                  .uid   = filestat.st_uid,
                  .gid   = filestat.st_gid,
             };
@@ -133,12 +133,12 @@ namespace madbfs::server
         }
 
         return rpc::resp::Stat{
-            .size  = filestat.st_size,
-            .links = filestat.st_nlink,
+            .size  = static_cast<off_t>(filestat.st_size),
+            .links = static_cast<nlink_t>(filestat.st_nlink),
             .mtime = filestat.st_mtim,
             .atime = filestat.st_atim,
             .ctime = filestat.st_ctim,
-            .mode  = filestat.st_mode,
+            .mode  = static_cast<mode_t>(filestat.st_mode),
             .uid   = filestat.st_uid,
             .gid   = filestat.st_gid,
         };
