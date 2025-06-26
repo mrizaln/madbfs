@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Build script for server for all supported Android ABIs.
+- Package script for `madbfs` and its servers.
+
+### Fixed
+
+- Unnecessary `find_package` command for `unordered_dense`.
+- Functions in `madbfs::operations::operations` not marked as `noexcept`.
+- File size info not set correctly for directories.
+- Conversion errors on server code.
+
+### Changed
+
+- Use `std::atomic` and `std::optional` instead of `std::future` and `std::promise` on sync-async bridge.
+- Server discovery logic now considers target device ABI.
+
 ## [0.6.0] - 2025-06-17
 
 ### Added
