@@ -183,7 +183,7 @@ namespace madbfs::connection
         auto ret = co_await proc.async_wait();
         if (check and ret != 0) {
             auto errmsg = not err.empty() ? madbfs::util::strip(err) : madbfs::util::strip(out);
-            madbfs::log_w("non-zero command status ({}) {} {}: err: [{}]", ret, exe, args, errmsg);
+            madbfs::log_i("non-zero command status ({}) {} {}: err: [{}]", ret, exe, args, errmsg);
             co_return madbfs::Unexpect{ to_errc(parse_stderr(errmsg)) };
         }
 

@@ -26,6 +26,10 @@ target_link_libraries(
     PUBLIC madbfs-common fetch::linr boost::boost libfuse::libfuse
 )
 target_include_directories(madbfs-lib PUBLIC include)
+target_compile_definitions(
+    madbfs-lib
+    PUBLIC MADBFS_VERSION_STRING="${CMAKE_PROJECT_VERSION}"
+)
 
 add_executable(madbfs src/main.cpp)
 target_link_libraries(madbfs PRIVATE madbfs-lib)

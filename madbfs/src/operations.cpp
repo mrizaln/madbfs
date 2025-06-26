@@ -51,9 +51,9 @@ namespace
         std::source_location loc = std::source_location::current()
     )
     {
-        auto log_e = [=]<typename... Args>(fmt::format_string<Args...>&& fmt, Args&&... args) {
-            using L = madbfs::log::Level;
-            madbfs::log::log_loc(loc, L::err, std::move(fmt), std::forward<Args>(args)...);
+        using madbfs::log::Level;
+        auto log = [=]<typename... Args>(Level level, fmt::format_string<Args...>&& fmt, Args&&... args) {
+            madbfs::log::log_loc(loc, level, std::move(fmt), std::forward<Args>(args)...);
         };
 
         return [=](std::errc err) {
@@ -76,12 +76,12 @@ namespace
             case std::errc::invalid_argument: {
                 if (madbfs::log::get_level() == madbfs::log::Level::debug) {
                     const auto msg = std::make_error_code(err).message();
-                    log_e("{}: {:?} returned with error code [{}]: {}", name, path, errint, msg);
+                    log(Level::warn, "{}: {:?} returned with error code [{}]: {}", name, path, errint, msg);
                 }
             } break;
             default: {
                 const auto msg = std::make_error_code(err).message();
-                log_e("{}: {:?} returned with error code [{}]: {}", name, path, errint, msg);
+                log(Level::err, "{}: {:?} returned with error code [{}]: {}", name, path, errint, msg);
             }
             }
             return -errint;

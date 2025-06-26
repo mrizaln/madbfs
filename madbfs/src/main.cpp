@@ -44,7 +44,7 @@ void unexpected_program_end(const char* msg, bool is_sigsegv)
     for (auto i : madbfs::sv::iota(0, size)) {
         fmt::println("\t{}", names[i]);
     }
-    free(names);
+    ::free(names);
 
     if (is_sigsegv) {
         std::signal(SIGSEGV, SIG_DFL);
@@ -68,23 +68,19 @@ int main(int argc, char** argv)
     if (maybe_opt.is_exit()) {
         return std::move(maybe_opt).exit().status;
     }
-    auto [opt, args] = std::move(maybe_opt).opt();
+    auto [opt, args, mount] = std::move(maybe_opt).opt();
 
     madbfs::log::init(opt.log_level, opt.log_file);
     madbfs::log_i(
-        "mount device '{}' with cache size {}MiB and page size {}kiB",    //
+        "[madbfs] mount '{}' at '{}' with cache size {} MiB and page size {} KiB",
         opt.serial,
+        mount,
         opt.cachesize,
         opt.pagesize
     );
-    if (opt.log_file != "-") {
-        fmt::println(
-            "[madbfs] mount device '{}' with cache size {}MiB and page size {}kiB",
-            opt.serial,
-            opt.cachesize,
-            opt.pagesize
-        );
-    }
+
+    fmt::println("[madbfs] mount '{}' [cache={} MiB, page={} KiB]", opt.serial, opt.cachesize, opt.pagesize);
+    fmt::println("[madbfs] unmount with 'fusermount -u {:?}'", mount);
 
     if (::setenv("ANDROID_SERIAL", opt.serial.c_str(), 1) < 0) {
         fmt::println(stderr, "error: failed to set env variable 'ANDROID_SERIAL' ({})", strerror(errno));

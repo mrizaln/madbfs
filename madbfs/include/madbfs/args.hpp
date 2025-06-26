@@ -25,8 +25,14 @@ namespace madbfs::args
         int         page_size  = 128;    // in KiB
         int         port       = 12345;
         int         no_server  = false;
-        int         help       = false;
-        int         full_help  = false;
+
+        ~MadbfsOpt()
+        {
+            ::free((void*)serial);
+            ::free((void*)server);
+            ::free((void*)log_level);
+            ::free((void*)log_file);
+        }
     };
 
     struct ParsedOpt
@@ -43,7 +49,7 @@ namespace madbfs::args
     struct ParseResult
     {
         // clang-format off
-        struct Opt  { ParsedOpt opt; fuse_args args; };
+        struct Opt  { ParsedOpt opt; fuse_args args; String mountpoint; };
         struct Exit { int status; };
 
         ParseResult() : result{ Exit{ 0} } {}
@@ -70,9 +76,6 @@ namespace madbfs::args
         { "--cache-size=%d", offsetof(MadbfsOpt, cache_size), true },
         { "--page-size=%d",  offsetof(MadbfsOpt, page_size),  true },
         { "--no-server",     offsetof(MadbfsOpt, no_server),  true },
-        { "-h",              offsetof(MadbfsOpt, help),       true },
-        { "--help",          offsetof(MadbfsOpt, help),       true },
-        { "--full-help",     offsetof(MadbfsOpt, full_help),  true },
         // clang-format on
         FUSE_OPT_END,
     } };
@@ -106,9 +109,13 @@ namespace madbfs::args
             "                           (will still attempt to connect to specified port)\n"
             "                           (fall back to adb shell calls if connection failed)\n"
             "                           (useful for debugging the server)\n"
+            "    --version            show version information\n"
             "    -h   --help          show this help message\n"
-            "    --full-help          show full help message (includes libfuse options)\n"
         );
+
+        fmt::println(stdout, "\nOptions for libfuse:");
+        ::fuse_cmdline_help();
+        ::fuse_lowlevel_help();
     };
 
     inline Opt<log::Level> parse_level_str(Str level)
@@ -240,6 +247,64 @@ namespace madbfs::args
      */
     inline Await<ParseResult> parse(int argc, char** argv)
     {
+        fuse_args args = FUSE_ARGS_INIT(argc, argv);
+
+        auto opts       = fuse_cmdline_opts{};
+        auto mountpoint = String{};
+
+        // NOTE: early parse to check whether mount point exists or help/version flag is provided. the
+        // resultant opts will not be used and args will be parsed again in fuse_main later.
+        {
+            if (::fuse_parse_cmdline(&args, &opts) != 0) {
+                fmt::println(stderr, "error: failed to parse options\n");
+                show_help(argv[0], true);
+                ::fuse_opt_free_args(&args);
+                co_return ParseResult{ 1 };
+            }
+
+            if (opts.show_help) {
+                show_help(argv[0], false);
+                ::fuse_opt_free_args(&args);
+                ::free(opts.mountpoint);
+                co_return ParseResult{ 0 };
+            }
+
+            if (opts.show_version) {
+                fmt::println("madbfs version {}", MADBFS_VERSION_STRING);
+                fmt::println("FUSE library version {}", ::fuse_pkgversion());
+                ::fuse_lowlevel_version();
+                ::fuse_opt_free_args(&args);
+                ::free(opts.mountpoint);
+                co_return ParseResult{ 1 };
+            }
+
+            if (opts.mountpoint == nullptr) {
+                fmt::println(stderr, "error: no mountpoint specified");
+                show_help(argv[0], true);
+                ::fuse_opt_free_args(&args);
+                co_return ParseResult{ 2 };
+            } else {
+                mountpoint = opts.mountpoint;
+                ::free(opts.mountpoint);
+            }
+
+            // recreate args
+            ::fuse_opt_free_args(&args);
+            args = FUSE_ARGS_INIT(argc, argv);
+        }
+
+        // NOTE: these strings must be malloc-ed since fuse_opt_parse will free them
+        auto madbfs_opt = MadbfsOpt{
+            .log_level = ::strdup("warn"),
+            .log_file  = ::strdup("-"),
+        };
+
+        if (fuse_opt_parse(&args, &madbfs_opt, madbfs_opt_spec.data(), NULL) != 0) {
+            fmt::println(stderr, "error: failed to parse options\n");
+            show_help(argv[0], true);
+            co_return ParseResult{ 1 };
+        }
+
         fmt::println("[madbfs] checking adb availability...");
         if (auto status = co_await connection::start_connection(); not status.has_value()) {
             const auto msg = std::make_error_code(status.error()).message();
@@ -248,45 +313,7 @@ namespace madbfs::args
             fmt::println(stderr, "note: make sure phone debugging permission is enabled.");
             fmt::println(stderr, "      phone with its screen locked might denies adb connection.");
             fmt::println(stderr, "      you might need to unlock your device first to be able to use adb.");
-
             co_return ParseResult{ 1 };
-        }
-
-        fuse_args args = FUSE_ARGS_INIT(argc, argv);
-
-        auto get_serial_env = []() -> const char* {
-            if (auto serial = ::getenv("ANDROID_SERIAL"); serial != nullptr) {
-                fmt::println("[madbfs] using serial '{}' from env variable 'ANDROID_SERIAL'", serial);
-                return ::strdup(serial);
-            }
-            return nullptr;
-        };
-
-        // NOTE: these strings must be malloc-ed since fuse_opt_parse will free them
-        auto madbfs_opt = MadbfsOpt{
-            .serial    = get_serial_env(),
-            .log_level = ::strdup("warn"),
-            .log_file  = ::strdup("-"),
-        };
-
-        if (fuse_opt_parse(&args, &madbfs_opt, madbfs_opt_spec.data(), NULL) != 0) {
-            fmt::println(stderr, "error: failed to parse options\n");
-            fmt::println(stderr, "try '{} --help' for more information", argv[0]);
-            fmt::println(stderr, "try '{} --full-help' for full information", argv[0]);
-            co_return ParseResult{ 1 };
-        }
-
-        if (madbfs_opt.help) {
-            show_help(argv[0], false);
-            ::fuse_opt_free_args(&args);
-            co_return ParseResult{ 0 };
-        } else if (madbfs_opt.full_help) {
-            show_help(argv[0], false);
-            fmt::println(stdout, "\nOptions for libfuse:");
-            ::fuse_cmdline_help();
-            ::fuse_lowlevel_help();
-            ::fuse_opt_free_args(&args);
-            co_return ParseResult{ 0 };
         }
 
         auto log_level = parse_level_str(madbfs_opt.log_level);
@@ -298,15 +325,20 @@ namespace madbfs::args
         }
 
         if (madbfs_opt.serial == nullptr) {
-            auto serial = co_await get_serial();
-            if (serial.empty()) {
+            if (auto serial = ::getenv("ANDROID_SERIAL"); serial != nullptr) {
+                fmt::println("[madbfs] using serial '{}' from env variable 'ANDROID_SERIAL'", serial);
+                madbfs_opt.serial = ::strdup(serial);
+            } else if (auto serial = co_await get_serial(); not serial.empty()) {
+                madbfs_opt.serial = ::strdup(serial.c_str());
+            } else {
                 fmt::println(stderr, "error: no device found, make sure your device is connected");
                 ::fuse_opt_free_args(&args);
                 co_return ParseResult{ 1 };
             }
-            madbfs_opt.serial = ::strdup(serial.c_str());
-        } else if (auto r = co_await check_serial(madbfs_opt.serial); r != connection::DeviceStatus::Device) {
-            fmt::println(stderr, "error: serial '{} 'is not valid ({})", madbfs_opt.serial, to_string(r));
+        }
+
+        if (auto dev = co_await check_serial(madbfs_opt.serial); dev != connection::DeviceStatus::Device) {
+            fmt::println(stderr, "error: serial '{} 'is not valid ({})", madbfs_opt.serial, to_string(dev));
             ::fuse_opt_free_args(&args);
             co_return ParseResult{ 1 };
         }
@@ -345,13 +377,14 @@ namespace madbfs::args
                 fmt::println("[madbfs] server is found: {}", server->c_str());
             }
         } else {
-            fmt::println("[madbfs] server path is set to {} (see logs for more detail)", madbfs_opt.server);
+            fmt::println("[madbfs] server path is set to {}", madbfs_opt.server);
             server = std::filesystem::absolute(madbfs_opt.server);
         }
 
         auto port = 12345_u16;
         if (madbfs_opt.port > std::numeric_limits<u16>::max()) {
             fmt::println("[madbfs] invalid port {}", madbfs_opt.port);
+            ::fuse_opt_free_args(&args);
             co_return ParseResult{ 1 };
         } else {
             port = static_cast<u16>(madbfs_opt.port);
@@ -368,6 +401,7 @@ namespace madbfs::args
                 .port      = port,
             },
             .args = args,
+            .mountpoint = mountpoint,
         };
     }
 }
