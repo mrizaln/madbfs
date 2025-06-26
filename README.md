@@ -6,11 +6,11 @@ This project, `madbfs` (modern adb filesystem, formerly `adbfsm`), aims to creat
 
 I want to manage my Android phone storage from my computer without using MTP (it's awful).
 
-This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbfs-rootless) project by Spion, available on GitHub. While `adbfs-rootless` works as intended, I encoutered frequent crashes that affected its reliability. I initially considered contributing fixes directly into the codebase, but found it somewhat dated with practices that don't align well with modern practices. Consequently, I decided to rebuild the project from the ground up to create a more stable and modern solution.
+This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbfs-rootless) project on GitHub. While `adbfs-rootless` works as intended, I encoutered frequent crashes that affected its reliability. I initially considered contributing fixes directly into the codebase, but found it somewhat dated with practices that don't align well with modern practices. Consequently, I decided to rebuild the project from the ground up to create a more stable and modern solution (and possibly faster).
 
 ## Features
 
-> TLDR: Full file and directory traversal with concurrent file streaming approach, partial read/write, and active caching.
+> TLDR: full file and directory traversal with concurrent file streaming approach, partial read/write, and active caching.
 
 - No root access required
 
@@ -82,6 +82,9 @@ This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbf
 
 - `madbfs`
 
+  Runtime dependencies
+  - adb
+
   Build dependencies
 
   - CMake
@@ -111,11 +114,13 @@ This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbf
 
 ## Building
 
+> if you just want a prebuilt binaries, jump to [installation](#installation)
+
 Since the dependencies are managed by Conan, you need to make sure it's installed and configured correctly (consult the documentation on how to do it, [here](https://docs.conan.io/2/installation.html)) on your system.
 
 > don't forget to run `conan profile detect` if you use Conan for the first time
 
-- `madbfs` (client)
+- `madbfs` 
 
   Navigate to the root of the repository, then you install the dependencies:
 
@@ -144,10 +149,10 @@ Since the dependencies are managed by Conan, you need to make sure it's installe
     > see [this](https://apilevels.com/)
   - COMPILER
     > usually clang
-  - COMPILER_VERSION=20
+  - COMPILER_VERSION
     > not ndk version! (check by running the compiler on the NDK path)
 
-  The compilation step is simpler than the client code:
+  The compilation step is simpler:
 
   ```sh
   ./build.sh
@@ -155,7 +160,13 @@ Since the dependencies are managed by Conan, you need to make sure it's installe
 
   The script above will build the server for all the currently supported Android ABIs (armeabi-v7a, arm64-v8a, x86, x86_64 (see [this](https://developer.android.com/ndk/guides/abis))). The binaries will be built in its own `build/android-<arch>-release` directory. A stripped version of all the binaries are copied to `build/android-all-release` directory.
 
-  To make sure `madbfs` works correctly you need to place these binaries in the same directory as the client binary. You can skip this part, but as a result you need to specify the server binary yourself using `--server` program argument (explained in the next section). Doing this also means that you need to know your Android device ABI beforehand to select the correct server binary. Failing to do so will result in the server not running and the client will fall back to direct `adb` transport.
+## Installation
+
+You can download `madbfs` from the [GitHub releases page](https://github.com/mrizaln/madbfs/releases).
+
+There is no installation step required, as the application is built statically. You can place the binaries wherever you prefer. However, make sure to place the server binaries in the same directory as `madbfs` (the client), or else `madbfs` won't be able to find the server and will fall back to using the `adb` transport. 
+
+If you separate `madbfs` from the server binaries, you need to specify them yourself using `--server` option (explained in the next section). Doing this also means that you need to know your Android device ABI beforehand to select the correct server binary. Failing to do so will result in the server not running and the client will fall back to using the `adb` transport.
 
 ## Usage
 
@@ -165,30 +176,55 @@ The help message can help you start using this program
 usage: madbfs [options] <mountpoint>
 
 Options for madbfs:
-    --serial=<s>         serial number of the device to mount
-                           (you can omit this [detection is similar to adb])
-                           (will prompt if more than one device exists)
-    --server             path to server file
-                           (if omitted will search the file automatically)
-                           (must have the same arch as your phone)
-    --log-level=<l>      log level to use (default: warn)
-    --log-file=<f>       log file to write to (default: - for stdout)
-    --cache-size=<n>     maximum size of the cache in MiB
-                            (default: 256)
-                           (minimum: 128)
-                           (value will be rounded to the next power of 2)
-    --page-size=<n>      page size for cache & transfer in KiB
-                           (default: 128)
-                           (minimum: 64)
-                           (value will be rounded to the next power of 2)
-    --port=<n>           set port the server listens on
-                           (default: 12345)
-    --no-server          don't launch server
-                           (will still attempt to connect to specified port)
-                           (fall back to adb shell calls if connection failed)
-                           (useful for debugging the server)
-    -h   --help          show this help message
-    --full-help          show full help message (includes libfuse options)
+    --serial=<s>           serial number of the device to mount
+                             (you can omit this [detection is similar to adb])
+                             (will prompt if more than one device exists)
+    --server               path to server file
+                             (if omitted will search the file automatically)
+                             (must have the same arch as your phone)
+    --log-level=<l>        log level to use
+                             (default: warn)
+                             (values: trace, debug, info, warn, error, critical, off)
+    --log-file=<f>         log file to write to
+                             (default: '-' for stdout)
+    --cache-size=<n>       maximum size of the cache in MiB
+                             (default: 256)
+                             (minimum: 128)
+                             (value will be rounded to the next power of 2)
+    --page-size=<n>        page size for cache & transfer in KiB
+                             (default: 128)
+                             (minimum: 64)
+                             (value will be rounded to the next power of 2)
+    --port=<n>             set port the server listens on
+                             (default: 12345)
+    --no-server            don't launch server
+                             (will still attempt to connect to specified port)
+                             (fall back to adb shell calls if connection failed)
+                             (useful for debugging the server)
+
+Options for libfuse:
+    -h   --help            print help
+    -V   --version         print version
+    -d   -o debug          enable debug output (implies -f)
+    -f                     foreground operation
+    -s                     disable multi-threaded operation
+    -o clone_fd            use separate fuse device fd for each thread
+                           (may improve performance)
+    -o max_idle_threads    the maximum number of idle worker threads
+                           allowed (default: -1)
+    -o max_threads         the maximum number of worker threads
+                           allowed (default: 10)
+    -o allow_other         allow access by all users
+    -o allow_root          allow access by root
+    -o auto_unmount        auto unmount on process termination
+```
+
+### Unmounting
+
+To unmount the filesystem, you run this command like for any other FUSE filesystem:
+
+```sh
+fusermount -u <mountpoint>
 ```
 
 ### Selecting device
@@ -220,11 +256,11 @@ In order to use the proxy transport, `madbfs` needs to be able to find the `madb
 
 - Place it where you run the `madbfs` program,
 - Place it in the same directory as `madbfs` program, or
-- Specify explicitly the path of the file using `--server` flag.
+- Specify explicitly the path of the file using `--server` option.
 
 If you want the filesystem to use `adb` transport instead then you can use `--no-server` flag. This flag prevents `madbfs` from pushing the server into your phone and running it.
 
-The proxy runs communicates with `madbfs` over TCP enabled by port forwarding and by default it will listen on `12345` port number. If you find this port to be not suitable for your use you can always specify it with `--port` flag.
+The proxy runs communicates with `madbfs` over TCP enabled by port forwarding and by default it will listen on `12345` port number. If you find this port to be not suitable for your use you can always specify it with `--port` option.
 
 ### Cache size
 
@@ -256,6 +292,7 @@ $ ./madbfs --log-file=madbfs.log --log-level=debug <mountpoint>
 As part of debugging functionality `libfuse` has provided debug mode through `-d` flag. You can use this to monitor `madbfs` operations (if you don't want to use log file or want to see the log in real-time). If the debugging information is too verbose, you can use `-f` instead to make madbfs run in foreground mode without printing `fuse` debug information.
 
 ```sh
+$ ./madbfs --log-file=- --log-level=debug -f <mountpoint>
 $ ./madbfs --log-file=- --log-level=debug -d <mountpoint>                     # this will print the libfuse debug messages and madbfs log messages
 $ ./madbfs --log-file=- --log-level=debug -d <mountpoint> 2> /dev/null        # this will print only madbfs log messages since libfuse debug messages are printed to stderr
 ```
@@ -404,13 +441,11 @@ The `<value>` then will be different depending on the operation performed:
 - [x] IPC to talk to the `madbfs` to control the filesystem parameters like invalidation, timeout, cache size, etc.
 - [x] Implement the filesystem as actual tree for caching the stat.
 - [x] Implement file read and write operation caching in memory.
-- [x] ~~Implement proper multithreading, (not needed, since it's using async now, though multiple executor might help).~~
 - [ ] Implement proper permission check.
 - [ ] Implement versioning on each node that expires every certain period of time. When a node expires it needs to query the files from the device again.
 - [ ] Periodic cache invalidation. Current implementation only look at the size of current cache and only invalidate oldest entry when newest entry is added and the size exceed the `cache-size` limit.
 - [x] Eliminate copying data to and from memory when transferring/copying files within the filesystem.
 - [ ] Use multiple threads backing the async runtime.
-- [ ] Rewrite the server app in Kotlin, using the Android runtime instead as native binary.
 - [x] Use persistent TCP connection to the server instead of making connection per request.
 - [ ] Fix open/close semantics.
 - [ ] Add limit to open file descriptor (for adb query it using `ulimit -n`, for server query it using `getrlimit`)
