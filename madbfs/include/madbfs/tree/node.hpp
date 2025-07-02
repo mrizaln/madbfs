@@ -480,7 +480,12 @@ namespace madbfs::tree
             if (current->is<Directory>()) {
                 return Unexpect{ Errc::is_a_directory };
             } else if (current->is<Other>()) {
-                return Unexpect{ Errc::permission_denied };
+                // NOTE: reading/writing special files (excluding symlink) is not possible by FUSE alone. One
+                // can present them by disguising it as regular files though.
+                //
+                // read: - https://github.com/rpodgorny/unionfs-fuse/issues/66
+                //       - https://github.com/libfuse/libfuse/issues/182
+                return Unexpect{ Errc::operation_not_supported };
             }
 
             return current->as<RegularFile>();
