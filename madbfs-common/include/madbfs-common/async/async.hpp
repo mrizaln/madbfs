@@ -70,7 +70,7 @@ namespace madbfs::async
                 ready.notify_one();
             });
 
-            ready.wait(false);
+            ready.wait(false, std::memory_order::acquire);
             if (except) {
                 std::rethrow_exception(except);
             }
@@ -89,7 +89,7 @@ namespace madbfs::async
                 ready.notify_one();
             });
 
-            ready.wait(false);
+            ready.wait(false, std::memory_order::acquire);
             if (except) {
                 std::rethrow_exception(except);
             }
