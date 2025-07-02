@@ -158,8 +158,10 @@ namespace madbfs::tree
             case S_IFDIR: built = base->build(name, stat, Directory{}); break;
             case S_IFLNK: {
                 auto may_target = co_await m_connection.readlink(pathbuf.as_path());
-                if (not may_stats) {
-                    co_return Unexpect{ may_target.error() };
+                if (not may_target) {
+                    auto msg = std::make_error_code(may_target.error()).message();
+                    log_e("readdir: {} [{}/{}]", msg, path.fullpath(), name);
+                    continue;
                 }
                 built = (co_await traverse_or_build(may_target->as_path())).and_then([&](Node& node) {
                     return base->build(name, stat, Link{ &node });
