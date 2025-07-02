@@ -11,7 +11,7 @@ namespace madbfs
 {
     Uniq<connection::Connection> Madbfs::prepare_connection(Opt<path::Path> server, u16 port)
     {
-        auto coro = [=] -> Await<Uniq<connection::Connection>> {
+        auto coro = [=] noexcept -> Await<Uniq<connection::Connection>> {
             auto result = co_await connection::ServerConnection::prepare_and_create(server, port);
             if (not result) {
                 auto msg = std::make_error_code(result.error()).message();
@@ -23,8 +23,7 @@ namespace madbfs
             co_return std::move(*result);
         };
 
-        auto fut = async::spawn(m_async_ctx, coro(), async::use_future);
-        return fut.get();
+        return async::spawn_block(m_async_ctx, coro());
     }
 
     Uniq<data::Ipc> Madbfs::create_ipc()
@@ -68,8 +67,7 @@ namespace madbfs
 
     Madbfs::~Madbfs()
     {
-        auto fut = async::spawn(m_async_ctx, m_tree.shutdown(), async::use_future);
-        fut.wait();
+        async::spawn_block(m_async_ctx, m_tree.shutdown());
 
         m_work_guard.reset();
         m_async_ctx.stop();
