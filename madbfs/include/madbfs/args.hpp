@@ -354,7 +354,7 @@ namespace madbfs::args
         } else if (madbfs_opt.server == nullptr) {
             auto exe = std::filesystem::path{ argv[0] == nullptr ? "madbfs" : argv[0] };
 
-            auto args = Array<Str, 3>{ "shell", "getprop", "ro.product.cpu.abi" };
+            auto args = Array<Str, 5>{ "-s", madbfs_opt.serial, "shell", "getprop", "ro.product.cpu.abi" };
             auto abi  = co_await connection::exec_async("adb", args, "", true);
 
             if (not abi) {
