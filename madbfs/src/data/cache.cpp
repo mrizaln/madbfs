@@ -344,11 +344,12 @@ namespace madbfs::data
             co_return Expect<void>{};
         };
 
-        // writing in parallel is not a good idea :P
-        for (auto [_, page] : may_entry->get().pages) {
-            if (auto res = co_await work(*page); not res) {
-                co_return Unexpect{ res.error() };
-            }
+        auto pages = may_entry->get().pages | sv::values | sv::transform([](auto i) { return std::ref(*i); });
+        auto res   = co_await spawn_parallel(work, pages);
+        if (not res) {
+            auto msg = std::make_error_code(res.error()).message();
+            log_e("{}: failed to flush pages of id={}", __func__, id.inner());
+            co_return Unexpect{ res.error() };
         }
 
         co_return Expect<void>{};
