@@ -1,12 +1,16 @@
 # madbfs
 
-This project, `madbfs` (modern adb filesystem, formerly `adbfsm`), aims to create a well-built filesystem abstraction over `adb` using `libfuse` that is fast, safe, and reliable while also have have well structured code according to modern C++ (20 and above) practices.
+`madbfs` (Modern `adb` Filesystem, formerly `adbfsm`) is a userspace filesystem for Android via `adb` built using `libfuse`. It focuses on being fast, reliable, and safe, with straightforward, well-structured code that follows modern C++ practices.
 
 ## Motivation
 
 I want to manage my Android phone storage from my computer without using MTP (it's awful).
 
-This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbfs-rootless) project on GitHub. While `adbfs-rootless` works as intended, I encoutered frequent crashes that affected its reliability. I initially considered contributing fixes directly into the codebase, but found it somewhat dated with practices that don't align well with modern practices. Consequently, I decided to rebuild the project from the ground up to create a more stable and modern solution (and possibly faster).
+This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbfs-rootless) project. While `adbfs-rootless` works most of the time under light load it has reliability issues. Under high load (such as when a thumbnailer service is running) `adbfs-rootless` tends to crash, making it unusable until it is forcefully unmounted and its cache cleaned.
+
+The file I/O approach of `adbfs-rootless` is also similar to that of MTP, in which each file is first pulled from device (using `adb pull`) before any operations like reading and writing performed. If a write operation is performed, the file is then pushed back into the device (using `adb push`). This approach limits the size of the file that can be handled before the cache is filled (it uses `/tmp`).
+
+These limitations lead me to decide to rebuild the project from ground up in order to create a more stable, modern, and possibly faster solution.
 
 ## Features
 
@@ -36,17 +40,13 @@ This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbf
 
   Update file access and modification times.
 
-- FUSE integration
-
-  Seamlessly mount your Android device as a regular filesystem. Fully compatible with standard tools like `ls`, `cp`, `mv`, `cat`, `vim`, etc.
-
 - Automatic in-memory caching
 
   Recently accessed files are cached in memory using an LRU paging mechanism, allowing faster repeated access.
 
 - Streamed file access (partial read/write)
 
-  Read files on-demand without pulling the entire file first. Unlike MTP’s "pull-whole-file" model, this filesystem streams data over `adb`, enabling efficient access to large files or specific file segments.
+  Read files on-demand without pulling the entire file first. Unlike MTP’s "pull-whole-file" approach, this filesystem streams data over `adb`, enabling efficient access to large files or specific file segments.
 
 - Efficient resource use
 
@@ -66,9 +66,9 @@ This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbf
 
   - Proxy transport (optional)
 
-    Communicates with a lightweight TCP server running natively on the Android device via a custom RPC protocol. It requires a server binary compiled for the phone architecture but has better i/o throughput than the `adb` transport.
+    Communicates with a lightweight TCP server running natively on the Android device via a custom RPC protocol. It requires a server binary compiled for the phone architecture but has better I/O throughput than the `adb` transport.
 
-  Both of the transport can work wired via USB or wireless in your local network. `madbfs` will automatically fall back to `adb` transport if the server is not available.
+  Both of the transport can work wired via USB or wireless in your local network. `madbfs` will automatically fall back to `adb` transport if the proxy transport is not available.
 
 - Resilient to disconnections
 
@@ -83,6 +83,7 @@ This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbf
 - `madbfs`
 
   Runtime dependencies
+
   - adb
 
   Build dependencies
@@ -120,7 +121,7 @@ Since the dependencies are managed by Conan, you need to make sure it's installe
 
 > don't forget to run `conan profile detect` if you use Conan for the first time
 
-- `madbfs` 
+- `madbfs`
 
   Navigate to the root of the repository, then you install the dependencies:
 
@@ -141,7 +142,7 @@ Since the dependencies are managed by Conan, you need to make sure it's installe
 
   > you may skip this process if you don't mind not having proxy transport support
 
-  Navigate to the root of the repository then go to `madbfs-server/` subdirectory. You then can proceed by editing the `build_all.sh` script. This step is necessary to set the Android native app build system and its paramater to be able to compile the server. You may change these parameters
+  Navigate to the root of the repository then go to `madbfs-server/` subdirectory. You then can proceed by editing the [`build_all.sh`](./madbfs-server/build_all.sh) script. This step is necessary to set the Android native app build system and its paramater to be able to compile the server. You may change these parameters
 
   - ANDROID_NDK_PATH
     > see [this](https://developer.android.com/studio/projects/install-ndk) or [this](https://developer.android.com/ndk/downloads)
@@ -155,16 +156,28 @@ Since the dependencies are managed by Conan, you need to make sure it's installe
   The compilation step is simpler:
 
   ```sh
-  ./build.sh
+  ./build_all.sh
   ```
 
-  The script above will build the server for all the currently supported Android ABIs (armeabi-v7a, arm64-v8a, x86, x86_64 (see [this](https://developer.android.com/ndk/guides/abis))). The binaries will be built in its own `build/android-<arch>-release` directory. A stripped version of all the binaries are copied to `build/android-all-release` directory.
+  The script above will build the server for all the currently supported Android ABIs (see [this](https://developer.android.com/ndk/guides/abis)). The binaries will be built in its own `build/android-<arch>-release` directory. A stripped version of all the binaries are copied to `build/android-all-release` directory.
+
+- Package
+
+  To allow for easier packaging, I have created [a script](./package.sh) that compiles both `madbfs` and `madbfs-server` in one go:
+
+  > NOTE: you must configure the Android NDK variables first on [`build_all.sh`](./madbfs-server/build_all.sh) script before using this script
+
+  ```sh
+  ./package.sh
+  ```
+
+  This will build and package `madbfs` into a `tar.gz` file in `build/package/` directory.
 
 ## Installation
 
 You can download `madbfs` from the [GitHub releases page](https://github.com/mrizaln/madbfs/releases).
 
-There is no installation step required, as the application is built statically. You can place the binaries wherever you prefer. However, make sure to place the server binaries in the same directory as `madbfs` (the client), or else `madbfs` won't be able to find the server and will fall back to using the `adb` transport. 
+There is no installation step required, as the application is built statically. You can place the binaries wherever you prefer. However, make sure to place the server binaries (`madbfs-server-*`) in the same directory as `madbfs` (the client), or else `madbfs` won't be able to find the server and will fall back to using the `adb` transport.
 
 If you separate `madbfs` from the server binaries, you need to specify them yourself using `--server` option (explained in the next section). Doing this also means that you need to know your Android device ABI beforehand to select the correct server binary. Failing to do so will result in the server not running and the client will fall back to using the `adb` transport.
 
@@ -252,7 +265,7 @@ $ ANDROID_SERIAL=068832516O101622 ./madbfs
 
 > only relevant if you want proxy transport support
 
-In order to use the proxy transport, `madbfs` needs to be able to find the `madbfs-server` binary. There are three approaches you can do in order for `mabfs` be able to find the server file:
+In order to use the proxy transport, `madbfs` needs to be able to find the `madbfs-server` binary. There are three approaches you can do in order for `madbfs` be able to find the server file:
 
 - Place it where you run the `madbfs` program,
 - Place it in the same directory as `madbfs` program, or
@@ -260,28 +273,28 @@ In order to use the proxy transport, `madbfs` needs to be able to find the `madb
 
 If you want the filesystem to use `adb` transport instead then you can use `--no-server` flag. This flag prevents `madbfs` from pushing the server into your phone and running it.
 
-The proxy runs communicates with `madbfs` over TCP enabled by port forwarding and by default it will listen on `12345` port number. If you find this port to be not suitable for your use you can always specify it with `--port` option.
+The proxy communicates with `madbfs` over TCP enabled by port forwarding and by default it will listen on port `12345`. If you find this port to be not suitable for your use you can always specify it with `--port` option.
 
 ### Cache size
 
-`madbfs` caches all the read/write operations on the files on the device. This cache is stored in memory. You can control the size of this cache using `--cache-size` option (in MiB). The default value is `256` (256MiB).
+`madbfs` caches all the read/write operations on the files on the device. This cache is stored in memory. You can control the size of this cache using `--cache-size` option (in MiB). The default value is `256` (256 MiB).
 
 ```sh
-$ ./madbfs --cache-size=256 <mountpoint>    # using 256MiB of cache
+$ ./madbfs --cache-size=256 <mountpoint>    # 256 MiB of memory will be used as file cache
 ```
 
 ### Page size
 
-In the cache, each file is divided into pages. The `--page-size` option dictates the size of this page (in KiB). Page size also dictates the size of the buffer used to read/write into the file on the device. You can adjust this value according to your use. From my testing, `page-size` of value `128` (means 128KiB) works well when using USB cable for the `adb` connection. You may want to decrease or increase this value for your use case. The default value is `128` (128KiB).
+In the cache, each file is divided into pages. The `--page-size` option dictates the size of this page (in KiB). Page size also dictates the size of the buffer used to read/write into the file on the device. You can adjust this value according to your use.
 
 ```sh
-$ ./madbfs --page-size=128 <mountpoint>    # using 128KiB of page size
+$ ./madbfs --page-size=128 <mountpoint>    # read/write operations are communicated in 128 KiB chunks
 
 ```
 
 ### Logging
 
-The default log file is stdout (which goes to nowhere when not run in foreground mode). You can manually set the log file using `--log-file` option and set the log level using `--log-level`.
+The default log file is stdout (specified by "-"; which goes to nowhere when not run in foreground mode). You can manually set the log file using `--log-file` option and set the log level using `--log-level`.
 
 ```sh
 $ ./madbfs --log-file=madbfs.log --log-level=debug <mountpoint>
@@ -292,7 +305,7 @@ $ ./madbfs --log-file=madbfs.log --log-level=debug <mountpoint>
 As part of debugging functionality `libfuse` has provided debug mode through `-d` flag. You can use this to monitor `madbfs` operations (if you don't want to use log file or want to see the log in real-time). If the debugging information is too verbose, you can use `-f` instead to make madbfs run in foreground mode without printing `fuse` debug information.
 
 ```sh
-$ ./madbfs --log-file=- --log-level=debug -f <mountpoint>
+$ ./madbfs --log-file=- --log-level=debug -f <mountpoint>                     # runs in foreground (not daemonized)
 $ ./madbfs --log-file=- --log-level=debug -d <mountpoint>                     # this will print the libfuse debug messages and madbfs log messages
 $ ./madbfs --log-file=- --log-level=debug -d <mountpoint> 2> /dev/null        # this will print only madbfs log messages since libfuse debug messages are printed to stderr
 ```
@@ -373,12 +386,12 @@ Some operations only requires `"op"` field, while some requires `"value"` field.
   > - uint must be between 64 and 4096
   > - the value will be rouded up to the nearest multiple of 2
 
-The IPC will reply immediately after an operation complete. The reply is in a JSON in the form of
+The IPC will reply immediately after an operation is completed. The reply is in a JSON in the form of
 
 ```json
 {
   "status", <success|error>,
-  "<value|message>": <value>
+  <"value"|"message">: <value>
 }
 ```
 
@@ -435,6 +448,56 @@ The `<value>` then will be different depending on the operation performed:
   > cache size is in MiB
   > page size is in KiB
 
+## Benchmark
+
+Benchmark is done by writing a 64 MiB file using `dd` and then reading it back. The statistics printed by `dd` is used for the speed value so is for `adb push` and `adb pull`. The test is done on an Android 11 phone (armv8) using USB cable with proxy transport. As baseline, the speed on which an `adb push` (write) and an `adb pull` (read) operation is done on a file with the same size is measured. `madbfs` is launched using its default parameters (cache size = 256 MiB, page size = 128 KiB).
+
+The write command is as follows:
+
+```sh
+  dd if=/dev/random of=random bs=128K count=1024
+```
+
+The read command is as follows:
+
+```sh
+  dd if=random of=/dev/null bs=128K count=1024
+```
+
+### Proxy transport
+
+- Write
+
+  | operation | speed (MB/s) | relative speed |
+  | :-------- | -----------: | -------------: |
+  | adb push  |         15.3 |           1.00 |
+  | write     |         13.1 |           0.86 |
+
+- Read
+
+  | operation       | speed (MB/s) | relative speed |
+  | :-------------- | -----------: | -------------: |
+  | adb pull        |         11.7 |           1.00 |
+  | read (no cache) |         10.8 |           0.93 |
+  | read (cache)    |       2100.0 |         179.49 |
+
+### `adb` transport
+
+- Write
+
+  | operation | speed (MB/s) | relative speed |
+  | :-------- | -----------: | -------------: |
+  | adb push  |         15.3 |           1.00 |
+  | write     |         12.4 |           0.81 |
+
+- Read
+
+  | operation       | speed (MB/s) | relative speed |
+  | :-------------- | -----------: | -------------: |
+  | adb pull        |         11.7 |           1.00 |
+  | read (no cache) |          3.6 |           0.24 |
+  | read (cache)    |       2100.0 |         179.49 |
+
 ## TODO
 
 - [x] Make the codebase async using C++20 coroutines.
@@ -448,4 +511,4 @@ The `<value>` then will be different depending on the operation performed:
 - [ ] Use multiple threads backing the async runtime.
 - [x] Use persistent TCP connection to the server instead of making connection per request.
 - [ ] Fix open/close semantics.
-- [ ] Add limit to open file descriptor (for adb query it using `ulimit -n`, for server query it using `getrlimit`)
+- [ ] Add limit to open file descriptor (for adb query it using `ulimit -n`, for server query it using `getrlimit`).
