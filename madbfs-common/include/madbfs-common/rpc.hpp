@@ -12,6 +12,9 @@ namespace madbfs::rpc
 {
     using Socket = async::tcp::Socket;
 
+    template <typename T>
+    using Channel = async::Channel<T>;
+
     // NOTE: if you decided to add/remove one or more entries, do update domain check in read_procedure
     enum class Procedure : u8
     {
@@ -209,6 +212,7 @@ namespace madbfs::rpc
 
         Client(Socket socket)
             : m_socket{ std::move(socket) }
+            , m_channel{ socket.get_executor(), 4096 }    // TODO: bigger numbers?
         {
         }
 
@@ -229,8 +233,11 @@ namespace madbfs::rpc
         using Inflight = std::unordered_map<Id, Promise, Id::Hash>;
 
         AExpect<void> receive();
+        AExpect<void> send();
 
-        Socket    m_socket;
+        Socket                  m_socket;
+        Channel<Span<const u8>> m_channel;
+
         Inflight  m_requests;
         Id::Inner m_counter = 0;
         bool      m_running = false;

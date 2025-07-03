@@ -12,6 +12,15 @@
         co_return madbfs::Unexpect{ madbfs::Errc::broken_pipe };                                             \
     }
 
+#define HANDLE_ERROR_ELSE(Res, Want, Msg, Else)                                                              \
+    if (not(Res)) {                                                                                          \
+        madbfs::log_e("{}: " Msg ": {}", __func__, Res.error().message());                                   \
+        Else;                                                                                                \
+    } else if (Res.value() != Want) {                                                                        \
+        madbfs::log_e("{}: " Msg ": message length mismatch [{} vs {}]", __func__, Res.value(), Want);       \
+        Else;                                                                                                \
+    }
+
 // NOTE: if only C++ has '?' a la rust... this is the most I can think of for C++
 #define TRY(Name, Stmt)                                                                                      \
     auto Name = Stmt;                                                                                        \
@@ -357,25 +366,41 @@ namespace madbfs::rpc
         m_running = true;
 
         auto exec = co_await async::current_executor();
-        asio::co_spawn(exec, receive(), [&](std::exception_ptr e, Expect<void> res) {
+        async::spawn(exec, receive(), [&](std::exception_ptr e, Expect<void> res) {
             m_running = false;
 
             if (e) {
                 try {
                     std::rethrow_exception(e);
                 } catch (std::exception& e) {
-                    log_c("receiver: exception occurred: {}", e.what());
+                    log_c("receive: exception occurred: {}", e.what());
                 }
             } else if (not res) {
                 auto msg = std::make_error_code(res.error()).message();
-                log_e("receiver: finished with error: {}", msg);
+                log_e("receive: finished with error: {}", msg);
             }
 
-            log_e("receiver: there are {} promises unhandled", m_requests.size());
+            log_e("receive: there are {} promises unhandled", m_requests.size());
             for (auto& [id, promise] : m_requests) {
                 promise.promise.set_value(Unexpect{ e ? Errc::state_not_recoverable : Errc::not_connected });
             }
+
             m_requests.clear();
+        });
+
+        async::spawn(exec, send(), [&](std::exception_ptr e, Expect<void> res) {
+            if (e) {
+                try {
+                    std::rethrow_exception(e);
+                } catch (std::exception& e) {
+                    log_c("send: exception occurred: {}", e.what());
+                }
+            } else if (not res) {
+                auto msg = std::make_error_code(res.error()).message();
+                log_e("send: finished with error: {}", msg);
+            }
+
+            m_channel.reset();
         });
     }
 
@@ -419,19 +444,7 @@ namespace madbfs::rpc
 
             buffer.resize(size);
             auto n1 = co_await async::read_exact<u8>(m_socket, buffer);
-            if (not n1) {
-                auto i   = id.inner();
-                auto msg = n1.error().message();
-                log_e("{}: [{}] failed to read response payload: {}", __func__, i, msg);
-                promise.set_value(Unexpect{ async::to_generic_err(n1.error(), Errc::not_connected) });
-                continue;
-            } else if (n1.value() != buffer.size()) {
-                auto i  = id.inner();
-                auto nn = buffer.size();
-                log_e("{}: [{}] mismatched response length [{} vs {}]", __func__, i, n1.value(), nn);
-                promise.set_value(Unexpect{ Errc::broken_pipe });
-                continue;
-            };
+            HANDLE_ERROR_ELSE(n1, buffer.size(), "failed to read response payload", continue);
 
             auto response = parse_response(buffer, *proc);
             if (not response) {
@@ -442,6 +455,22 @@ namespace madbfs::rpc
 
             promise.set_value(std::move(response).value());
         }
+        co_return Expect<void>{};
+    }
+
+    AExpect<void> Client::send()
+    {
+        while (m_running and m_channel.is_open()) {
+            auto payload = co_await m_channel.async_receive(async::as_expected(async::use_awaitable));
+            if (not payload) {
+                log_e("{}: failed to recv payload from channel: {}", __func__, payload.error().message());
+                co_return Unexpect{ async::to_generic_err(payload.error(), Errc::broken_pipe) };
+            }
+
+            auto n = co_await async::write_exact(m_socket, payload.value());
+            HANDLE_ERROR_ELSE(n, payload->size(), "failed to send request payload", continue);
+        }
+
         co_return Expect<void>{};
     }
 
@@ -539,10 +568,11 @@ namespace madbfs::rpc
         std::visit(std::move(overload), std::move(req));
         auto payload = builder.build();
 
-        auto n = co_await async::write_exact(m_socket, payload);
-        HANDLE_ERROR(n, payload.size(), "failed to send request payload");
-
-        buffer.clear();
+        auto res = co_await m_channel.async_send({}, payload, async::as_expected(async::use_awaitable));
+        if (not res) {
+            log_e("{}: failed to send payload to channel: {}", __func__, res.error().message());
+            co_return Unexpect{ async::to_generic_err(res.error(), Errc::broken_pipe) };
+        }
 
         co_return future;
     }

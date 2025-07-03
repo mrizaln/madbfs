@@ -11,11 +11,13 @@
 #    include <asio.hpp>
 #    include <asio/error.hpp>
 #    include <asio/experimental/awaitable_operators.hpp>
+#    include <asio/experimental/channel.hpp>
 #    include <asio/experimental/parallel_group.hpp>
 #else
 #    include <boost/asio.hpp>
 #    include <boost/asio/error.hpp>
 #    include <boost/asio/experimental/awaitable_operators.hpp>
+#    include <boost/asio/experimental/channel.hpp>
 #    include <boost/asio/experimental/parallel_group.hpp>
 #endif
 
@@ -48,6 +50,9 @@ namespace madbfs::async
     using WorkGuard = asio::executor_work_guard<Executor>;
 
     using Timer = Token::as_default_on_t<asio::steady_timer>;
+
+    template <typename T>
+    using Channel = asio::experimental::channel<void(error_code, T)>;
 
     template <typename Exec, typename Awaited, typename Completion>
     auto spawn(Exec&& ex, Awaited&& func, Completion&& completion) noexcept
