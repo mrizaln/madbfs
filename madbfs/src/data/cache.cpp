@@ -509,8 +509,7 @@ namespace madbfs::data
         auto found = m_table.find(id);
         assert(found != m_table.end());
 
-        // NOTE: if m_path_map is updated, the path may point to freed memory, so copy is made
-        auto path = found->second.path;
+        auto path = found->second.path.as_path();
         auto idx  = static_cast<usize>(offset) / m_page_size;
 
         log_d("{}: [id={}|idx={}] cache miss, read from device...", __func__, id.inner(), idx, offset);
@@ -522,8 +521,7 @@ namespace madbfs::data
         auto found = m_table.find(id);
         assert(found != m_table.end());
 
-        // NOTE: if m_path_map is updated, the path may point to freed memory, so copy is made
-        auto path = found->second.path;
+        auto path = found->second.path.as_path();
         auto idx  = static_cast<usize>(offset) / m_page_size;
 
         log_d("{}: [id={}|idx={}] flush, write to device...", __func__, id.inner(), idx, offset);
