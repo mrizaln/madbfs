@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Benchmark on README.md
+
+### Fixed
+
+- Crash when symlink target doesn't have access permission.
+- ABI query at startup fail when there is more than one device.
+
+### Changed
+
+- Use channel to synchronize writing on socket.
+- Make multiple adjacent page `flush` operation launch in parallel.
+
 ## [0.7.0] - 2025-06-26
 
 ### Added
@@ -44,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Make `read`/`write` parallelize-friendly.
+- Make multiple adjacent page `read` and `write` operation launch in parallel.
 - Lower the default cache size to `256` MiB from `512` MiB.
 
 ### Removed
