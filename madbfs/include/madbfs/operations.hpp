@@ -67,8 +67,8 @@ namespace madbfs::operations
         .readdir         = madbfs::operations::readdir,
         .releasedir      = nullptr,
         .fsyncdir        = nullptr,
-        .init            = madbfs::operations::init,
-        .destroy         = madbfs::operations::destroy,
+        .init            = madbfs::operations::init,       // entry point of fuse_main
+        .destroy         = madbfs::operations::destroy,    // exit point of fuse_main
         .access          = madbfs::operations::access,
         .create          = nullptr,
         .lock            = nullptr,

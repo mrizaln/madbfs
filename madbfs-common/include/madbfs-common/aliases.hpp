@@ -40,6 +40,9 @@ namespace madbfs
         using Str    = std::string_view;
         using String = std::string;
 
+        template <typename T>
+        using Init = std::initializer_list<T>;
+
         template <typename T, typename U>
         using Pair = std::pair<T, U>;
 

@@ -148,18 +148,6 @@ namespace madbfs::connection
         virtual ~Connection() = default;
     };
 
-    enum class AdbError
-    {
-        Unknown,
-        NoDev,
-        PermDenied,
-        NoSuchFileOrDir,
-        NotADir,
-        Inaccessible,
-        ReadOnly,
-        TryAgain,
-    };
-
     enum class DeviceStatus
     {
         Device,
@@ -178,23 +166,6 @@ namespace madbfs::connection
      * @brief Get human readable description of DeviceStatus.
      */
     Str to_string(DeviceStatus status);
-
-    /**
-     * @brief Execute a command.
-     *
-     * @param exe Executable name.
-     * @param args Arguments to the command.
-     * @param in Input data to be piped as stdin.
-     * @param check Check return value.
-     * @param merge_err Append stderr to stdout.
-     */
-    madbfs::Await<madbfs::Expect<madbfs::String>> exec_async(
-        madbfs::Str                     exe,
-        madbfs::Span<const madbfs::Str> args,
-        madbfs::Str                     in,
-        bool                            check,
-        bool                            merge_err = false
-    );
 
     /**
      * @brief Start connection with the devices.

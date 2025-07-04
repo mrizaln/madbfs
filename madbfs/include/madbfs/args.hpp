@@ -1,5 +1,7 @@
 #pragma once
 
+#include "madbfs/cmd.hpp"
+
 #include "madbfs-common/log.hpp"
 #include "madbfs-common/util/split.hpp"
 #include "madbfs/connection/connection.hpp"
@@ -197,7 +199,7 @@ namespace madbfs::args
             if (path_env != nullptr) {
                 auto splitter = util::StringSplitter{ path_env, ':' };
                 while (auto path = splitter.next()) {
-                    auto file = std::filesystem::path{ *path } / exec_path.filename();
+                    auto file = fs::path{ *path } / exec_path.filename();
                     if (not fs::exists(file)) {
                         continue;
                     }
@@ -353,9 +355,9 @@ namespace madbfs::args
             fmt::println("[madbfs] no-server flag specified, won't launch server");
         } else if (madbfs_opt.server == nullptr) {
             auto exe = std::filesystem::path{ argv[0] == nullptr ? "madbfs" : argv[0] };
-
-            auto args = Array<Str, 5>{ "-s", madbfs_opt.serial, "shell", "getprop", "ro.product.cpu.abi" };
-            auto abi  = co_await connection::exec_async("adb", args, "", true);
+            auto abi = co_await cmd::exec(
+                { "adb", "-s", madbfs_opt.serial, "shell", "getprop", "ro.product.cpu.abi" }
+            );
 
             if (not abi) {
                 fmt::println("[madbfs] the device's Android ABI can't be queried");

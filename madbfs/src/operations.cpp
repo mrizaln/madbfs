@@ -111,7 +111,7 @@ namespace madbfs::operations
         auto page_size  = args->pagesize * 1024;
         auto max_pages  = cache_size / page_size;
         auto port       = args->port;
-        auto server     = args->server.and_then([](auto& p) { return path::create(p.c_str()); });
+        auto server     = args->server.transform(&std::filesystem::path::c_str).and_then(&path::create);
 
         return new Madbfs{ server, port, page_size, max_pages };
     }

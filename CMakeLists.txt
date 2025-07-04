@@ -17,5 +17,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(MADBFS_USE_NON_BOOST_ASIO OFF CACHE BOOL "use non-boost asio")
 set(MADBFS_ENABLE_RAPIDHASH_BLANKET_IMPL ON CACHE BOOL "enable rapidhash")
+
 add_subdirectory(madbfs-common)
 add_subdirectory(madbfs)

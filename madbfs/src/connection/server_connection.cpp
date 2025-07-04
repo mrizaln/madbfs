@@ -1,6 +1,6 @@
 #include "madbfs/connection/server_connection.hpp"
 
-#include "madbfs/connection/connection.hpp"
+#include "madbfs/cmd.hpp"
 #include "madbfs/path/path.hpp"
 
 #include <madbfs-common/log.hpp>
@@ -75,9 +75,8 @@ namespace madbfs::connection
         auto serv_file = Str{ "/data/local/tmp/madbfs-server" };
 
         // enable port forwarding
-        auto forward      = fmt::format("tcp:{}", port);
-        auto forward_args = Array<Str, 3>{ "forward", forward, forward };
-        if (auto res = co_await exec_async("adb", forward_args, "", true, false); not res) {
+        auto forward = fmt::format("tcp:{}", port);
+        if (auto res = co_await cmd::exec({ "adb", "forward", forward, forward }); not res) {
             auto msg = std::make_error_code(res.error()).message();
             log_e("{}: failed to enable port forwarding at port {}: {}", __func__, port, msg);
             co_return Unexpect{ res.error() };
@@ -97,16 +96,14 @@ namespace madbfs::connection
         log_i("{}: server path set to {}, pushing server normally", __func__, server->fullpath());
 
         // push server executable to device
-        auto push_args = Array<Str, 3>{ "push", server->fullpath(), serv_file };
-        if (auto res = co_await exec_async("adb", push_args, "", true, false); not res) {
+        if (auto res = co_await cmd::exec({ "adb", "push", server->fullpath(), serv_file }); not res) {
             auto msg = std::make_error_code(res.error()).message();
             log_e("{}: failed to push 'madbfs-server' to device: {}", __func__, msg);
             co_return Unexpect{ res.error() };
         }
 
         // update execute permission
-        auto chmod_args = Array<Str, 4>{ "shell", "chmod", "+x", serv_file };
-        if (auto res = co_await exec_async("adb", chmod_args, "", true, false); not res) {
+        if (auto res = co_await cmd::exec({ "adb", "shell", "chmod", "+x", serv_file }); not res) {
             auto msg = std::make_error_code(res.error()).message();
             log_e("{}: failed to update 'madbfs-server' permission: {}", __func__, msg);
             co_return Unexpect{ res.error() };
