@@ -4,7 +4,7 @@
 
 #define FUSE_USE_VERSION 31
 #include <fcntl.h>
-#include <fuse3/fuse.h>
+#include <fuse.h>
 
 namespace madbfs::operations
 {

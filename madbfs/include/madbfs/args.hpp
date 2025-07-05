@@ -7,8 +7,8 @@
 #include "madbfs/connection/connection.hpp"
 
 #define FUSE_USE_VERSION 31
-#include <fuse3/fuse_lowlevel.h>
-#include <fuse3/fuse_opt.h>
+#include <fuse_lowlevel.h>
+#include <fuse_opt.h>
 #include <linr/read.hpp>
 
 #include <filesystem>
