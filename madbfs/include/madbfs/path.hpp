@@ -19,8 +19,16 @@ namespace madbfs::path
         friend class PathBuf;
         friend constexpr Opt<Path> create(Str path);
 
+        /**
+         * @brief Default construct a path.
+         *
+         * The path will point to root. You can use `root()` static function instead to be more explicit.
+         */
         constexpr Path() = default;
 
+        /**
+         * @brief Create a path that points to root.
+         */
         static Path root() { return {}; }
 
         constexpr bool is_root() const { return m_dirname == "/" and m_basename == "/"; }
@@ -67,7 +75,7 @@ namespace madbfs::path
         Opt<PathBuf> extend_copy(Str name) const;
 
         /**
-         * @brief Creates generator that iterates over the path.
+         * @brief Creates generator that iterates over the path components from root.
          */
         Gen<Str> iter() const;
 
@@ -99,8 +107,16 @@ namespace madbfs::path
         friend class Path;
         friend Opt<PathBuf> create_buf(String&& path);
 
+        /**
+         * @brief Default construct a path.
+         *
+         * The path will point to root. You can use `root()` static function instead to be more explicit.
+         */
         PathBuf() = default;
 
+        /**
+         * @brief Create a path that points to root.
+         */
         static PathBuf root() { return {}; }
 
         /**
@@ -123,7 +139,7 @@ namespace madbfs::path
          *
          * @return True if extended, false if extension failed.
          *
-         * Extension will fails if the name is empty, is '..' or is '.', or contains '/'.
+         * Extension will fail if the name is empty, is '..' or is '.', or contains '/'.
          */
         bool extend(Str name);
 
@@ -136,6 +152,11 @@ namespace madbfs::path
          */
         Opt<PathBuf> extend_copy(Str name) const;
 
+        /**
+         * @brief Creates a `Path` from `PathBuf`.
+         *
+         * The backing `PathBuf` must outlive the constructed `Path`.
+         */
         Path as_path() const;
 
         operator Path() const { return as_path(); }
@@ -236,6 +257,9 @@ namespace madbfs::path::inline literals
         };
     }
 
+    /**
+     * @brief Create a path at compile-time.
+     */
     template <detail::FixedStr Str>
     consteval Path operator""_path()
     {

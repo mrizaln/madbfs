@@ -35,8 +35,12 @@ namespace madbfs::data
         using Socket   = async::unix_socket::Socket;
         using OnOp     = std::move_only_function<Await<boost::json::value>(ipc::Op op)>;
 
-        // Uniq to make it std::movable
-        static Expect<Uniq<Ipc>> create(async::Context& context);
+        /**
+         * @brief Create IPC.
+         *
+         * @param context Async context.
+         */
+        static Expect<Ipc> create(async::Context& context);
 
         ~Ipc();
 
@@ -46,8 +50,17 @@ namespace madbfs::data
         Ipc(const Ipc&)            = delete;
         Ipc& operator=(const Ipc&) = delete;
 
+        /**
+         * @brief Lauch the IPC and listen for request.
+         *
+         * @param on_op Operation request handler.
+         */
         Await<void> launch(OnOp on_op);
-        void        stop();
+
+        /**
+         * @brief Stop the IPC.
+         */
+        void stop();
 
         path::Path path() const { return m_socket_path.as_path(); }
 
@@ -64,6 +77,6 @@ namespace madbfs::data
         path::PathBuf m_socket_path;
         Acceptor      m_socket;
         OnOp          m_on_op;
-        bool          m_running = false;    // should have been an atomic
+        bool          m_running = false;
     };
 }

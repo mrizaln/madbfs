@@ -16,7 +16,8 @@ namespace madbfs::connection
          * @brief Prepare the server connection and create the class.
          *
          * @param port Port the server will be listening on.
-         * @return A newly created ServerConnection class.
+         *
+         * The returned Uniq will never be nullptr.
          */
         static AExpect<Uniq<ServerConnection>> prepare_and_create(Opt<path::Path> server, u16 port);
 
@@ -62,20 +63,41 @@ namespace madbfs::connection
         {
         }
 
-        static AExpect<Uniq<rpc::Client>> try_make_client(u16 port);
+        /**
+         * @brief Connect to the server and create an RPC client.
+         *
+         * @param port The port to connect to.
+         */
+        static AExpect<Uniq<rpc::Client>> make_client(u16 port);
 
-        AExpect<rpc::Response> try_send(Vec<u8>& buf, rpc::Request req);
+        /**
+         * @brief Send request through the RPC client.
+         *
+         * @param buf Data buffer.
+         * @param req Operation request.
+         *
+         * This function will try to reconnect if the RPC client is disconnected.
+         */
+        AExpect<rpc::Response> send(Vec<u8>& buf, rpc::Request req);
 
+        /**
+         * @brief Request send wrapper.
+         *
+         * @param buf Data buffer.
+         * @param req Operation request.
+         *
+         * This function typecheck the returned response variant from `send` to match the corresponding
+         * request.
+         */
         template <rpc::IsRequest Req>
         AExpect<rpc::ToResp<Req>> send_req(Vec<u8>& buf, Req req)
         {
-            auto res = co_await try_send(buf, std::move(req));
+            auto res = co_await send(buf, std::move(req));
             if (not res) {
                 co_return Unexpect{ res.error() };
             }
 
-            using Resp = rpc::ToResp<Req>;
-            if (auto resp = std::get_if<Resp>(&*res); resp != nullptr) {
+            if (auto resp = std::get_if<rpc::ToResp<Req>>(&*res); resp != nullptr) {
                 co_return std::move(*resp);
             }
 
@@ -83,7 +105,7 @@ namespace madbfs::connection
         }
 
         u16               m_port        = 0;
-        Uniq<rpc::Client> m_client      = nullptr;    // may be nullable (in the case of disconnection)
+        Uniq<rpc::Client> m_client      = nullptr;    // may be null (in the case of disconnection)
         Opt<Process>      m_server_proc = {};         // server process handle
         Opt<Pipe>         m_server_out  = {};         // server's stdout
         Opt<Pipe>         m_server_err  = {};         // server's stderr

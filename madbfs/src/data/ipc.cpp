@@ -111,7 +111,7 @@ namespace madbfs::data
         }
     }
 
-    Expect<Uniq<Ipc>> Ipc::create(async::Context& context)
+    Expect<Ipc> Ipc::create(async::Context& context)
     {
         auto socket_path = [] -> String {
             const auto* res = std::getenv("XDG_RUNTIME_DIR");
@@ -138,7 +138,7 @@ namespace madbfs::data
 
         try {
             auto acc = Acceptor{ context, ep };    // may throw
-            return Uniq<Ipc>{ new Ipc{ std::move(*path), std::move(acc) } };
+            return Ipc{ std::move(*path), std::move(acc) };
         } catch (const boost::system::system_error& e) {
             log_e("{}: failed to construct acceptor {:?}: {}", __func__, name, e.code().message());
             return Unexpect{ async::to_generic_err(e.code(), Errc::address_not_available) };

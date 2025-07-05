@@ -11,7 +11,11 @@
 
 namespace madbfs
 {
-    Uniq<connection::Connection> Madbfs::prepare_connection(Opt<path::Path> server, u16 port)
+    Uniq<connection::Connection> Madbfs::prepare_connection(
+        async::Context& ctx,
+        Opt<path::Path> server,
+        u16             port
+    )
     {
         auto coro = [=] noexcept -> Await<Uniq<connection::Connection>> {
             auto result = co_await connection::ServerConnection::prepare_and_create(server, port);
@@ -25,27 +29,27 @@ namespace madbfs
             co_return std::move(*result);
         };
 
-        return async::spawn_block(m_async_ctx, coro());
+        return async::spawn_block(ctx, coro());
     }
 
-    Uniq<data::Ipc> Madbfs::create_ipc()
+    Opt<data::Ipc> Madbfs::create_ipc(async::Context& ctx)
     {
-        auto ipc = data::Ipc::create(m_async_ctx);
+        auto ipc = data::Ipc::create(ctx);
         if (not ipc.has_value()) {
             const auto msg = std::make_error_code(ipc.error()).message();
             log_e("Madbfs: failed to initialize ipc: {}", msg);
-            return nullptr;
+            return {};
         }
 
-        log_i("Madbfs: succesfully created ipc: {}", (*ipc)->path().fullpath());
+        log_i("Madbfs: succesfully created ipc: {}", ipc->path().fullpath());
         return std::move(*ipc);
     }
 
-    void Madbfs::work_thread_function()
+    void Madbfs::work_thread_function(async::Context& ctx)
     {
         try {
             log_i("Madbfs: io_context running...");
-            auto num_handlers = m_async_ctx.run();
+            auto num_handlers = ctx.run();
             log_i("Madbfs: io_context stopped with {} handlers executed", num_handlers);
         } catch (std::exception& e) {
             log_w("Madbfs: io_context stopped with an exception: {}", e.what());
@@ -55,13 +59,13 @@ namespace madbfs
     Madbfs::Madbfs(Opt<path::Path> server, u16 port, usize page_size, usize max_pages)
         : m_async_ctx{}
         , m_work_guard{ m_async_ctx.get_executor() }
-        , m_work_thread{ [this] { work_thread_function(); } }
-        , m_connection{ prepare_connection(server, port) }
+        , m_work_thread{ [this] { work_thread_function(m_async_ctx); } }
+        , m_connection{ prepare_connection(m_async_ctx, server, port) }
         , m_cache{ *m_connection, page_size, max_pages }
         , m_tree{ *m_connection, m_cache }
-        , m_ipc{ create_ipc() }
+        , m_ipc{ create_ipc(m_async_ctx) }
     {
-        if (m_ipc != nullptr) {
+        if (m_ipc) {
             auto coro = m_ipc->launch([this](data::ipc::Op op) { return ipc_handler(op); });
             async::spawn(m_async_ctx, std::move(coro), async::detached);
         }

@@ -7,7 +7,7 @@
 namespace madbfs::tree
 {
     FileTree::FileTree(connection::Connection& connection, data::Cache& cache)
-        : m_root{ "/", nullptr, {}, Directory{} }
+        : m_root{ "/", nullptr, {}, node::Directory{} }
         , m_connection{ connection }
         , m_cache{ cache }
     {
@@ -63,7 +63,7 @@ namespace madbfs::tree
             // get stat from device
             auto stat = co_await m_connection.stat(current_path.as_path());
             if (not stat.has_value()) {
-                std::ignore = current->build(name, {}, Error{ stat.error() });
+                std::ignore = current->build(name, {}, node::Error{ stat.error() });
                 co_return Unexpect{ stat.error() };
             }
             if ((stat->mode & S_IFMT) != S_IFDIR) {
@@ -71,7 +71,7 @@ namespace madbfs::tree
             }
 
             // build the node
-            auto built = current->build(name, *stat, Directory{});
+            auto built = current->build(name, *stat, node::Directory{});
             if (not built.has_value()) {
                 co_return Unexpect{ built.error() };
             }
@@ -89,15 +89,15 @@ namespace madbfs::tree
         // get stat from device
         auto stat = co_await m_connection.stat(current_path.as_path());
         if (not stat.has_value()) {
-            std::ignore = current->build(path.filename(), {}, Error{ stat.error() });
+            std::ignore = current->build(path.filename(), {}, node::Error{ stat.error() });
             co_return Unexpect{ stat.error() };
         }
 
         const auto name = path.filename();
 
         switch (stat->mode & S_IFMT) {
-        case S_IFREG: co_return current->build(name, *stat, RegularFile{}); break;
-        case S_IFDIR: co_return current->build(name, *stat, Directory{}); break;
+        case S_IFREG: co_return current->build(name, *stat, node::Regular{}); break;
+        case S_IFDIR: co_return current->build(name, *stat, node::Directory{}); break;
         case S_IFLNK: {
             auto may_target = co_await m_connection.readlink(path);
             if (not may_target) {
@@ -110,9 +110,9 @@ namespace madbfs::tree
                     log_e("traverse_or_build: target not found: {:?}", __func__, target.as_path().fullpath());
                     return err;
                 })
-                .and_then([&](Node& node) { return current->build(name, *stat, Link{ &node }); });
+                .and_then([&](Node& node) { return current->build(name, *stat, node::Link{ &node }); });
         } break;
-        default: co_return current->build(name, *stat, Other{}); break;
+        default: co_return current->build(name, *stat, node::Other{}); break;
         }
     }
 
@@ -154,8 +154,8 @@ namespace madbfs::tree
             auto built = Opt<Expect<Ref<Node>>>{};
 
             switch (stat.mode & S_IFMT) {
-            case S_IFREG: built = base->build(name, stat, RegularFile{}); break;
-            case S_IFDIR: built = base->build(name, stat, Directory{}); break;
+            case S_IFREG: built = base->build(name, stat, node::Regular{}); break;
+            case S_IFDIR: built = base->build(name, stat, node::Directory{}); break;
             case S_IFLNK: {
                 auto may_target = co_await m_connection.readlink(pathbuf.as_path());
                 if (not may_target) {
@@ -164,10 +164,10 @@ namespace madbfs::tree
                     continue;
                 }
                 built = (co_await traverse_or_build(may_target->as_path())).and_then([&](Node& node) {
-                    return base->build(name, stat, Link{ &node });
+                    return base->build(name, stat, node::Link{ &node });
                 });
             } break;
-            default: built = base->build(name, stat, Other{}); break;
+            default: built = base->build(name, stat, node::Other{}); break;
             }
 
             if (not built.has_value()) {

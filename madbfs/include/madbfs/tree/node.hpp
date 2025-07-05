@@ -13,16 +13,24 @@
 namespace madbfs::tree
 {
     class Node;
-    class RegularFile;
+}
+
+namespace madbfs::tree::node
+{
+    class Regular;
     class Directory;
     class Link;
     struct Other;
     struct Error;
 
-    using File = Var<RegularFile, Directory, Link, Other, Error>;
-
-    // TODO: add open flags, use them to determine if file has suitable read/write permission
-    class RegularFile
+    /**
+     * @class Regular
+     *
+     * @brief Represent a regular file.
+     *
+     *  TODO: add open flags, use them to determine if file has suitable read/write permission
+     */
+    class Regular
     {
     public:
         friend Node;
@@ -33,13 +41,7 @@ namespace madbfs::tree
             i32 flags;
         };
 
-        RegularFile() = default;
-
-        RegularFile(RegularFile&& other)
-            : m_open_fds{ std::move(other.m_open_fds) }
-            , m_dirty{ other.m_dirty.load(std::memory_order::acquire) }
-        {
-        }
+        Regular() = default;
 
         /**
          * @brief Insert `fd` into list of open files.
@@ -72,14 +74,19 @@ namespace madbfs::tree
 
         bool is_open(u64 fd) { return sr::find(m_open_fds, fd, &Entry::fd) != m_open_fds.end(); }
         bool has_open_fds() const { return not m_open_fds.empty(); }
-        bool is_dirty() const { return m_dirty.load(std::memory_order::acquire); }
-        void set_dirty(bool val) { m_dirty.store(val, std::memory_order::release); }
+        bool is_dirty() const { return m_dirty; }
+        void set_dirty(bool val) { m_dirty = val; }
 
     private:
-        Vec<Entry>        m_open_fds;    // used to track open files
-        std::atomic<bool> m_dirty = false;
+        Vec<Entry> m_open_fds;    // used to track open files
+        bool       m_dirty = false;
     };
 
+    /**
+     * @class Directory
+     *
+     * @brief Represent a directory.
+     */
     class Directory
     {
     public:
@@ -152,6 +159,14 @@ namespace madbfs::tree
         bool m_has_readdir = false;
     };
 
+    /**
+     * @class Link
+     *
+     * @brief Represent a symbolic link.
+     *
+     * This class is only used for preexisting symlink on the device. The behavior of the link is also not the
+     * same to that of POSIX since this class doesn't allow dangling symbolic link.
+     */
     class Link
     {
     public:
@@ -171,9 +186,11 @@ namespace madbfs::tree
 
     /**
      * @class Other
-     * @brief For files other than regular file, directory, or link.
      *
-     * Block files, character files, socket file, etc. should use this type.
+     * @brief For files other than regular file, directory, or symbolic link.
+     *
+     * File types that goes into this category includes but not limited to block files, character files,
+     * socket file.
      */
     struct Other
     {
@@ -181,14 +198,22 @@ namespace madbfs::tree
 
     /**
      * @class Error
-     * @brief For error operations.
      *
-     * For optimization purpose this class cache the last failed node operation.
+     * @brief Last FUSE operation error.
+     *
+     * This class doesn't represent anything in the fileystem but instead represents the last failed
+     * operation on this particular node. The purpose of this class is to cache the failure so madbfs doesn't
+     * need to pass the operation to the device only to have it fail again.
      */
     struct Error
     {
         Errc error;
     };
+}
+
+namespace madbfs::tree
+{
+    using File = Var<node::Regular, node::Directory, node::Link, node::Other, node::Error>;
 
     class Node
     {
@@ -233,7 +258,7 @@ namespace madbfs::tree
          * This function is different from `as<Error>` since it's intended for use outside of Node. It will
          * return nullptr if the Node is not an Error instance.
          */
-        const Error* as_error() const;
+        const node::Error* as_error() const;
 
         /**
          * @brief Build path from node.
@@ -338,7 +363,7 @@ namespace madbfs::tree
         Expect<Ref<Node>> symlink(Str name, Node* target);
 
         /**
-         * @brief Create a new child node as RegularFile.
+         * @brief Create a new child node as Regular.
          *
          * @param context Context needed to communicate with device and local.
          * @param mode File mode to use and the type of node to be created.
@@ -358,7 +383,7 @@ namespace madbfs::tree
         AExpect<Ref<Node>> mkdir(Context context, mode_t mode);
 
         /**
-         * @brief Remove a child node by its name (RegularFile or Directory).
+         * @brief Remove a child node by its name (Regular or Directory).
          *
          * @param context Context needed to communicate with device and local.
          */
@@ -373,7 +398,7 @@ namespace madbfs::tree
 
         // -----------------------
 
-        // operations on RegularFile
+        // operations on Regular
         // -------------------------
 
         /**
@@ -466,20 +491,20 @@ namespace madbfs::tree
         template <typename T>
         Expect<Ref<const T>> as() const;
 
-        Expect<Ref<RegularFile>> regular_file_prelude()
+        Expect<Ref<node::Regular>> regular_file_prelude()
         {
             auto current = this;
-            if (is<Link>()) {
+            if (is<node::Link>()) {
                 current = &readlink()->get();
             }
 
-            if (auto err = as<Error>(); err.has_value()) {
+            if (auto err = as<node::Error>(); err.has_value()) {
                 return Unexpect{ err->get().error };
             }
 
-            if (current->is<Directory>()) {
+            if (current->is<node::Directory>()) {
                 return Unexpect{ Errc::is_a_directory };
-            } else if (current->is<Other>()) {
+            } else if (current->is<node::Other>()) {
                 // NOTE: reading/writing special files (excluding symlink) is not possible by FUSE alone. One
                 // can present them by disguising it as regular files though.
                 //
@@ -488,7 +513,7 @@ namespace madbfs::tree
                 return Unexpect{ Errc::operation_not_supported };
             }
 
-            return current->as<RegularFile>();
+            return current->as<node::Regular>();
         }
 
         Node*      m_parent = nullptr;
@@ -514,7 +539,7 @@ namespace madbfs::tree
     Expect<Ref<T>> Node::as()
     {
         constexpr auto errc = [&] {
-            if constexpr (std::same_as<Directory, T>) {
+            if constexpr (std::same_as<node::Directory, T>) {
                 return Errc::not_a_directory;
             } else {
                 return Errc::invalid_argument;
@@ -530,7 +555,7 @@ namespace madbfs::tree
     Expect<Ref<const T>> Node::as() const
     {
         constexpr auto errc = [] {
-            if constexpr (std::same_as<Directory, T>) {
+            if constexpr (std::same_as<node::Directory, T>) {
                 return Errc::not_a_directory;
             } else {
                 return Errc::invalid_argument;

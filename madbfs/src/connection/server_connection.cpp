@@ -8,7 +8,7 @@
 
 namespace madbfs::connection
 {
-    AExpect<Uniq<rpc::Client>> ServerConnection::try_make_client(u16 port)
+    AExpect<Uniq<rpc::Client>> ServerConnection::make_client(u16 port)
     {
         auto exec   = co_await async::current_executor();
         auto socket = async::tcp::Socket{ exec };
@@ -29,11 +29,11 @@ namespace madbfs::connection
         co_return std::make_unique<rpc::Client>(std::move(socket));
     }
 
-    AExpect<rpc::Response> ServerConnection::try_send(Vec<u8>& buf, rpc::Request req)
+    AExpect<rpc::Response> ServerConnection::send(Vec<u8>& buf, rpc::Request req)
     {
         if (m_client == nullptr) {
             log_i("{}: client is not connected, trying to reestablish connection", __func__);
-            auto client = co_await try_make_client(m_port);
+            auto client = co_await make_client(m_port);
             if (not client) {
                 log_e("{}: reconnection failed", __func__);
                 co_return Unexpect{ client.error() };
@@ -84,7 +84,7 @@ namespace madbfs::connection
 
         if (not server) {
             log_i("{}: server path not set, try connect", __func__);
-            auto client = co_await try_make_client(port);
+            auto client = co_await make_client(port);
             if (not client) {
                 co_return Unexpect{ client.error() };
             }
@@ -153,7 +153,7 @@ namespace madbfs::connection
             }
         }
 
-        auto client = co_await try_make_client(port);
+        auto client = co_await make_client(port);
         if (not client) {
             co_return Unexpect{ client.error() };
         }

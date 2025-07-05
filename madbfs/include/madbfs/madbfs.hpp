@@ -33,19 +33,51 @@ namespace madbfs
         const data::Cache& cache() const { return m_cache; }
 
     private:
-        Uniq<connection::Connection> prepare_connection(Opt<path::Path> server, u16 port);
-        Uniq<data::Ipc>              create_ipc();
-        void                         work_thread_function();
+        /**
+         * @brief Prepare and create connection to device.
+         *
+         * @param ctx Async context.
+         * @param server Server binary path.
+         * @param port Port on which the server will be ran on.
+         *
+         * If the server binary path is set, this function will attempt to create a `ServerConnection` and
+         * then fall back to `AdbConnection` if the connection failed. If it is not set, it will immediately
+         * cerate `AdbConnection` instead. The returned value will never be null.
+         */
+        static Uniq<connection::Connection> prepare_connection(
+            async::Context& ctx,
+            Opt<path::Path> server,
+            u16             port
+        );
 
+        /**
+         * @brief Create an IPC (Unix socket).
+         *
+         * @param ctx Async context.
+         */
+        static Opt<data::Ipc> create_ipc(async::Context& ctx);
+
+        /**
+         * @brief Function for work thread on which async context will run on.
+         */
+        static void work_thread_function(async::Context& ctx);
+
+        /**
+         * @brief IPC operation handler.
+         *
+         * @param op Requested operation.
+         *
+         * This function handles all requested operations from peers that comes from `m_ipc` instance.
+         */
         Await<boost::json::value> ipc_handler(data::ipc::Op op);
 
         async::Context   m_async_ctx;
-        async::WorkGuard m_work_guard;    // to prevent `io_context` from returning immediately
+        async::WorkGuard m_work_guard;    // to prevent `async::Context` from returning immediately
         std::jthread     m_work_thread;
 
         Uniq<connection::Connection> m_connection;
         data::Cache                  m_cache;
         tree::FileTree               m_tree;
-        Uniq<data::Ipc>              m_ipc;
+        Opt<data::Ipc>               m_ipc;
     };
 }

@@ -36,6 +36,13 @@ namespace madbfs::data
         u64 m_inner = 0;
     };
 
+    /**
+     * @class Stat
+     *
+     * @brief File status information.
+     *
+     * This is a simplified `struct stat` (see man(3) stat). On creation, id shouldn't be set manually.
+     */
     struct Stat
     {
         Id       id    = Id::incr();

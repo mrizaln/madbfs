@@ -35,6 +35,8 @@ namespace madbfs::tree
          */
         Expect<Ref<Node>> traverse(path::Path path);
 
+        // fuse oprations
+        // --------------
         AExpect<void>                  readdir(path::Path path, Filler filler);
         AExpect<Ref<const data::Stat>> getattr(path::Path path);
 
@@ -62,12 +64,19 @@ namespace madbfs::tree
             off_t      offset_out,
             size_t     size
         );
+        // --------------
 
-        // this function only used to link already existing files, user can't use it
+        // this function only used to link already existing files, user can't and shouldn't use it
         Expect<void> symlink(path::Path path, path::Path target);
 
+        /**
+         * @brief Safely clean up and sync data.
+         */
         Await<void> shutdown();
 
+        /**
+         * @brief Get root node.
+         */
         const Node& root() const { return m_root; }
 
     private:

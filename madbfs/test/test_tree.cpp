@@ -88,11 +88,11 @@ struct fmt::formatter<madbfs::tree::Node> : fmt::formatter<std::string_view>
             }
 
             auto visitor = madbfs::util::Overload{
-                [&](const Link& link) {
+                [&](const node::Link& link) {
                     auto pathbuf = link.target().build_path();
                     return fmt::format("    ->    {}", pathbuf.as_path().fullpath());
                 },
-                [&](const Directory&) { return String{ "/" }; },
+                [&](const node::Directory&) { return String{ "/" }; },
                 [&](const auto&) { return String{ "" }; },
             };
             auto additional = std::visit(visitor, node->value());
@@ -101,7 +101,7 @@ struct fmt::formatter<madbfs::tree::Node> : fmt::formatter<std::string_view>
             auto name = node->name() == "/" ? "" : node->name();
             fmt::format_to(ctx.out(), "- {}{}\n", name, additional);
 
-            if (auto* dir = std::get_if<Directory>(&node->value())) {
+            if (auto* dir = std::get_if<node::Directory>(&node->value())) {
                 auto to_ref = [](const Uniq<Node>& f) { return std::ref(*f); };
                 auto ptrs   = dir->children() | sv::transform(to_ref) | sr::to<std::vector>();
                 sr::sort(ptrs, std::less<>{}, &Node::name);
@@ -226,7 +226,7 @@ int main()
         auto io_context = madbfs::async::Context{};
 
         auto coro = [&] -> madbfs::Await<void> {
-            auto root = Node{ "/", nullptr, {}, Directory{} };
+            auto root = Node{ "/", nullptr, {}, node::Directory{} };
 
             Node& hello = (co_await root.mkdir(make_context("hello"), 0)).unwrap();
 

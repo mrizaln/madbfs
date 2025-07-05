@@ -26,6 +26,11 @@ namespace madbfs::data
         bool  operator==(const PageKey& other) const = default;
     };
 
+    /**
+     * @class Page
+     *
+     * @brief Represent a chunk of file content.
+     */
     class Page
     {
     public:
@@ -51,6 +56,15 @@ namespace madbfs::data
         bool         m_dirty = false;
     };
 
+    /**
+     * @class Cache
+     *
+     * @brief Manage file content cache.
+     *
+     * The cache is implemented as an LRU cache in order to speed up repeated access to recently accessed
+     * files. Each element in the LRU is a `Page` that represents a portion of a file being stored. This
+     * pages are interleaved between files (cross-file).
+     */
     class Cache
     {
     public:

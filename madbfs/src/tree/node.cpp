@@ -4,27 +4,27 @@
 
 namespace madbfs::tree
 {
-    u64 Directory::NodeHash::operator()(const Uniq<Node>& node) const
+    u64 node::Directory::NodeHash::operator()(const Uniq<Node>& node) const
     {
         return (*this)(node->name());
     }
 
-    bool Directory::NodeEq::operator()(Str lhs, const Uniq<Node>& rhs) const
+    bool node::Directory::NodeEq::operator()(Str lhs, const Uniq<Node>& rhs) const
     {
         return lhs == rhs->name();
     }
 
-    bool Directory::NodeEq::operator()(const Uniq<Node>& lhs, Str rhs) const
+    bool node::Directory::NodeEq::operator()(const Uniq<Node>& lhs, Str rhs) const
     {
         return lhs->name() == rhs;
     }
 
-    bool Directory::NodeEq::operator()(const Uniq<Node>& lhs, const Uniq<Node>& rhs) const
+    bool node::Directory::NodeEq::operator()(const Uniq<Node>& lhs, const Uniq<Node>& rhs) const
     {
         return lhs->name() == rhs->name();
     }
 
-    Expect<Ref<Node>> Directory::find(Str name) const
+    Expect<Ref<Node>> node::Directory::find(Str name) const
     {
         if (auto found = m_children.find(name); found != m_children.end()) {
             return *found->get();
@@ -32,7 +32,7 @@ namespace madbfs::tree
         return Unexpect{ Errc::no_such_file_or_directory };
     }
 
-    bool Directory::erase(Str name)
+    bool node::Directory::erase(Str name)
     {
         if (auto found = m_children.find(name); found != m_children.end()) {
             m_children.erase(found);
@@ -41,7 +41,7 @@ namespace madbfs::tree
         return false;
     }
 
-    Expect<Pair<Ref<Node>, Uniq<Node>>> Directory::insert(Uniq<Node> node, bool overwrite)
+    Expect<Pair<Ref<Node>, Uniq<Node>>> node::Directory::insert(Uniq<Node> node, bool overwrite)
     {
         auto found = m_children.find(node->name());
         if (found != m_children.end() and not overwrite) {
@@ -57,7 +57,7 @@ namespace madbfs::tree
         return Pair{ std::ref(*back->get()), std::move(released) };
     }
 
-    Expect<Uniq<Node>> Directory::extract(Str name)
+    Expect<Uniq<Node>> node::Directory::extract(Str name)
     {
         if (auto found = m_children.find(name); found != m_children.end()) {
             return std::move(m_children.extract(found).value());
@@ -70,15 +70,15 @@ namespace madbfs::tree
 {
     Expect<Ref<const data::Stat>> Node::stat() const
     {
-        if (auto err = as<Error>(); err.has_value()) {
+        if (auto err = as<node::Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
         return m_stat;
     }
 
-    const Error* Node::as_error() const
+    const node::Error* Node::as_error() const
     {
-        auto err = as<Error>();
+        auto err = as<node::Error>();
         return err ? &err->get() : nullptr;
     }
 
@@ -120,9 +120,8 @@ namespace madbfs::tree
 
     bool Node::has_synced() const
     {
-        // should have locked but bool is atomic anyway in x64
         auto visit = util::Overload{
-            [](const Directory& dir) { return dir.has_readdir(); },
+            [](const node::Directory& dir) { return dir.has_readdir(); },
             [](const auto&) { return true; },
         };
         return std::visit(visit, m_value);
@@ -130,26 +129,25 @@ namespace madbfs::tree
 
     void Node::set_synced()
     {
-        // should have locked but bool is atomic anyway in x64
-        std::ignore = as<Directory>().transform(&Directory::set_readdir);
+        std::ignore = as<node::Directory>().transform(&node::Directory::set_readdir);
     }
 
     Expect<Ref<Node>> Node::traverse(Str name) const
     {
-        if (auto err = as<Error>(); err.has_value()) {
+        if (auto err = as<node::Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
-        return as<Directory>().and_then(proj(&Directory::find, name));
+        return as<node::Directory>().and_then(proj(&node::Directory::find, name));
     }
 
     Expect<void> Node::list(std::move_only_function<void(Str)>&& fn) const
     {
-        if (auto err = as<Error>(); err.has_value()) {
+        if (auto err = as<node::Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
-        return as<Directory>().transform([&](const Directory& dir) {
+        return as<node::Directory>().transform([&](const node::Directory& dir) {
             for (const auto& node : dir.children()) {
-                if (not node->is<Error>()) {
+                if (not node->is<node::Error>()) {
                     fn(node->name());
                 }
             }
@@ -158,12 +156,12 @@ namespace madbfs::tree
 
     Expect<Ref<Node>> Node::build(Str name, data::Stat stat, File file)
     {
-        if (auto err = as<Error>(); err.has_value()) {
+        if (auto err = as<node::Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
-        return as<Directory>()
+        return as<node::Directory>()
             .and_then(proj(
-                &Directory::insert,
+                &node::Directory::insert,
                 std::make_unique<Node>(name, this, std::move(stat), std::move(file)),
                 false
             ))
@@ -172,26 +170,26 @@ namespace madbfs::tree
 
     Expect<Uniq<Node>> Node::extract(Str name)
     {
-        if (auto err = as<Error>(); err.has_value()) {
+        if (auto err = as<node::Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
-        return as<Directory>().and_then(proj(&Directory::extract, name));
+        return as<node::Directory>().and_then(proj(&node::Directory::extract, name));
     }
 
     Expect<Pair<Ref<Node>, Uniq<Node>>> Node::insert(Uniq<Node> node, bool overwrite)
     {
-        if (auto err = as<Error>(); err.has_value()) {
+        if (auto err = as<node::Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
-        return as<Directory>().and_then(proj(&Directory::insert, std::move(node), overwrite));
+        return as<node::Directory>().and_then(proj(&node::Directory::insert, std::move(node), overwrite));
     }
 
     Expect<Ref<Node>> Node::symlink(Str name, Node* target)
     {
-        if (auto err = as<Error>(); err.has_value()) {
+        if (auto err = as<node::Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
-        return as<Directory>().and_then([&](Directory& dir) -> Expect<Ref<Node>> {
+        return as<node::Directory>().and_then([&](node::Directory& dir) -> Expect<Ref<Node>> {
             if (dir.find(name).has_value()) {
                 return Unexpect{ Errc::file_exists };
             }
@@ -218,18 +216,18 @@ namespace madbfs::tree
                 .gid   = 0,
             };
 
-            auto node = std::make_unique<Node>(name, this, std::move(dummy_stat), Link{ target });
+            auto node = std::make_unique<Node>(name, this, std::move(dummy_stat), node::Link{ target });
             return dir.insert(std::move(node), false).transform([&](auto&& pair) { return pair.first; });
         });
     }
 
     AExpect<Ref<Node>> Node::mknod(Context context, mode_t mode, dev_t dev)
     {
-        if (auto err = as<Error>(); err.has_value()) {
+        if (auto err = as<node::Error>(); err.has_value()) {
             co_return Unexpect{ err->get().error };
         }
 
-        auto may_dir = as<Directory>();
+        auto may_dir = as<node::Directory>();
         if (not may_dir) {
             co_return Unexpect{ may_dir.error() };
         }
@@ -239,7 +237,7 @@ namespace madbfs::tree
 
         auto overwrite = false;
         if (auto node = dir.find(name); node.has_value()) {
-            if (not node->get().is<Error>()) {
+            if (not node->get().is<node::Error>()) {
                 co_return Unexpect{ Errc::file_exists };
             }
             overwrite = true;
@@ -251,7 +249,7 @@ namespace madbfs::tree
 
         co_return (co_await context.connection.stat(context.path))
             .and_then([&](data::Stat stat) {
-                auto node = std::make_unique<Node>(name, this, std::move(stat), RegularFile{});
+                auto node = std::make_unique<Node>(name, this, std::move(stat), node::Regular{});
                 return dir.insert(std::move(node), overwrite);
             })
             .transform([&](auto&& pair) { return pair.first; });
@@ -259,11 +257,11 @@ namespace madbfs::tree
 
     AExpect<Ref<Node>> Node::mkdir(Context context, mode_t mode)
     {
-        if (auto err = as<Error>(); err.has_value()) {
+        if (auto err = as<node::Error>(); err.has_value()) {
             co_return Unexpect{ err->get().error };
         }
 
-        auto may_dir = as<Directory>();
+        auto may_dir = as<node::Directory>();
         if (not may_dir) {
             co_return Unexpect{ may_dir.error() };
         }
@@ -273,7 +271,7 @@ namespace madbfs::tree
 
         auto overwrite = false;
         if (auto node = dir.find(name); node.has_value()) {
-            if (not node->get().is<Error>()) {
+            if (not node->get().is<node::Error>()) {
                 co_return Unexpect{ Errc::file_exists };
             }
             overwrite = true;
@@ -286,7 +284,7 @@ namespace madbfs::tree
 
         co_return (co_await context.connection.stat(context.path))
             .and_then([&](data::Stat stat) {
-                auto node = std::make_unique<Node>(name, this, std::move(stat), Directory{});
+                auto node = std::make_unique<Node>(name, this, std::move(stat), node::Directory{});
                 return dir.insert(std::move(node), overwrite);
             })
             .transform([&](auto&& pair) { return pair.first; });
@@ -294,14 +292,14 @@ namespace madbfs::tree
 
     AExpect<void> Node::unlink(Context context)
     {
-        if (auto err = as<Error>(); err.has_value()) {
+        if (auto err = as<node::Error>(); err.has_value()) {
             co_return Unexpect{ err->get().error };
         }
 
-        auto res = as<Directory>().and_then([&](Directory& dir) -> Expect<void> {
+        auto res = as<node::Directory>().and_then([&](node::Directory& dir) -> Expect<void> {
             auto name = context.path.filename();
             return dir.find(name).and_then([&](Node& node) -> Expect<void> {
-                if (node.is<Directory>()) {
+                if (node.is<node::Directory>()) {
                     return Unexpect{ Errc::is_a_directory };
                 }
                 auto success = dir.erase(name);
@@ -324,24 +322,26 @@ namespace madbfs::tree
 
     AExpect<void> Node::rmdir(Context context)
     {
-        if (auto err = as<Error>(); err.has_value()) {
+        if (auto err = as<node::Error>(); err.has_value()) {
             co_return Unexpect{ err->get().error };
         }
 
         auto name = context.path.filename();
 
-        auto res = as<Directory>().and_then([&](Directory& dir) {
+        auto res = as<node::Directory>().and_then([&](node::Directory& dir) {
             return dir.find(name).and_then([&](Node& node) {
-                return node.as<Directory>().and_then([&](Directory& target) -> Expect<Ref<Directory>> {
-                    if (not target.children().empty()) {
-                        for (const auto& child : target.children()) {
-                            if (not child->is<Error>()) {
-                                Unexpect{ Errc::directory_not_empty };
+                return node.as<node::Directory>().and_then(
+                    [&](node::Directory& target) -> Expect<Ref<node::Directory>> {
+                        if (not target.children().empty()) {
+                            for (const auto& child : target.children()) {
+                                if (not child->is<node::Error>()) {
+                                    Unexpect{ Errc::directory_not_empty };
+                                }
                             }
                         }
+                        return Expect<Ref<node::Directory>>{ dir };
                     }
-                    return Expect<Ref<Directory>>{ dir };
-                });
+                );
             });
         });
 
@@ -482,8 +482,8 @@ namespace madbfs::tree
     Expect<Ref<Node>> Node::readlink()
     {
         auto current = this;
-        while (current->is<Link>()) {
-            current = &current->as<Link>()->get().target();
+        while (current->is<node::Link>()) {
+            current = &current->as<node::Link>()->get().target();
         }
         return *current;
     }
