@@ -1,0 +1,47 @@
+name: madbfs CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  NDK_VERSION: 29.0.13599879
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure C++ Development Tools
+      run: |
+        sudo apt install gcc-14 g++-14 cmake ninja-build git
+
+    - name: Configure Conan 2 Package Manager
+      run: |
+        sudo apt install python3 python3-pip
+        pip3 install conan
+        conan profile detect --force
+      env:
+        CC: gcc-14
+        CXX: g++-14
+
+    - name: Configure Android NDK
+      run: |
+        yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null
+        /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --install "ndk;$NDK_VERSION"
+        echo ANDROID_NDK_HOME="/usr/local/lib/android/sdk/ndk/$NDK_VERSION" >> $GITHUB_ENV
+
+    - name: Build, Test, and Package
+      run: ./package.sh $PWD/.github/ci/conan-profile.ini
+
+    - name: Save Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: madbfs
+        path: ./build/package/madbfs.tar.gz
+
+# todo: add filesystem test job (requires android emulation to exist)
