@@ -19,6 +19,7 @@ mkdir -p ${PACKAGE_DIR}/madbfs/
 conan install . --build=missing -s build_type=Release
 cmake --preset conan-release
 cmake --build --preset conan-release
+ctest --preset conan-release --verbose
 
 cp build/Release/madbfs/madbfs ${PACKAGE_DIR}/madbfs/
 strip ${PACKAGE_DIR}/madbfs/madbfs
