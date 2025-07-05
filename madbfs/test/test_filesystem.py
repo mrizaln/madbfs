@@ -45,6 +45,8 @@ SERVER_PATH = PROJECT_ROOT / "madbfs-server/build/android-all-release/madbfs-ser
 with open(TEST_FILE, "rb") as fh:
     TEST_DATA = fh.read()
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class Environ:
@@ -54,10 +56,11 @@ class Environ:
     test_dir: Path
     log_path: Path
     mount_cmd: list[str]
+    server: bool
 
 
-@pytest.fixture
-def environ():
+@pytest.fixture(params=[True, False])
+def environ(request):
     serial = os.environ.get("ANDROID_SERIAL")
     if serial is None:
         pytest.fail("test requires ANDROID_SERIAL environment variable to be set")
@@ -90,7 +93,7 @@ def environ():
         "-f",
         f"--log-file={log_path}",
         "--log-level=debug",
-        f"--server={server_path}",
+        f"--server={server_path}" if request.param else "--no-server",
     ]
 
     return Environ(
@@ -100,6 +103,7 @@ def environ():
         test_dir=test_dir,
         log_path=log_path,
         mount_cmd=mount_cmd,
+        server=request.param,
     )
 
 
@@ -116,8 +120,6 @@ def wait_for_mount(mount_process: Popen[str], mnt_dir: Path):
 
 
 def unmount(mount_process: Popen[str], mnt_dir: Path):
-    logger = logging.getLogger(__name__)
-
     cmd = ["fusermount3", "-z", "-u", mnt_dir]
     try:
         result = run(cmd, capture_output=True, text=True, check=True)
@@ -380,6 +382,10 @@ def tst_utimens(work_dir: Path, ns_tol=1000):
     dir.mkdir()
     fstat = dir.lstat()
 
+    logger.debug(
+        f" sec=[a:{fstat.st_atime}, m:{fstat.st_mtime}] nsec=[a:{fstat.st_atime_ns}, m:{fstat.st_mtime_ns}]"
+    )
+
     atime = fstat.st_atime + 42.28
     mtime = fstat.st_mtime - 42.23
     if sys.version_info < (3, 3):
@@ -389,7 +395,13 @@ def tst_utimens(work_dir: Path, ns_tol=1000):
         mtime_ns = fstat.st_mtime_ns - int(42.23 * 1e9)
         os.utime(dir, None, ns=(atime_ns, mtime_ns))
 
+    logger.debug(f" sec=[a:{atime}, m:{mtime}] nsec=[a:{atime_ns}, m:{mtime_ns}]")
+
     fstat = dir.lstat()
+
+    logger.debug(
+        f" sec=[a:{fstat.st_atime}, m:{fstat.st_mtime}] nsec=[a:{fstat.st_atime_ns}, m:{fstat.st_mtime_ns}]"
+    )
 
     assert abs(fstat.st_atime - atime) < 1
     assert abs(fstat.st_mtime - mtime) < 1
@@ -470,7 +482,6 @@ def tst_truncate_fd(work_dir: Path):
 
 def tst_open_unlink(work_dir: Path):
     file = work_dir / name_generator()
-    logging.getLogger(__name__).debug(f"file: {file}")
 
     data1 = b"foo"
     data2 = b"bar"
@@ -488,7 +499,6 @@ def tst_open_unlink(work_dir: Path):
 
 def tst_open_rename(work_dir: Path):
     file = work_dir / name_generator()
-    logging.getLogger(__name__).debug(f"file: {file}")
 
     file2 = work_dir / name_generator()
 
@@ -510,18 +520,17 @@ def tst_open_rename(work_dir: Path):
 
 
 def test_filesystem(environ):
-    logger = logging.getLogger(__name__)
-
     serial: str
     abi: str
     mount_point: Path
     test_dir: Path
     log_file: Path
     cmd_base: list[str]
+    server: bool
 
-    serial, abi, mount_point, test_dir, log_file, cmd_base = astuple(environ)
+    serial, abi, mount_point, test_dir, log_file, cmd_base, server = astuple(environ)
 
-    logger.info(f"test is running on device with serial {serial} and ABI {abi}")
+    logger.info(f"test is running serial={serial}, abi={abi}, server={server}")
 
     cmd = cmd_base + [f"--serial={serial}", str(mount_point)]
     proc = Popen(cmd, stdout=PIPE, universal_newlines=True)
@@ -531,6 +540,7 @@ def test_filesystem(environ):
         logger.info(f"filesystem is mounted at {mount_point}")
 
         work_dir = test_dir / "testing"
+        shutil.rmtree(work_dir)
         work_dir.mkdir(exist_ok=True)
 
         def call(fn):
