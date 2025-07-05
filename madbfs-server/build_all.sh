@@ -37,6 +37,7 @@ for i in $(seq ${#SUPPORTED_ARCH[@]}); do
     conan install .                                                 \
         -b missing                                                  \
         -pr:b default                                               \
+        -s:b compiler.cppstd=23                                     \
         -c:h tools.android:ndk_path="${ANDROID_NDK_PATH/#\~/$HOME}" \
         -s:h arch=${arch}                                           \
         -s:h build_type=Release                                     \
