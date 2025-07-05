@@ -37,19 +37,41 @@ namespace
     }
 
     /**
-     * @brief Parse the output of `stat -c '%f %h %s %u %g %X %Y %Z %n' <path>`
+     * @brief Parse date in the form "2025-06-04 12:09:05.450071907 +0700"
+     *
+     * @param date Date string.
+     */
+    timespec parse_date(madbfs::Str date)
+    {
+        // apparently istringstream only have the overload for string_view from C++26 onwards. damn it!
+        auto in = std::istringstream{ madbfs::String{ date } };    // unnecessary copy... :(
+        auto tp = std::chrono::sys_time<std::chrono::nanoseconds>{};
+
+        in >> std::chrono::parse("%F %T %z", tp);
+        if (in.fail()) {
+            madbfs::log_d("{}: fail to parse {:?}", __func__, date);
+        }
+
+        auto secs  = std::chrono::time_point_cast<std::chrono::seconds>(tp);
+        auto nsecs = std::chrono::duration_cast<std::chrono::nanoseconds>(tp - secs);
+
+        return { secs.time_since_epoch().count(), nsecs.count() };
+    }
+
+    /**
+     * @brief Parse the output of `stat -c '%f|%h|%s|%u|%g|%x|%y|%z|%n' <path>`
      */
     madbfs::Opt<madbfs::connection::ParsedStat> parse_file_stat(madbfs::Str str)
     {
-        return madbfs::util::split_n<8>(str, ' ').transform([](madbfs::util::SplitResult<8>&& res) {
+        return madbfs::util::split_n<8>(str, '|').transform([](madbfs::util::SplitResult<8>&& res) {
             auto [mode_hex, hardlinks, size, uid, gid, atime, mtime, ctime] = res.result;
             return madbfs::connection::ParsedStat{
                 .stat = madbfs::data::Stat{
                     .links = parse_fundamental<nlink_t>(hardlinks, 10).value_or(0),
                     .size  = parse_fundamental<off_t>(size, 10).value_or(0),
-                    .mtime = { parse_fundamental<time_t>(mtime, 10).value_or(0), 0 },
-                    .atime = { parse_fundamental<time_t>(atime, 10).value_or(0), 0 },
-                    .ctime = { parse_fundamental<time_t>(ctime, 10).value_or(0), 0 },
+                    .mtime = parse_date(mtime),
+                    .atime = parse_date(atime),
+                    .ctime = parse_date(ctime),
                     .mode  = parse_fundamental<mode_t>(mode_hex, 16).value_or(0),
                     .uid   = parse_fundamental<uid_t>(uid, 10).value_or(0),
                     .gid   = parse_fundamental<uid_t>(gid, 10).value_or(0),
@@ -81,7 +103,7 @@ namespace madbfs::connection
             "-exec",
             "stat",
             "-c",
-            "'%f %h %s %u %g %X %Y %Z %n'",
+            "'%f|%h|%s|%u|%g|%x|%y|%z|%n'",
             "{}",
             "+",
         });
@@ -109,7 +131,7 @@ namespace madbfs::connection
     AExpect<data::Stat> AdbConnection::stat(path::Path path)
     {
         auto res = co_await cmd::exec(
-            { "adb", "shell", "stat", "-c", "'%f %h %s %u %g %X %Y %Z %n'", quote(path) }
+            { "adb", "shell", "stat", "-c", "'%f|%h|%s|%u|%g|%x|%y|%z|%n'", quote(path) }
         );
 
         co_return res.and_then([&](Str out) {
@@ -214,29 +236,33 @@ namespace madbfs::connection
 
     AExpect<void> AdbConnection::utimens(path::Path path, timespec atime, timespec mtime)
     {
-        // since I can only use touch, I can only use one value. I decided then that the value to be used on
-        // touch command must be the highest between atime and mtime.
+        for (auto [time, flag] : { Pair{ atime, "-a" }, Pair{ mtime, "-m" } }) {
+            if (time.tv_nsec == UTIME_NOW) {
+                auto res = co_await cmd::exec({ "adb", "shell", "touch", "-c", flag, quote(path) });
+                co_return res.transform(sink_void);
+            }
 
-        auto time = atime;
-        if (atime.tv_sec < mtime.tv_sec or (atime.tv_sec == mtime.tv_sec and atime.tv_nsec < mtime.tv_nsec)) {
-            time = mtime;
+            if (auto sec = time.tv_nsec / 1'000'000'000; sec > 0) {
+                time.tv_sec  += sec;
+                time.tv_nsec -= sec * 1'000'000'000;
+            }
+
+            auto tm_info = std::localtime(&time.tv_sec);
+            if (tm_info == nullptr) {
+                time.tv_sec = std::time(nullptr);
+                tm_info     = std::gmtime(&time.tv_sec);
+            }
+
+            const auto str = fmt::format("{:%Y%m%d%H%M.%S}{}", *tm_info, time.tv_nsec);
+            log_i("{}: utimens to {}", __func__, str);
+
+            auto res = co_await cmd::exec({ "adb", "shell", "touch", "-c", flag, "-t", str, quote(path) });
+            if (not res) {
+                co_return Unexpect{ res.error() };
+            }
         }
 
-        if (time.tv_nsec == UTIME_NOW) {
-            auto res = co_await cmd::exec({ "adb", "shell", "touch", "-c", quote(path) });
-            co_return res.transform(sink_void);
-        }
-
-        auto tm_info = std::gmtime(&time.tv_sec);
-        if (tm_info == nullptr) {
-            time.tv_sec = std::time(nullptr);
-            tm_info     = std::gmtime(&time.tv_sec);
-        }
-
-        const auto time_str = fmt::format("{:%Y%m%d%H%M.%S}{}", *tm_info, time.tv_nsec);
-
-        auto res = co_await cmd::exec({ "adb", "shell", "touch", "-c", "-d", time_str, quote(path) });
-        co_return res.transform(sink_void);
+        co_return Expect<void>{};
     }
 
     AExpect<usize> AdbConnection::copy_file_range(
