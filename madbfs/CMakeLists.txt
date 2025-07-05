@@ -41,7 +41,7 @@ target_compile_options(madbfs PRIVATE -Wall -Wextra -Wconversion)
 # target_link_options(madbfs PRIVATE -fsanitize=address,leak,undefined)
 
 if(MADBFS_ENABLE_TESTS)
-    message(STATUS "Building tests")
+    message(STATUS "madbfs: Building tests")
     enable_testing()
     add_subdirectory(test)
 endif()

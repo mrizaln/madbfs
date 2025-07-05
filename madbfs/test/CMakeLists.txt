@@ -13,9 +13,17 @@ function(create_test_exe name)
     target_compile_options(${name} PRIVATE -fsanitize=address,leak,undefined)
     target_link_options(${name} PRIVATE -fsanitize=address,leak,undefined)
 
-    # register test and post-build command
-    add_test(name ${name} COMMAND $<TARGET_FILE:${name}>)
-    add_custom_command(TARGET ${name} POST_BUILD COMMAND $<TARGET_FILE:${name}>)
+    # register test
+    add_test(NAME ${name} COMMAND $<TARGET_FILE:${name}>)
+
+    # post-build command
+    if(MADBFS_AUTORUN_TESTS)
+        add_custom_command(
+            TARGET ${name}
+            POST_BUILD
+            COMMAND $<TARGET_FILE:${name}>
+        )
+    endif()
 endfunction()
 
 enable_testing()
