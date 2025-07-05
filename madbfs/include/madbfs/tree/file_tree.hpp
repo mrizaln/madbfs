@@ -1,7 +1,7 @@
 #pragma once
 
 #include "madbfs/connection/connection.hpp"
-#include "madbfs/path/path.hpp"
+#include "madbfs/path.hpp"
 #include "madbfs/tree/node.hpp"
 
 #include <functional>

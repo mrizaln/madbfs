@@ -6,8 +6,6 @@
 
 namespace madbfs::connection
 {
-    using namespace std::string_view_literals;
-
     Str to_string(DeviceStatus status)
     {
         switch (status) {

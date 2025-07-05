@@ -1,7 +1,7 @@
 #pragma once
 
 #include "madbfs/data/stat.hpp"
-#include "madbfs/path/path.hpp"
+#include "madbfs/path.hpp"
 
 #include <madbfs-common/async/async.hpp>
 
@@ -15,12 +15,6 @@
 namespace madbfs::connection
 {
     class Connection;
-}
-
-namespace madbfs::path
-{
-    class Path;
-    class PathBuf;
 }
 
 namespace madbfs::data

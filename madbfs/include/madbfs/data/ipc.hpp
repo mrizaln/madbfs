@@ -1,13 +1,16 @@
 #pragma once
 
-#include "madbfs/path/path.hpp"
+#include "madbfs/path.hpp"
 
 #include <madbfs-common/aliases.hpp>
 #include <madbfs-common/async/async.hpp>
 
-#include <boost/json.hpp>
-
 #include <functional>
+
+namespace boost::json
+{
+    class value;
+}
 
 namespace madbfs::data
 {

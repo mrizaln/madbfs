@@ -1,4 +1,4 @@
-#include "madbfs/path/path.hpp"
+#include "madbfs/path.hpp"
 
 #include <boost/ut.hpp>
 

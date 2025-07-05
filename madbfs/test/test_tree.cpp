@@ -1,4 +1,4 @@
-#include "madbfs/path/path.hpp"
+#include "madbfs/path.hpp"
 #include "madbfs/tree/file_tree.hpp"
 #include "madbfs/tree/node.hpp"
 

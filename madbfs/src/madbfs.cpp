@@ -7,6 +7,8 @@
 #include <madbfs-common/log.hpp>
 #include <madbfs-common/util/overload.hpp>
 
+#include <boost/json.hpp>
+
 namespace madbfs
 {
     Uniq<connection::Connection> Madbfs::prepare_connection(Opt<path::Path> server, u16 port)

@@ -3,7 +3,7 @@
 #include "madbfs/connection/connection.hpp"
 #include "madbfs/data/cache.hpp"
 #include "madbfs/data/stat.hpp"
-#include "madbfs/path/path.hpp"
+#include "madbfs/path.hpp"
 
 #include <algorithm>
 #include <atomic>

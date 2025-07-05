@@ -2,6 +2,8 @@
 
 #include <madbfs-common/log.hpp>
 
+#include <boost/json.hpp>
+
 namespace madbfs::data::ipc::names
 {
     constexpr auto help             = "help";

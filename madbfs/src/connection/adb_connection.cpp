@@ -1,7 +1,7 @@
 #include "madbfs/connection/adb_connection.hpp"
 
 #include "madbfs/cmd.hpp"
-#include "madbfs/path/path.hpp"
+#include "madbfs/path.hpp"
 
 #include <madbfs-common/log.hpp>
 #include <madbfs-common/util/split.hpp>

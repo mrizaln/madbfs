@@ -12,12 +12,12 @@ target_sources(
         src/madbfs.cpp
         src/cmd.cpp
         src/operations.cpp
+        src/path.cpp
         src/connection/connection.cpp
         src/connection/adb_connection.cpp
         src/connection/server_connection.cpp
         src/data/cache.cpp
         src/data/ipc.cpp
-        src/path/path.cpp
         src/tree/file_tree.cpp
         src/tree/node.cpp
         src/tree/node.cpp
