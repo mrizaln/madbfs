@@ -2,6 +2,11 @@
 
 set -e
 
+if [[ -z $ANDROID_NDK_HOME ]]; then
+    echo "error: ANDROID_NDK_HOME variable is required to build this project"
+    exit 1
+fi
+
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 PACKAGE_DIR="build/package"
 

@@ -2,9 +2,15 @@
 
 set -e
 
+if [[ -z $ANDROID_NDK_HOME ]]; then
+    echo "error: ANDROID_NDK_HOME variable is required to build this project"
+    exit 1
+fi
+
 # change these to your Android NDK configuration
 # ----------------------------------------------
-ANDROID_NDK_PATH="~/Android/Sdk/ndk/29.0.13113456"  # https://developer.android.com/studio/projects/install-ndk or https://developer.android.com/ndk/downloads
+# ANDROID_NDK_PATH="~/Android/Sdk/ndk/29.0.13113456"  # https://developer.android.com/studio/projects/install-ndk or https://developer.android.com/ndk/downloads
+ANDROID_NDK_PATH=${ANDROID_NDK_HOME}
 API_LEVEL=21                                        # see https://apilevels.com/
 COMPILER="clang"                                    # usually clang
 COMPILER_VERSION=20                                 # not ndk version! (check by running the compiler on the NDK path)
