@@ -1,0 +1,47 @@
+# This starter workflow is for a CMake project running on a single platform. There is a different starter workflow if you need cross-platform coverage.
+# See: https://github.com/actions/starter-workflows/blob/main/ci/cmake-multi-platform.yml
+name: madbfs CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  NDK_REVISION: r29-rc1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Configure C++ Development Tools
+      run: |
+        sudo apt update -y
+        sudo apt install build-essential cmake ninja-build git
+    
+    - name: Configure Conan 2 Package Manager
+      run: |
+        sudo apt install python3 python3-pip
+        pip3 install conan
+        conan profile detect --force
+
+    - name: Configure Android NDK
+      id: get-ndk
+      uses: nttld/setup-ndk@v1.5.0
+      with:
+        ndk-version: '${{env.NDK_REVISION}}'
+        add-to-path: false
+        local-cache: true
+        link-to-sdk: true
+
+    - name: Build, Test, and Package
+      run: ./package.sh
+      env:
+        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        
+# todo: add filesystem test job (requires android emulation to exist)
