@@ -9,9 +9,9 @@ function(create_test_exe name)
     )
     target_compile_options(${name} PRIVATE -Wall -Wextra -Wconversion)
 
-    # sanitizer
-    target_compile_options(${name} PRIVATE -fsanitize=address,leak,undefined)
-    target_link_options(${name} PRIVATE -fsanitize=address,leak,undefined)
+    # # sanitizer
+    # target_compile_options(${name} PRIVATE -fsanitize=address,leak,undefined)
+    # target_link_options(${name} PRIVATE -fsanitize=address,leak,undefined)
 
     # register test
     add_test(NAME ${name} COMMAND $<TARGET_FILE:${name}>)

@@ -7,16 +7,19 @@ if [[ -z $ANDROID_NDK_HOME ]]; then
     exit 1
 fi
 
+CONAN_PROFILE="$1"
+if [[ -z "$1" ]]; then
+    CONAN_PROFILE=default
+fi
+
 # change these to your Android NDK configuration
 # ----------------------------------------------
-# ANDROID_NDK_PATH="~/Android/Sdk/ndk/29.0.13113456"  # https://developer.android.com/studio/projects/install-ndk or https://developer.android.com/ndk/downloads
-ANDROID_NDK_PATH=${ANDROID_NDK_HOME}
 API_LEVEL=21                                        # see https://apilevels.com/
 COMPILER="clang"                                    # usually clang
 COMPILER_VERSION=20                                 # not ndk version! (check by running the compiler on the NDK path)
 # ----------------------------------------------
 
-STRIP_BINARY="${ANDROID_NDK_PATH}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+STRIP_BINARY="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
 
 # based on https://developer.android.com/ndk/guides/abis
 SUPPORTED_ARCH=("armv7" "armv8" "x86" "x86_64")
@@ -35,9 +38,10 @@ for i in $(seq ${#SUPPORTED_ARCH[@]}); do
     echo "----------------------[ building for ${arch} ]----------------------"
 
     conan install .                                                 \
-        -b missing                                                  \
-        -pr:b default                                               \
-        -c:h tools.android:ndk_path="${ANDROID_NDK_PATH/#\~/$HOME}" \
+        --build missing                                             \
+        -pr:b ${CONAN_PROFILE}                                      \
+        -s:b compiler.cppstd=23                                     \
+        -c:h tools.android:ndk_path="${ANDROID_NDK_HOME/#\~/$HOME}" \
         -s:h arch=${arch}                                           \
         -s:h build_type=Release                                     \
         -s:h compiler=${COMPILER}                                   \
