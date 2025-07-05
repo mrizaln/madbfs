@@ -69,7 +69,7 @@ namespace madbfs::rpc
         Self&& write_int(this Self&& self, I value)
         {
             auto array = to_net_bytes(value);
-            self.m_buffer.append_range(array);
+            self.m_buffer.insert(self.m_buffer.end(), array.begin(), array.end());
             return std::forward<Self>(self);
         }
 
@@ -95,7 +95,7 @@ namespace madbfs::rpc
         Self&& write_bytes(this Self&& self, Span<const u8> bytes)
         {
             self.template write_int<u64>(bytes.size());
-            self.m_buffer.append_range(bytes);
+            self.m_buffer.insert(self.m_buffer.end(), bytes.begin(), bytes.end());
             return std::forward<Self>(self);
         }
 
@@ -104,7 +104,7 @@ namespace madbfs::rpc
         {
             self.template write_int<u64>(path.size() + 1);
             auto span = Span{ reinterpret_cast<const u8*>(path.data()), path.size() };
-            self.m_buffer.append_range(span);
+            self.m_buffer.insert(self.m_buffer.end(), span.begin(), span.end());
             self.m_buffer.push_back(0x00);    // null terminator
             return std::forward<Self>(self);
         }

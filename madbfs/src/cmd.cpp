@@ -106,12 +106,14 @@ namespace
                     eof = true;
                     break;
                 } else if (not res) {
-                    out.append_range(tmp | madbfs::sv::take(tmp_read));
+                    auto rest = tmp | madbfs::sv::take(tmp_read);
+                    out.insert(out.end(), rest.begin(), rest.end());
                     co_return res.error();
                 }
                 tmp_read += *res;
             }
-            out.append_range(tmp | madbfs::sv::take(tmp_read));
+            auto rest = tmp | madbfs::sv::take(tmp_read);
+            out.insert(out.end(), rest.begin(), rest.end());
         }
 
         co_return boost::system::error_code{};
@@ -120,7 +122,7 @@ namespace
 
 namespace madbfs::cmd
 {
-    Await<Expect<String>> exec(Span<const Str> cmd, Str in, bool check, bool merge_err)
+    AExpect<String> exec(Span<const Str> cmd, Str in, bool check, bool merge_err)
     {
         assert(not cmd.empty());
 
