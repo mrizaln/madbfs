@@ -88,7 +88,8 @@ These limitations lead me to decide to rebuild the project from ground up in ord
 
   Build dependencies
 
-  - CMake
+  - GCC or Clang (support C++23 or above, tested on GCC 14, GCC 15, and Clang 20 )
+  - CMake (version 3.22+)
   - Conan
 
   Library dependencies
@@ -103,8 +104,8 @@ These limitations lead me to decide to rebuild the project from ground up in ord
 
   Build dependencies
 
-  - Android NDK (must support C++20 or above)
-  - CMake
+  - Android NDK (support C++23 or above, tested on NDK version 29 (beta 1))
+  - CMake (version 3.22+)
   - Conan
 
   Library dependencies
