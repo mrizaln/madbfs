@@ -372,8 +372,10 @@ namespace madbfs::rpc
             if (e) {
                 try {
                     std::rethrow_exception(e);
-                } catch (std::exception& e) {
+                } catch (const std::exception& e) {
                     log_c("receive: exception occurred: {}", e.what());
+                } catch (...) {
+                    log_c("receive: exception occurred (unknown type)");
                 }
             } else if (not res) {
                 auto msg = std::make_error_code(res.error()).message();
@@ -392,8 +394,10 @@ namespace madbfs::rpc
             if (e) {
                 try {
                     std::rethrow_exception(e);
-                } catch (std::exception& e) {
+                } catch (const std::exception& e) {
                     log_c("send: exception occurred: {}", e.what());
+                } catch (...) {
+                    log_c("send: exception occurred (unknown type)");
                 }
             } else if (not res) {
                 auto msg = std::make_error_code(res.error()).message();

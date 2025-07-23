@@ -51,8 +51,10 @@ namespace madbfs
             log_i("Madbfs: io_context running...");
             auto num_handlers = ctx.run();
             log_i("Madbfs: io_context stopped with {} handlers executed", num_handlers);
-        } catch (std::exception& e) {
+        } catch (const std::exception& e) {
             log_w("Madbfs: io_context stopped with an exception: {}", e.what());
+        } catch (...) {
+            log_w("Madbfs: io_context stopped with an exception (unknown type)");
         }
     }
 

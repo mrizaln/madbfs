@@ -83,7 +83,10 @@ try {
     madbfs::log_i("server exited normally");
 
     return 0;
-} catch (std::exception& e) {
+} catch (const std::exception& e) {
     madbfs::log_c("exception: {}", e.what());
+    return 1;
+} catch (...) {
+    madbfs::log_c("exception (unknown type)");
     return 1;
 }

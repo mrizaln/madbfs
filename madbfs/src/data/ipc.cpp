@@ -32,7 +32,7 @@ namespace madbfs::data
 
         auto len = ::ntohl(std::bit_cast<u32>(len_buffer));
         if (len > max_msg_len) {
-            Unexpect{ Errc::message_size };
+            co_return Unexpect{ Errc::message_size };
         }
 
         auto buffer = String(len, '\0');
@@ -94,6 +94,8 @@ namespace madbfs::data
             return std::unexpected{ fmt::format("'{}' is not a valid operation, try 'help'", op) };
         } catch (const boost::system::system_error& e) {
             return std::unexpected{ e.code().message() };
+        } catch (...) {
+            return std::unexpected{ "unknown error" };
         }
     }
 }
@@ -136,13 +138,20 @@ namespace madbfs::data
         auto name = path->as_path().fullpath();
         auto ep   = async::unix_socket::Endpoint{ name };
 
-        try {
-            auto acc = Acceptor{ context, ep };    // may throw
-            return Ipc{ std::move(*path), std::move(acc) };
-        } catch (const boost::system::system_error& e) {
-            log_e("{}: failed to construct acceptor {:?}: {}", __func__, name, e.code().message());
-            return Unexpect{ async::to_generic_err(e.code(), Errc::address_not_available) };
+        auto ec  = error_code{};
+        auto acc = Acceptor{ context };
+
+        acc.open(ep.protocol(), ec);
+        acc.set_option(Acceptor::reuse_address(true));
+        acc.bind(ep, ec);
+        acc.listen(acc.max_listen_connections, ec);
+
+        if (ec) {
+            log_e("{}: failed to construct acceptor {:?}: {}", __func__, name, ec.message());
+            return Unexpect{ async::to_generic_err(ec, Errc::address_not_available) };
         }
+
+        return Ipc{ std::move(*path), std::move(acc) };
     }
 
     Await<void> Ipc::launch(OnOp on_op)

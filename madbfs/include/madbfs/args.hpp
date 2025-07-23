@@ -176,10 +176,11 @@ namespace madbfs::args
                 break;
             } else if (not input and is_stream_error(input.error())) {
                 fmt::println("\n[madbfs] stdin closed, aborting.");
-                exit(1);    // I don't think there is an easy way out of this but exit
+                std::exit(1);    // I don't think there is an easy way out of this but exit
+            } else {
+                fmt::println("[madbfs] invalid choice, enter a number between 1 - {}: ", devices.size());
+                continue;
             }
-            fmt::println("[madbfs] invalid choice, enter a number between 1 - {}: ", devices.size());
-            continue;
         }
         fmt::println("[madbfs] using serial '{}'", devices[choice - 1].serial);
 
@@ -195,8 +196,7 @@ namespace madbfs::args
 
         // search in PATH
         if (exec_path.filename() == exec_path and not exec_path.string().starts_with("./")) {
-            auto path_env = ::getenv("PATH");
-            if (path_env != nullptr) {
+            if (auto path_env = ::getenv("PATH"); path_env != nullptr) {
                 auto splitter = util::StringSplitter{ path_env, ':' };
                 while (auto path = splitter.next()) {
                     auto file = fs::path{ *path } / exec_path.filename();

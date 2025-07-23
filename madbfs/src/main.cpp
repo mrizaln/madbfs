@@ -68,7 +68,7 @@ int main(int argc, char** argv)
     if (maybe_opt.is_exit()) {
         return std::move(maybe_opt).exit().status;
     }
-    auto [opt, args, mount] = std::move(maybe_opt).opt();
+    auto&& [opt, args, mount] = std::move(maybe_opt).opt();
 
     madbfs::log::init(opt.log_level, opt.log_file);
     madbfs::log_i(
