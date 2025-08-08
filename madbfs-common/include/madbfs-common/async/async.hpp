@@ -52,7 +52,7 @@ namespace madbfs::async
     using Timer = Token::as_default_on_t<asio::steady_timer>;
 
     template <typename T>
-    using Channel = asio::experimental::channel<void(error_code, T)>;
+    using Channel = Token::as_default_on_t<asio::experimental::channel<void(error_code, T)>>;
 
     template <typename Exec, typename Awaited, typename Completion>
     auto spawn(Exec&& ex, Awaited&& func, Completion&& completion) noexcept

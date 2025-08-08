@@ -465,7 +465,7 @@ namespace madbfs::rpc
     AExpect<void> Client::send()
     {
         while (m_running and m_channel.is_open()) {
-            auto payload = co_await m_channel.async_receive(async::as_expected(async::use_awaitable));
+            auto payload = co_await m_channel.async_receive();
             if (not payload) {
                 log_e("{}: failed to recv payload from channel: {}", __func__, payload.error().message());
                 co_return Unexpect{ async::to_generic_err(payload.error(), Errc::broken_pipe) };
@@ -485,7 +485,7 @@ namespace madbfs::rpc
         m_socket.close();
     }
 
-    AExpect<Client::Future> Client::send_req(Vec<u8>& buffer, Request req)
+    AExpect<Response> Client::send_req(Vec<u8>& buffer, Request req)
     {
         if (not m_running) {
             co_return Unexpect{ Errc::not_connected };
@@ -572,13 +572,13 @@ namespace madbfs::rpc
         std::visit(std::move(overload), std::move(req));
         auto payload = builder.build();
 
-        auto res = co_await m_channel.async_send({}, payload, async::as_expected(async::use_awaitable));
+        auto res = co_await m_channel.async_send({}, payload);
         if (not res) {
             log_e("{}: failed to send payload to channel: {}", __func__, res.error().message());
             co_return Unexpect{ async::to_generic_err(res.error(), Errc::broken_pipe) };
         }
 
-        co_return future;
+        co_return co_await future.async_extract();
     }
 }
 

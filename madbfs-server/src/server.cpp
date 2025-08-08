@@ -350,6 +350,7 @@ namespace madbfs::server
             return status_from_errno(__func__, out, "failed to seek file");
         }
 
+        // TODO: using dynamic buffer size adapted to requested size operation might be better
         auto buffer = String(256 * 1024, '\0');
 
         auto copied = 0_i64;
@@ -359,6 +360,7 @@ namespace madbfs::server
             if (len = ::read(in_fd, buffer.data(), buffer.size()); len <= 0) {
                 break;
             }
+            // FIXME: partial write may happen, this operation should handle the remainder
             if (len = ::write(out_fd, buffer.data(), static_cast<usize>(len)); len < 0) {
                 break;
             }

@@ -208,8 +208,6 @@ namespace madbfs::rpc
     class Client
     {
     public:
-        using Future = saf::future<Expect<Response>>;
-
         Client(Socket socket)
             : m_socket{ std::move(socket) }
             , m_channel{ socket.get_executor(), 4096 }    // TODO: bigger numbers?
@@ -219,9 +217,9 @@ namespace madbfs::rpc
         Socket& sock() noexcept { return m_socket; }
         bool    running() const { return m_running; }
 
-        Await<void>     start();
-        AExpect<Future> send_req(Vec<u8>& buffer, Request req);
-        void            stop();
+        Await<void>       start();
+        AExpect<Response> send_req(Vec<u8>& buffer, Request req);
+        void              stop();
 
     private:
         struct Promise

@@ -46,16 +46,7 @@ namespace madbfs::connection
             co_await m_client->start();
         }
 
-        auto fut = co_await m_client->send_req(buf, std::move(req));
-        if (not fut) {
-            if (fut.error() == Errc::not_connected or fut.error() == Errc::broken_pipe) {
-                log_e("{}: client is disconnected, releasing client", __func__);
-                m_client.reset();
-            }
-            co_return Unexpect{ fut.error() };
-        }
-
-        auto res = co_await fut->async_extract();
+        auto res = co_await m_client->send_req(buf, std::move(req));
         if (not res) {
             if (res.error() == Errc::not_connected or res.error() == Errc::broken_pipe) {
                 log_e("{}: client is disconnected, releasing client", __func__);
