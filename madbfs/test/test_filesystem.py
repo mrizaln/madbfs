@@ -540,7 +540,8 @@ def test_filesystem(environ):
         logger.info(f"filesystem is mounted at {mount_point}")
 
         work_dir = test_dir / "testing"
-        shutil.rmtree(work_dir)
+        if work_dir.exists():
+            shutil.rmtree(work_dir)
         work_dir.mkdir(exist_ok=True)
 
         def call(fn):
