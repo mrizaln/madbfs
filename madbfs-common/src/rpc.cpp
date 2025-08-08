@@ -424,13 +424,13 @@ namespace madbfs::rpc
             auto size   = reader.read_int<u64>().value();
 
             if (not proc) {
-                log_d("{}: RESP RECV {} [invalid procedure]", __func__, id.inner());
+                log_d("{}: RESP RECV  {} [invalid procedure]", __func__, id.inner());
                 auto buffer = Vec<u8>(size);
                 std::ignore = co_await async::read_exact<u8>(m_socket, buffer);
                 continue;
             }
 
-            log_d("{}: RESP RECV {} [{}]", __func__, id.inner(), to_string(*proc));
+            log_d("{}: RESP RECV  {} [{}]", __func__, id.inner(), to_string(*proc));
 
             auto req = m_requests.extract(id);
             if (req.empty()) {
@@ -465,14 +465,19 @@ namespace madbfs::rpc
     AExpect<void> Client::send()
     {
         while (m_running and m_channel.is_open()) {
-            auto payload = co_await m_channel.async_receive();
-            if (not payload) {
-                log_e("{}: failed to recv payload from channel: {}", __func__, payload.error().message());
-                co_return Unexpect{ async::to_generic_err(payload.error(), Errc::broken_pipe) };
+            auto id_payload = co_await m_channel.async_receive();
+            if (not id_payload) {
+                log_e("{}: failed to recv payload from channel: {}", __func__, id_payload.error().message());
+                co_return Unexpect{ async::to_generic_err(id_payload.error(), Errc::broken_pipe) };
             }
 
-            auto n = co_await async::write_exact(m_socket, payload.value());
-            HANDLE_ERROR_ELSE(n, payload->size(), "failed to send request payload", continue);
+            auto [id, payload] = std::move(*id_payload);
+
+            auto n = co_await async::write_exact(m_socket, payload);
+            HANDLE_ERROR_ELSE(n, payload.size(), "failed to send request payload", {
+                m_requests.erase(id);
+                continue;
+            });
         }
 
         co_return Expect<void>{};
@@ -494,89 +499,92 @@ namespace madbfs::rpc
         buffer.clear();
 
         auto id      = Id{ ++m_counter };
-        auto proc    = static_cast<Procedure>(req.index());
+        auto proc    = req.proc();
         auto builder = RequestBuilder{ buffer, id, proc };
 
-        log_d("{}: REQ  SENT {} [{}]", __func__, id.inner(), to_string(proc));
-
-        auto overload = util::Overload{
+        auto payload = std::move(req).visit(util::Overload{
             [&](req::Mknod&& req) {
                 auto [path, mode, dev] = req;
-                builder    //
+                return builder    //
                     .write_path(path)
                     .write_int<u32>(mode)
-                    .write_int<u64>(dev);
+                    .write_int<u64>(dev)
+                    .build();
             },
             [&](req::Mkdir&& req) {
                 auto [path, mode] = req;
-                builder    //
+                return builder    //
                     .write_path(path)
-                    .write_int<u32>(mode);
+                    .write_int<u32>(mode)
+                    .build();
             },
             [&](req::Rename&& req) {
                 auto [from, to, flags] = req;
-                builder    //
+                return builder    //
                     .write_path(from)
                     .write_path(to)
-                    .write_int<u32>(flags);
+                    .write_int<u32>(flags)
+                    .build();
             },
             [&](req::Truncate&& req) {
                 auto [path, size] = req;
-                builder    //
+                return builder    //
                     .write_path(path)
-                    .write_int<i64>(size);
+                    .write_int<i64>(size)
+                    .build();
             },
             [&](req::Read&& req) {
                 auto [path, offset, size] = req;
-                builder    //
+                return builder    //
                     .write_path(path)
                     .write_int<i64>(offset)
-                    .write_int<u64>(size);
+                    .write_int<u64>(size)
+                    .build();
             },
             [&](req::Write&& req) {
                 auto [path, offset, in] = req;
-                builder    //
+                return builder    //
                     .write_path(path)
                     .write_int<i64>(offset)
-                    .write_bytes(in);
+                    .write_bytes(in)
+                    .build();
             },
             [&](req::Utimens&& req) {
                 auto [path, atime, mtime] = req;
-                builder    //
+                return builder    //
                     .write_path(path)
                     .write_int<i64>(atime.tv_sec)
                     .write_int<i64>(atime.tv_nsec)
                     .write_int<i64>(mtime.tv_sec)
-                    .write_int<i64>(mtime.tv_nsec);
+                    .write_int<i64>(mtime.tv_nsec)
+                    .build();
             },
             [&](req::CopyFileRange&& req) {
                 auto [in_path, in_off, out_path, out_off, size] = req;
-                builder    //
+                return builder    //
                     .write_path(in_path)
                     .write_int<i64>(in_off)
                     .write_path(out_path)
                     .write_int<i64>(out_off)
-                    .write_int<u64>(size);
+                    .write_int<u64>(size)
+                    .build();
             },
             [&](auto&& req) {
                 auto [path] = req;
-                builder.write_path(path);
+                return builder.write_path(path).build();
             },
-        };
+        });
+
+        if (auto res = co_await m_channel.async_send({}, { id, payload }); not res) {
+            log_e("{}: failed to send payload to channel: {}", __func__, res.error().message());
+            co_return Unexpect{ async::to_generic_err(res.error(), Errc::broken_pipe) };
+        }
 
         auto promise = saf::promise<Expect<Response>>{ co_await async::current_executor() };
         auto future  = promise.get_future();
 
         m_requests.emplace(id, Promise{ buffer, std::move(promise) });
-
-        std::visit(std::move(overload), std::move(req));
-        auto payload = builder.build();
-
-        auto res = co_await m_channel.async_send({}, payload);
-        if (not res) {
-            log_e("{}: failed to send payload to channel: {}", __func__, res.error().message());
-            co_return Unexpect{ async::to_generic_err(res.error(), Errc::broken_pipe) };
-        }
+        log_d("{}: REQ QUEUED {} [{}]", __func__, id.inner(), to_string(proc));
 
         co_return co_await future.async_extract();
     }
@@ -764,7 +772,13 @@ namespace madbfs::rpc
             co_return Expect<void>{};
         }
 
-        auto overload = util::Overload{
+        auto resp = std::get<Response>(std::move(response));
+        if (auto actual = resp.proc(); actual != proc) {
+            log_e("{}: mismatched procedure: [{} vs {}]", __func__, to_string(actual), to_string(proc));
+            co_return Unexpect{ Errc::bad_message };
+        }
+
+        auto payload = std::move(resp).visit(util::Overload{
             [&](resp::Listdir&& resp) {
                 builder.write_int<u64>(resp.entries.size());
                 for (const auto& [name, stat] : resp.entries) {
@@ -782,9 +796,10 @@ namespace madbfs::rpc
                         .write_int<u32>(stat.uid)
                         .write_int<u32>(stat.gid);
                 }
+                return builder.build();
             },
             [&](resp::Stat&& resp) {
-                builder    //
+                return builder    //
                     .write_int<i64>(resp.size)
                     .write_int<u64>(resp.links)
                     .write_int<i64>(resp.mtime.tv_sec)
@@ -795,31 +810,25 @@ namespace madbfs::rpc
                     .write_int<i64>(resp.ctime.tv_nsec)
                     .write_int<u32>(resp.mode)
                     .write_int<u32>(resp.uid)
-                    .write_int<u32>(resp.gid);
+                    .write_int<u32>(resp.gid)
+                    .build();
             },
-            [&](resp::Readlink&& resp) { builder.write_path(resp.target); },
-            [&](resp::Mknod&&) { /* empty */ },
-            [&](resp::Mkdir&&) { /* empty */ },
-            [&](resp::Unlink&&) { /* empty */ },
-            [&](resp::Rmdir&&) { /* empty */ },
-            [&](resp::Rename&&) { /* empty */ },
-            [&](resp::Truncate&&) { /* empty */ },
-            [&](resp::Read&& resp) { builder.write_bytes(resp.read); },
-            [&](resp::Write&& resp) { builder.write_int<u64>(resp.size); },
-            [&](resp::Utimens&&) { /* empty */ },
-            [&](resp::CopyFileRange&& resp) { builder.write_int<u64>(resp.size); },
-        };
+            // clang-format off
+            [&](resp::Readlink&&      resp) { return builder.write_path(resp.target).build();   },
+            [&](resp::Mknod&&             ) { return builder.build();                           },
+            [&](resp::Mkdir&&             ) { return builder.build();                           },
+            [&](resp::Unlink&&            ) { return builder.build();                           },
+            [&](resp::Rmdir&&             ) { return builder.build();                           },
+            [&](resp::Rename&&            ) { return builder.build();                           },
+            [&](resp::Truncate&&          ) { return builder.build();                           },
+            [&](resp::Read&&          resp) { return builder.write_bytes   (resp.read).build(); },
+            [&](resp::Write&&         resp) { return builder.write_int<u64>(resp.size).build(); },
+            [&](resp::Utimens&&           ) { return builder.build();                           },
+            [&](resp::CopyFileRange&& resp) { return builder.write_int<u64>(resp.size).build(); },
+            // clang-format on
+        });
 
-        auto resp = std::get<Response>(std::move(response));
-        if (auto actual = static_cast<Procedure>(resp.index()); actual != proc) {
-            log_e("{}: mismatched procedure: [{} vs {}]", __func__, to_string(actual), to_string(proc));
-            co_return Unexpect{ Errc::bad_message };
-        }
-
-        std::visit(std::move(overload), std::move(resp));
-
-        auto payload = builder.build();
-        auto n       = co_await async::write_exact(m_socket, payload);
+        auto n = co_await async::write_exact(m_socket, payload);
         HANDLE_ERROR(n, payload.size(), "failed to send response payload");
         co_return Expect<void>{};
     }
@@ -850,14 +859,12 @@ namespace madbfs::rpc
 
     Str to_string(Request request)
     {
-        auto index = request.index();
-        return to_string(static_cast<Procedure>(index));
+        return to_string(request.proc());
     }
 
     Str to_string(Response response)
     {
-        auto index = response.index();
-        return to_string(static_cast<Procedure>(index));
+        return to_string(response.proc());
     }
 
     AExpect<void> handshake(Socket& sock, bool client)

@@ -2,6 +2,7 @@
 
 #include "madbfs-common/aliases.hpp"
 #include "madbfs-common/async/async.hpp"
+#include "madbfs-common/util/var_wrapper.hpp"
 
 #include <saf.hpp>
 
@@ -11,9 +12,6 @@
 namespace madbfs::rpc
 {
     using Socket = async::tcp::Socket;
-
-    template <typename T>
-    using Channel = async::Channel<T>;
 
     // NOTE: if you decided to add/remove one or more entries, do update domain check in read_procedure
     enum class Procedure : u8
@@ -89,20 +87,27 @@ namespace madbfs::rpc
         // clang-format on
     }
 
-    using Request = Var<
-        req::Listdir,
-        req::Stat,
-        req::Readlink,
-        req::Mknod,
-        req::Mkdir,
-        req::Unlink,
-        req::Rmdir,
-        req::Rename,
-        req::Truncate,
-        req::Read,
-        req::Write,
-        req::Utimens,
-        req::CopyFileRange>;
+    struct Request    //
+        : util::VarWrapper<
+              req::Listdir,
+              req::Stat,
+              req::Readlink,
+              req::Mknod,
+              req::Mkdir,
+              req::Unlink,
+              req::Rmdir,
+              req::Rename,
+              req::Truncate,
+              req::Read,
+              req::Write,
+              req::Utimens,
+              req::CopyFileRange>
+    {
+        // make the base constructor visible
+        using VarWrapper::VarWrapper;
+
+        Procedure proc() { return static_cast<Procedure>(index()); }
+    };
 
     namespace resp
     {
@@ -140,20 +145,27 @@ namespace madbfs::rpc
         // clang-format on
     }
 
-    using Response = Var<
-        resp::Listdir,
-        resp::Stat,
-        resp::Readlink,
-        resp::Mknod,
-        resp::Mkdir,
-        resp::Unlink,
-        resp::Rmdir,
-        resp::Rename,
-        resp::Truncate,
-        resp::Read,
-        resp::Write,
-        resp::Utimens,
-        resp::CopyFileRange>;
+    struct Response    //
+        : util::VarWrapper<
+              resp::Listdir,
+              resp::Stat,
+              resp::Readlink,
+              resp::Mknod,
+              resp::Mkdir,
+              resp::Unlink,
+              resp::Rmdir,
+              resp::Rename,
+              resp::Truncate,
+              resp::Read,
+              resp::Write,
+              resp::Utimens,
+              resp::CopyFileRange>
+    {
+        // make the base constructor visible
+        using VarWrapper::VarWrapper;
+
+        Procedure proc() { return static_cast<Procedure>(index()); }
+    };
 
     namespace meta
     {
@@ -188,16 +200,16 @@ namespace madbfs::rpc
         };
 
         template <typename T>
-        concept IsRequest = meta::VarTraits<Request>::has_type<T>;
+        concept IsRequest = meta::VarTraits<Request::Var>::has_type<T>;
 
         template <typename T>
-        concept IsResponse = meta::VarTraits<Response>::has_type<T>;
+        concept IsResponse = meta::VarTraits<Response::Var>::has_type<T>;
 
         template <IsRequest Req>
-        using ToResp = VarTraits<Request>::Swap<Req, Response>;
+        using ToResp = VarTraits<Request::Var>::Swap<Req, Response::Var>;
 
         template <IsResponse Resp>
-        using ToReq = VarTraits<Response>::Swap<Resp, rpc::Request>;
+        using ToReq = VarTraits<Response::Var>::Swap<Resp, rpc::Request::Var>;
     }
 
     using meta::IsRequest;
@@ -210,7 +222,7 @@ namespace madbfs::rpc
     public:
         Client(Socket socket)
             : m_socket{ std::move(socket) }
-            , m_channel{ socket.get_executor(), 4096 }    // TODO: bigger numbers?
+            , m_channel{ socket.get_executor(), 4096 }
         {
         }
 
@@ -229,12 +241,13 @@ namespace madbfs::rpc
         };
 
         using Inflight = std::unordered_map<Id, Promise, Id::Hash>;
+        using Channel  = async::Channel<std::tuple<Id, Span<const u8>>>;
 
         AExpect<void> receive();
         AExpect<void> send();
 
-        Socket                  m_socket;
-        Channel<Span<const u8>> m_channel;
+        Socket  m_socket;
+        Channel m_channel;
 
         Inflight  m_requests;
         Id::Inner m_counter = 0;
