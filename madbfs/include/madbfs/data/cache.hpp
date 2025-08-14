@@ -107,6 +107,28 @@ namespace madbfs::data
 
         Await<void> evict(usize size);
 
+        AExpect<usize> read_at(
+            LookupEntry& entry,
+            Span<char>   out,
+            Id           id,
+            usize        index,
+            usize        first,
+            usize        last,
+            off_t        offset
+        );
+
+        AExpect<usize> write_at(
+            LookupEntry&     entry,
+            Span<const char> in,
+            Id               id,
+            usize            index,
+            usize            first,
+            usize            last,
+            off_t            offset
+        );
+
+        AExpect<void> flush_at(Page& page, Id id);
+
         connection::Connection& m_connection;
 
         Lru    m_lru;      // most recently used is at the front
