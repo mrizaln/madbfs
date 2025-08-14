@@ -42,6 +42,25 @@ namespace madbfs
     using AExpect = Await<Expect<T, E>>;
 }
 
+namespace madbfs::inline concepts
+{
+    namespace detail
+    {
+        template <typename>
+        struct AwaitableTraits : std::false_type
+        {
+        };
+
+        template <typename T>
+        struct AwaitableTraits<Await<T>> : std::true_type
+        {
+        };
+    }
+
+    template <typename T>
+    concept IsAwaitable = concepts::detail::AwaitableTraits<T>::value;
+}
+
 namespace madbfs::async
 {
     using Context   = asio::io_context;
@@ -101,6 +120,26 @@ namespace madbfs::async
 
             return std::move(result).value();
         }
+    }
+
+    template <Range R>
+        requires IsAwaitable<RangeValue<R>>
+    Await<Vec<typename RangeValue<R>::value_type>> wait_all(R&& awaitables) noexcept(false)
+    {
+        namespace asiox = asio::experimental;
+
+        auto exec  = co_await asio::this_coro::executor;
+        auto defer = [&](auto&& coro) { return async::spawn(exec, std::move(coro), asio::deferred); };
+        auto grp   = asiox::make_parallel_group(awaitables | sv::transform(defer) | sr::to<std::vector>());
+
+        auto [ord, e, res] = co_await grp.async_wait(asiox::wait_for_all{}, asio::use_awaitable);
+        for (auto e : e) {
+            if (e) {
+                std::rethrow_exception(e);
+            }
+        }
+
+        co_return res;
     }
 
     inline Errc to_generic_err(error_code ec, Errc fallback = Errc::io_error) noexcept
