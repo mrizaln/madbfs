@@ -26,21 +26,22 @@ namespace
      * @return The return value of the member function.
      */
     template <typename Ret, typename... Args>
-    Ret::value_type tree_blocking(
-        Ret (madbfs::tree::FileTree::*fn)(Args...),
+    Ret invoke_tree(
+        madbfs::Await<Ret> (madbfs::tree::FileTree::*fn)(Args...),
         std::type_identity_t<Args>... args
     ) noexcept
     {
-        auto& ctx  = get_data().async_ctx();
-        auto& tree = get_data().tree();
+        auto& data = get_data();
+        auto& ctx  = data.async_ctx();
+        auto& tree = data.tree();
 
         try {
             auto coro = (tree.*fn)(std::forward<Args>(args)...);
-            return madbfs::async::spawn_block(ctx, std::move(coro));
+            return madbfs::async::block(ctx, std::move(coro));
         } catch (const std::exception& e) {
-            madbfs::log_c("tree_blocking: exception occurred: {}", e.what());
+            madbfs::log_c("invoke_tree: exception occurred: {}", e.what());
         } catch (...) {
-            madbfs::log_c("tree_blocking: unknown exception occurred");
+            madbfs::log_c("invoke_tree: unknown exception occurred");
         }
         return madbfs::Unexpect{ madbfs::Errc::io_error };
     }
@@ -91,6 +92,8 @@ namespace
 
 namespace madbfs::operations
 {
+    using tree::FileTree;
+
     void* init(fuse_conn_info* conn, fuse_config*) noexcept
     {
         if (conn->want & FUSE_CAP_ATOMIC_O_TRUNC) {
@@ -138,7 +141,7 @@ namespace madbfs::operations
         log_i("{}: {:?}", __func__, path);
 
         auto maybe_stat = ok_or(path::create(path), Errc::operation_not_supported).and_then([](auto p) {
-            return tree_blocking(&tree::FileTree::getattr, p);
+            return invoke_tree(&FileTree::getattr, p);
         });
         if (not maybe_stat.has_value()) {
             return fuse_err(__func__, path)(maybe_stat.error());
@@ -168,7 +171,7 @@ namespace madbfs::operations
         log_i("{}: {:?}", __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](path::Path p) { return tree_blocking(&tree::FileTree::readlink, p); })
+            .and_then([](path::Path p) { return invoke_tree(&FileTree::readlink, p); })
             .and_then([&](tree::Node& node) -> Expect<void> {
                 auto target_buf = node.build_path();    // this will emits absolute path, which we don't want
                 auto target     = target_buf.as_path();
@@ -189,7 +192,7 @@ namespace madbfs::operations
         log_i("{}: {:?}", __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([=](path::Path p) { return tree_blocking(&tree::FileTree::mknod, p, mode, dev); })
+            .and_then([=](path::Path p) { return invoke_tree(&FileTree::mknod, p, mode, dev); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -199,7 +202,7 @@ namespace madbfs::operations
         log_i("{}: {:?}", __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([=](path::Path p) { return tree_blocking(&tree::FileTree::mkdir, p, mode | S_IFDIR); })
+            .and_then([=](path::Path p) { return invoke_tree(&FileTree::mkdir, p, mode | S_IFDIR); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -209,7 +212,7 @@ namespace madbfs::operations
         log_i("{}: {:?}", __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](path::Path p) { return tree_blocking(&tree::FileTree::unlink, p); })
+            .and_then([](path::Path p) { return invoke_tree(&FileTree::unlink, p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -219,7 +222,7 @@ namespace madbfs::operations
         log_i("{}: {:?}", __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](path::Path p) { return tree_blocking(&tree::FileTree::rmdir, p); })
+            .and_then([](path::Path p) { return invoke_tree(&FileTree::rmdir, p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -239,7 +242,7 @@ namespace madbfs::operations
             return fuse_err(__func__, to)(Errc::operation_not_supported);
         }
 
-        return tree_blocking(&tree::FileTree::rename, *from_path, *to_path, flags)
+        return invoke_tree(&FileTree::rename, *from_path, *to_path, flags)
             .transform_error(fuse_err(__func__, from))
             .error_or(0);
     }
@@ -249,7 +252,7 @@ namespace madbfs::operations
         log_i("{}: [size={}] {:?}", __func__, size, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return tree_blocking(&tree::FileTree::truncate, p, size); })
+            .and_then([&](path::Path p) { return invoke_tree(&FileTree::truncate, p, size); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -259,7 +262,7 @@ namespace madbfs::operations
         log_i("{}: {:?} [flags={:#08o}]", __func__, path, fi->flags);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return tree_blocking(&tree::FileTree::open, p, fi->flags); })
+            .and_then([&](path::Path p) { return invoke_tree(&FileTree::open, p, fi->flags); })
             .transform([&](auto fd) { fi->fh = fd; })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
@@ -270,7 +273,7 @@ namespace madbfs::operations
         log_i("{}: [offset={}|size={}] {:?}", __func__, offset, size, path);
 
         auto res = ok_or(path::create(path), Errc::operation_not_supported).and_then([&](path::Path p) {
-            return tree_blocking(&tree::FileTree::read, p, fi->fh, { buf, size }, offset);
+            return invoke_tree(&FileTree::read, p, fi->fh, { buf, size }, offset);
         });
         return res.has_value() ? static_cast<i32>(res.value()) : fuse_err(__func__, path)(res.error());
     }
@@ -280,7 +283,7 @@ namespace madbfs::operations
         log_i("{}: [offset={}|size={}] {:?}", __func__, offset, size, path);
 
         auto res = ok_or(path::create(path), Errc::operation_not_supported).and_then([&](auto p) {
-            return tree_blocking(&tree::FileTree::write, p, fi->fh, { buf, size }, offset);
+            return invoke_tree(&FileTree::write, p, fi->fh, { buf, size }, offset);
         });
         return res.has_value() ? static_cast<i32>(res.value()) : fuse_err(__func__, path)(res.error());
     }
@@ -290,7 +293,7 @@ namespace madbfs::operations
         log_i("{}: {:?}", __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return tree_blocking(&tree::FileTree::flush, p, fi->fh); })
+            .and_then([&](path::Path p) { return invoke_tree(&FileTree::flush, p, fi->fh); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -300,7 +303,7 @@ namespace madbfs::operations
         log_i("{}: {:?}", __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return tree_blocking(&tree::FileTree::release, p, fi->fh); })
+            .and_then([&](path::Path p) { return invoke_tree(&FileTree::release, p, fi->fh); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -319,7 +322,7 @@ namespace madbfs::operations
         const auto fill = [&](const char* name) { filler(buf, name, nullptr, 0, FUSE_FILL_DIR_PLUS); };
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return tree_blocking(&tree::FileTree::readdir, p, fill); })
+            .and_then([&](path::Path p) { return invoke_tree(&FileTree::readdir, p, fill); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -338,7 +341,7 @@ namespace madbfs::operations
         log_i("{}: {:?}", __func__, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return tree_blocking(&tree::FileTree::utimens, p, tv[0], tv[1]); })
+            .and_then([&](path::Path p) { return invoke_tree(&FileTree::utimens, p, tv[0], tv[1]); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -373,8 +376,8 @@ namespace madbfs::operations
             return fuse_err(__func__, out_path)(Errc::operation_not_supported);
         }
 
-        auto op  = &tree::FileTree::copy_file_range;
-        auto res = tree_blocking(op, *in, in_fi->fh, in_off, *out, out_fi->fh, out_off, size);
+        auto op  = &FileTree::copy_file_range;
+        auto res = invoke_tree(op, *in, in_fi->fh, in_off, *out, out_fi->fh, out_off, size);
         return res ? static_cast<isize>(res.value()) : fuse_err(__func__, in_path)(res.error());
     }
 }

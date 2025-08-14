@@ -29,7 +29,7 @@ namespace madbfs
             co_return std::move(*result);
         };
 
-        return async::spawn_block(ctx, coro());
+        return async::block(ctx, coro());
     }
 
     Opt<data::Ipc> Madbfs::create_ipc(async::Context& ctx)
@@ -75,7 +75,7 @@ namespace madbfs
 
     Madbfs::~Madbfs()
     {
-        async::spawn_block(m_async_ctx, m_tree.shutdown());
+        async::block(m_async_ctx, m_tree.shutdown());
 
         m_work_guard.reset();
         m_async_ctx.stop();

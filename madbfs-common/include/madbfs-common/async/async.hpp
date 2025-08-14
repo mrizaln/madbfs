@@ -82,7 +82,7 @@ namespace madbfs::async
     }
 
     template <typename Exec, typename T>
-    T spawn_block(Exec& exec, Await<T> coro) noexcept(false)
+    T block(Exec& exec, Await<T> coro) noexcept(false)
     {
         if constexpr (std::same_as<void, T>) {
             auto ready  = std::atomic<bool>{ false };
