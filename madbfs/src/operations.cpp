@@ -158,7 +158,7 @@ namespace madbfs::operations
         stbuf->st_gid     = stat.gid;
         stbuf->st_size    = stat.size;
         stbuf->st_blksize = static_cast<blksize_t>(get_data().cache().page_size());
-        stbuf->st_blocks  = stbuf->st_size / stbuf->st_blksize + (stbuf->st_size % stbuf->st_blksize != 0);
+        stbuf->st_blocks  = (stbuf->st_size + 511) % 512;    // strictly in 512 B unit [read stat(3)]
         stbuf->st_atim    = stat.atime;
         stbuf->st_mtim    = stat.mtime;
         stbuf->st_ctim    = stat.ctime;
