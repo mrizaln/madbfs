@@ -119,29 +119,21 @@ namespace madbfs::connection
         auto err  = Pipe{ exec };
         auto proc = Process{ exec, cmd, args, bp::process_stdio{ {}, out, err } };
 
-        auto timer = async::Timer{ exec };
-        timer.expires_after(std::chrono::seconds{ 5 });
+        auto buf = String(rpc::server_ready_string.size(), '\0');
+        auto res = co_await async::timeout(async::read_exact<char>(out, buf), timeout_delay);
 
-        using namespace async::operators;
-
-        auto buf   = String(rpc::server_ready_string.size(), '\0');
-        auto waitd = co_await (timer.async_wait() || async::read_exact<char>(out, buf));
-
-        if (waitd.index() == 0) {
+        if (not res) {
             log_e("{}: waited for 5 seconds, server is timed out", __func__);
             co_return Unexpect{ Errc::timed_out };
-        } else {
-            auto n = std::get<1>(waitd);
-            if (not n) {
-                log_e("{}: failed to read output: {}", __func__, n.error().message());
-                co_return Unexpect{ async::to_generic_err(n.error(), Errc::not_connected) };
-            } else if (n.value() != buf.size()) {
-                log_e("{}: server process broken pipe", __func__);
-                co_return Unexpect{ Errc::broken_pipe };
-            } else if (buf != rpc::server_ready_string) {
-                log_e("{}: server process is responding, but incorrect response: {:?}", __func__, buf);
-                co_return Unexpect{ Errc::broken_pipe };
-            }
+        } else if (auto n = res.value(); not n) {
+            log_e("{}: failed to read output: {}", __func__, n.error().message());
+            co_return Unexpect{ async::to_generic_err(n.error(), Errc::not_connected) };
+        } else if (n.value() != buf.size()) {
+            log_e("{}: server process broken pipe", __func__);
+            co_return Unexpect{ Errc::broken_pipe };
+        } else if (buf != rpc::server_ready_string) {
+            log_e("{}: server process is responding, but incorrect response: {:?}", __func__, buf);
+            co_return Unexpect{ Errc::broken_pipe };
         }
 
         auto client = co_await make_client(port);

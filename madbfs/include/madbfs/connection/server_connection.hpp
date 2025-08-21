@@ -12,6 +12,8 @@ namespace madbfs::connection
         using Process = boost::process::v2::process;
         using Pipe    = async::pipe::Read;
 
+        static constexpr auto timeout_delay = std::chrono::seconds{ 1 };
+
         /**
          * @brief Prepare the server connection and create the class.
          *
@@ -92,7 +94,7 @@ namespace madbfs::connection
         template <rpc::IsRequest Req>
         AExpect<rpc::ToResp<Req>> send_req(Vec<u8>& buf, Req req)
         {
-            auto res = co_await send(buf, std::move(req));
+            auto res = co_await async::timeout_expect(send(buf, std::move(req)), timeout_delay);
             if (not res) {
                 co_return Unexpect{ res.error() };
             }

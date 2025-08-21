@@ -73,12 +73,10 @@ namespace madbfs::async
     template <typename T>
     using Channel = Token::as_default_on_t<asio::experimental::channel<void(error_code, T)>>;
 
-    template <typename Exec, typename Awaited, typename Completion>
-    auto spawn(Exec&& ex, Awaited&& func, Completion&& completion) noexcept
+    template <typename Exec, typename T, typename Compl>
+    auto spawn(Exec& exec, Await<T>&& awaitable, Compl&& completion) noexcept
     {
-        return asio::co_spawn(
-            std::forward<Exec>(ex), std::forward<Awaited>(func), std::forward<Completion>(completion)
-        );
+        return asio::co_spawn(exec, std::move(awaitable), std::forward<Compl>(completion));
     }
 
     template <typename Exec, typename T>
@@ -142,6 +140,42 @@ namespace madbfs::async
         co_return res;
     }
 
+    template <typename T>
+    Await<Opt<T>> timeout(Await<T>&& awaitable, std::chrono::milliseconds time)
+    {
+        using asio::experimental::awaitable_operators::operator||;
+
+        auto timer = Timer{ co_await asio::this_coro::executor };
+
+        timer.expires_after(time);
+        auto res = co_await (std::move(awaitable) || timer.async_wait());
+
+        switch (res.index()) {
+        case 0: co_return Opt{ std::move(std::get<0>(res)) };
+        case 1: co_return std::nullopt;
+        }
+
+        co_return std::nullopt;
+    }
+
+    template <typename T>
+    AExpect<T> timeout_expect(AExpect<T>&& awaitable, std::chrono::milliseconds time)
+    {
+        using asio::experimental::awaitable_operators::operator||;
+
+        auto timer = Timer{ co_await asio::this_coro::executor };
+
+        timer.expires_after(time);
+        auto res = co_await (std::move(awaitable) || timer.async_wait());
+
+        switch (res.index()) {
+        case 0: co_return std::move(std::get<0>(res));
+        case 1: co_return Unexpect{ Errc::timed_out };
+        }
+
+        co_return Unexpect{ Errc::io_error };
+    }
+
     inline Errc to_generic_err(error_code ec, Errc fallback = Errc::io_error) noexcept
     {
         const auto& cat = ec.category();
@@ -201,10 +235,5 @@ namespace madbfs::async
     {
         using Write = Token::as_default_on_t<asio::writable_pipe>;
         using Read  = Token::as_default_on_t<asio::readable_pipe>;
-    }
-
-    namespace operators
-    {
-        using namespace asio::experimental::awaitable_operators;
     }
 }
