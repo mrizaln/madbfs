@@ -44,6 +44,11 @@ target_include_directories(madbfs-common PUBLIC include)
 target_compile_features(madbfs-common PUBLIC cxx_std_23)
 set_target_properties(madbfs-common PROPERTIES CXX_EXTENSIONS OFF)
 
+target_compile_definitions(
+    madbfs-common
+    PUBLIC MADBFS_VERSION_STRING="${CMAKE_PROJECT_VERSION}"
+)
+
 if(MADBFS_USE_NON_BOOST_ASIO)
     target_compile_definitions(madbfs-common PUBLIC MADBFS_NON_BOOST_ASIO=1)
     target_compile_definitions(madbfs-common PUBLIC SAF_ASIO_STANDALONE)
