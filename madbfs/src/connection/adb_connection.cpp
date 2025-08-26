@@ -237,28 +237,28 @@ namespace madbfs::connection
     AExpect<void> AdbConnection::utimens(path::Path path, timespec atime, timespec mtime)
     {
         for (auto [time, flag] : { Pair{ atime, "-a" }, Pair{ mtime, "-m" } }) {
-            if (time.tv_nsec == UTIME_NOW) {
+            switch (time.tv_nsec) {
+            case UTIME_OMIT: continue;
+            case UTIME_NOW: {
                 auto res = co_await cmd::exec({ "adb", "shell", "touch", "-c", flag, quote(path) });
-                co_return res.transform(sink_void);
-            }
+                if (not res) {
+                    co_return Unexpect{ res.error() };
+                }
+            } break;
+            default:
+                auto tm = std::tm{};
+                if (::localtime_r(&time.tv_sec, &tm) == nullptr) {    // localtime_r is C23 feature
+                    co_return Unexpect{ Errc::invalid_argument };
+                }
 
-            if (auto sec = time.tv_nsec / 1'000'000'000; sec > 0) {
-                time.tv_sec  += sec;
-                time.tv_nsec -= sec * 1'000'000'000;
-            }
+                const auto str = fmt::format("{:%Y%m%d%H%M.%S}{}", tm, time.tv_nsec);
+                log_i("{}: utimens to {}", __func__, str);
 
-            auto tm_info = std::localtime(&time.tv_sec);
-            if (tm_info == nullptr) {
-                time.tv_sec = std::time(nullptr);
-                tm_info     = std::gmtime(&time.tv_sec);
-            }
-
-            const auto str = fmt::format("{:%Y%m%d%H%M.%S}{}", *tm_info, time.tv_nsec);
-            log_i("{}: utimens to {}", __func__, str);
-
-            auto res = co_await cmd::exec({ "adb", "shell", "touch", "-c", flag, "-t", str, quote(path) });
-            if (not res) {
-                co_return Unexpect{ res.error() };
+                auto res = co_await cmd::exec({ "adb", "shell", "touch", "-c", flag, "-t", str, quote(path) }
+                );
+                if (not res) {
+                    co_return Unexpect{ res.error() };
+                }
             }
         }
 
