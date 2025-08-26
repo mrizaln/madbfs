@@ -130,6 +130,9 @@ Since the dependencies are managed by Conan, you need to make sure it's installe
   conan install . --build=missing -s build_type=Release
   ```
 
+  > - you might want to change the Conan profile by appending `-pr <profile_path>` to the command above.
+  > - for an example, you can see [this profile I use for CI](./.github/ci/conan-profile.ini) (you can also just use this one)
+
   Then compile the project:
 
   ```sh
@@ -143,16 +146,20 @@ Since the dependencies are managed by Conan, you need to make sure it's installe
 
   > you may skip this process if you don't mind not having proxy transport support
 
-  Navigate to the root of the repository then go to `madbfs-server/` subdirectory. You then can proceed by editing the [`build_all.sh`](./madbfs-server/build_all.sh) script. This step is necessary to set the Android native app build system and its paramater to be able to compile the server. You may change these parameters
+  Navigate to the root of the repository then go to `madbfs-server/` subdirectory. You then can proceed by editing the [`build_all.sh`](./madbfs-server/build_all.sh) script. This step is necessary to set the Android native app build system and its parameters to be able to compile the server. You may change these parameters
 
-  - ANDROID_NDK_PATH
-    > see [this](https://developer.android.com/studio/projects/install-ndk) or [this](https://developer.android.com/ndk/downloads)
   - API_LEVEL
     > see [this](https://apilevels.com/)
   - COMPILER
     > usually clang
   - COMPILER_VERSION
     > not ndk version! (check by running the compiler on the NDK path)
+
+  Your `ANDROID_NDK_HOME` variable must be set before compiling and point to the appropriate Android NDK. If your `ANDROID_NDK_HOME` variable is not set, you can set it yourself like so before going to the next step:
+
+  ```sh
+  export ANDROID_NDK_HOME=/path/to/your/android/ndk/home/
+  ```
 
   The compilation step is simpler:
 
@@ -166,11 +173,12 @@ Since the dependencies are managed by Conan, you need to make sure it's installe
 
   To allow for easier packaging, I have created [a script](./package.sh) that compiles both `madbfs` and `madbfs-server` in one go:
 
-  > NOTE: you must configure the Android NDK variables first on [`build_all.sh`](./madbfs-server/build_all.sh) script before using this script
-
   ```sh
   ./package.sh
   ```
+
+  > - you must configure the Android NDK variables first on [`build_all.sh`](./madbfs-server/build_all.sh) script and set the `ANDROID_NDK_HOME` environment variable before using this script.
+  > - you can given an argument to this script to set your Conan profile for building the `madbfs` client.
 
   This will build and package `madbfs` into a `tar.gz` file in `build/package/` directory.
 
