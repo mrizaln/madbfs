@@ -25,18 +25,21 @@
 #include <expected>
 #include <utility>
 
-namespace madbfs
+namespace madbfs::net
 {
 #if not MADBFS_NON_BOOST_ASIO
-    namespace asio   = boost::asio;
+    using namespace ::boost::asio;
     using error_code = boost::system::error_code;
 #else
-    namespace asio   = ::asio;
+    using namespace ::asio;
     using error_code = std::error_code;
 #endif
+}
 
+namespace madbfs
+{
     template <typename T>
-    using Await = asio::awaitable<T>;
+    using Await = net::awaitable<T>;
 
     template <typename T, typename E = std::errc>
     using AExpect = Await<Expect<T, E>>;
@@ -63,20 +66,20 @@ namespace madbfs::inline concepts
 
 namespace madbfs::async
 {
-    using Context   = asio::io_context;
-    using Token     = AsExpected<asio::use_awaitable_t<>>;
+    using Context   = net::io_context;
+    using Token     = AsExpected<net::use_awaitable_t<>>;
     using Executor  = Context::executor_type;
-    using WorkGuard = asio::executor_work_guard<Executor>;
+    using WorkGuard = net::executor_work_guard<Executor>;
 
-    using Timer = Token::as_default_on_t<asio::steady_timer>;
+    using Timer = Token::as_default_on_t<net::steady_timer>;
 
     template <typename T>
-    using Channel = Token::as_default_on_t<asio::experimental::channel<void(error_code, T)>>;
+    using Channel = Token::as_default_on_t<net::experimental::channel<void(net::error_code, T)>>;
 
     template <typename Exec, typename T, typename Compl>
     auto spawn(Exec& exec, Await<T>&& awaitable, Compl&& completion) noexcept
     {
-        return asio::co_spawn(exec, std::move(awaitable), std::forward<Compl>(completion));
+        return net::co_spawn(exec, std::move(awaitable), std::forward<Compl>(completion));
     }
 
     template <typename Exec, typename T>
@@ -86,7 +89,7 @@ namespace madbfs::async
             auto ready  = std::atomic<bool>{ false };
             auto except = std::exception_ptr{};
 
-            asio::co_spawn(exec, std::move(coro), [&](std::exception_ptr e) {
+            net::co_spawn(exec, std::move(coro), [&](std::exception_ptr e) {
                 except = e;
                 ready.store(true, std::memory_order::release);
                 ready.notify_one();
@@ -98,14 +101,14 @@ namespace madbfs::async
             }
         } else {
             // NOTE: coro needs to be wrapped into a coro that returns void since co_spawn on awaitable<T>
-            // requires T to be default constructible [https://github.com/chriskohlhoff/asio/issues/1303]
+            // requires T to be default constructible [https://github.com/chriskohlhoff/net/issues/1303]
 
             auto ready   = std::atomic<bool>{ false };
             auto except  = std::exception_ptr{};
             auto result  = Opt<T>{};
             auto wrapped = [&] -> Await<void> { result.emplace(co_await std::move(coro)); };
 
-            asio::co_spawn(exec, std::move(wrapped), [&](std::exception_ptr e) {
+            net::co_spawn(exec, std::move(wrapped), [&](std::exception_ptr e) {
                 except = e;
                 ready.store(true, std::memory_order::release);
                 ready.notify_one();
@@ -124,13 +127,13 @@ namespace madbfs::async
         requires IsAwaitable<RangeValue<R>>
     Await<Vec<typename RangeValue<R>::value_type>> wait_all(R&& awaitables) noexcept(false)
     {
-        namespace asiox = asio::experimental;
+        namespace netx = net::experimental;
 
-        auto exec  = co_await asio::this_coro::executor;
-        auto defer = [&](auto&& coro) { return async::spawn(exec, std::move(coro), asio::deferred); };
-        auto grp   = asiox::make_parallel_group(awaitables | sv::transform(defer) | sr::to<std::vector>());
+        auto exec  = co_await net::this_coro::executor;
+        auto defer = [&](auto&& coro) { return async::spawn(exec, std::move(coro), net::deferred); };
+        auto grp   = netx::make_parallel_group(awaitables | sv::transform(defer) | sr::to<std::vector>());
 
-        auto [ord, e, res] = co_await grp.async_wait(asiox::wait_for_all{}, asio::use_awaitable);
+        auto [ord, e, res] = co_await grp.async_wait(netx::wait_for_all{}, net::use_awaitable);
         for (auto e : e) {
             if (e) {
                 std::rethrow_exception(e);
@@ -143,9 +146,9 @@ namespace madbfs::async
     template <typename T>
     Await<Opt<T>> timeout(Await<T>&& awaitable, std::chrono::milliseconds time)
     {
-        using asio::experimental::awaitable_operators::operator||;
+        using net::experimental::awaitable_operators::operator||;
 
-        auto timer = Timer{ co_await asio::this_coro::executor };
+        auto timer = Timer{ co_await net::this_coro::executor };
 
         timer.expires_after(time);
         auto res = co_await (std::move(awaitable) || timer.async_wait());
@@ -161,9 +164,9 @@ namespace madbfs::async
     template <typename T>
     AExpect<T> timeout_expect(AExpect<T>&& awaitable, std::chrono::milliseconds time)
     {
-        using asio::experimental::awaitable_operators::operator||;
+        using net::experimental::awaitable_operators::operator||;
 
-        auto timer = Timer{ co_await asio::this_coro::executor };
+        auto timer = Timer{ co_await net::this_coro::executor };
 
         timer.expires_after(time);
         auto res = co_await (std::move(awaitable) || timer.async_wait());
@@ -176,48 +179,45 @@ namespace madbfs::async
         co_return Unexpect{ Errc::io_error };
     }
 
-    inline Errc to_generic_err(error_code ec, Errc fallback = Errc::io_error) noexcept
+    inline Errc to_generic_err(net::error_code ec, Errc fallback = Errc::io_error) noexcept
     {
-        const auto& cat = ec.category();
-#if MADBFS_NON_BOOST_ASIO
+        // conversion from boost error code to std error code
+        auto err = static_cast<std::error_code>(ec);
+
+        const auto& cat = err.category();
         if (cat == std::generic_category() or cat == std::system_category()) {
-#else
-        if (cat == boost::system::generic_category() or cat == asio::error::get_system_category()) {
-#endif
-            return static_cast<Errc>(ec.value());
+            return static_cast<Errc>(err.value());
         }
+
         return static_cast<bool>(fallback) ? fallback : Errc::invalid_argument;
     }
 
     template <typename Char, typename AStream>
-    AExpect<usize, error_code> write_exact(AStream& stream, Span<const Char> in) noexcept
+    AExpect<usize, net::error_code> write_exact(AStream& stream, Span<const Char> in) noexcept
     {
-        auto buf = asio::buffer(in);
-        return asio::async_write(stream, buf, as_expected(asio::use_awaitable));
+        auto buf = net::buffer(in);
+        return net::async_write(stream, buf, as_expected(net::use_awaitable));
     }
 
     template <typename Char, typename AStream>
-    AExpect<usize, error_code> read_exact(AStream& stream, Span<Char> out) noexcept
+    AExpect<usize, net::error_code> read_exact(AStream& stream, Span<Char> out) noexcept
     {
-        auto buf = asio::buffer(out.data(), out.size());
-        return asio::async_read(stream, buf, as_expected(asio::use_awaitable));
+        auto buf = net::buffer(out.data(), out.size());
+        return net::async_read(stream, buf, as_expected(net::use_awaitable));
     }
 
-    inline asio::this_coro::executor_t current_executor() noexcept
+    inline net::this_coro::executor_t current_executor() noexcept
     {
-        return asio::this_coro::executor;
+        return net::this_coro::executor;
     }
 
-    using asio::buffer;
-    using asio::dynamic_buffer;
-
-    using asio::detached;
-    using asio::use_awaitable;
-    using asio::use_future;
+    using net::detached;
+    using net::use_awaitable;
+    using net::use_future;
 
     namespace tcp
     {
-        using Proto    = asio::ip::tcp;
+        using Proto    = net::ip::tcp;
         using Endpoint = Proto::endpoint;
         using Acceptor = Token::as_default_on_t<Proto::acceptor>;
         using Socket   = Token::as_default_on_t<Proto::socket>;
@@ -225,7 +225,7 @@ namespace madbfs::async
 
     namespace unix_socket
     {
-        using Proto    = asio::local::stream_protocol;
+        using Proto    = net::local::stream_protocol;
         using Endpoint = Proto::endpoint;
         using Acceptor = Token::as_default_on_t<Proto::acceptor>;
         using Socket   = Token::as_default_on_t<Proto::socket>;
@@ -233,7 +233,7 @@ namespace madbfs::async
 
     namespace pipe
     {
-        using Write = Token::as_default_on_t<asio::writable_pipe>;
-        using Read  = Token::as_default_on_t<asio::readable_pipe>;
+        using Write = Token::as_default_on_t<net::writable_pipe>;
+        using Read  = Token::as_default_on_t<net::readable_pipe>;
     }
 }

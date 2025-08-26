@@ -100,9 +100,9 @@ namespace
         while (not eof) {
             auto tmp_read = 0uz;
             while (tmp_read < tmp.size()) {
-                auto buf = madbfs::async::buffer(tmp.data() + tmp_read, tmp.size() - tmp_read);
+                auto buf = madbfs::net::buffer(tmp.data() + tmp_read, tmp.size() - tmp_read);
                 auto res = co_await rpipe.async_read_some(buf);
-                if (not res and res == madbfs::asio::error::eof) {
+                if (not res and res == madbfs::net::error::eof) {
                     eof = true;
                     break;
                 } else if (not res) {
@@ -145,7 +145,7 @@ namespace madbfs::cmd
         auto ec   = boost::system::error_code{};
 
         // NOTE: synchronous write to prevent interleaving
-        if (auto n = asio::write(pipe_in, async::buffer(in), ec); ec) {
+        if (auto n = net::write(pipe_in, net::buffer(in), ec); ec) {
             log_e("{}: failed to write to stdin: {}", __func__, ec.message());
             co_return Unexpect{ async::to_generic_err(ec) };
         } else if (n < in.size()) {
@@ -154,13 +154,13 @@ namespace madbfs::cmd
         pipe_in.close();
 
         auto out = std::string{};
-        if (auto ec = co_await drain_pipe(pipe_out, out); ec and ec != asio::error::eof) {
+        if (auto ec = co_await drain_pipe(pipe_out, out); ec and ec != net::error::eof) {
             log_e("{}: failed to read from stdout: {}", __func__, ec.message());
             co_return Unexpect{ async::to_generic_err(ec) };
         }
 
         auto err = std::string{};
-        if (auto ec = co_await drain_pipe(pipe_err, err); ec and ec != asio::error::eof) {
+        if (auto ec = co_await drain_pipe(pipe_err, err); ec and ec != net::error::eof) {
             log_e("{}: failed to read from stderr: {}", __func__, ec.message());
             co_return Unexpect{ async::to_generic_err(ec) };
         }

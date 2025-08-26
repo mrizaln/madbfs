@@ -13,8 +13,8 @@ namespace madbfs::connection
         auto exec   = co_await async::current_executor();
         auto socket = async::tcp::Socket{ exec };
 
-        auto address  = asio::ip::address_v4{ { 127, 0, 0, 1 } };    // localhost
-        auto endpoint = asio::ip::tcp::endpoint{ address, port };
+        auto address  = net::ip::address_v4{ { 127, 0, 0, 1 } };    // localhost
+        auto endpoint = net::ip::tcp::endpoint{ address, port };
 
         if (auto res = co_await socket.async_connect(endpoint); not res) {
             log_e("{}: failed to connect to server at port {}", __func__, port);
@@ -162,7 +162,7 @@ namespace madbfs::connection
             return;
         }
 
-        auto ec      = error_code{};
+        auto ec      = net::error_code{};
         auto running = m_server_proc->running(ec);
         if (ec) {
             log_w("{}: error terminating server: {}", __func__, ec.message());

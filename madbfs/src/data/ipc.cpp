@@ -138,7 +138,7 @@ namespace madbfs::data
         auto name = path->as_path().fullpath();
         auto ep   = async::unix_socket::Endpoint{ name };
 
-        auto ec  = error_code{};
+        auto ec  = net::error_code{};
         auto acc = Acceptor{ context };
 
         acc.open(ep.protocol(), ec);
