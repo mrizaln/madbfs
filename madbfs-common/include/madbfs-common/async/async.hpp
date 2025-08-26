@@ -206,6 +206,77 @@ namespace madbfs::async
         return net::async_read(stream, buf, as_expected(net::use_awaitable));
     }
 
+    template <typename AStream>
+    AExpect<void, net::error_code> discard(AStream& stream, usize size) noexcept
+    {
+        auto sink = Array<char, 1024>{};
+        while (size != 0) {
+            auto buf = Span{ sink.data(), std::min(sink.size(), size) };
+            if (auto n = co_await read_exact(stream, buf); not n) {
+                co_return Unexpect{ n.error() };
+            } else {
+                size -= *n;
+            }
+        }
+
+        co_return Expect<void, net::error_code>{};
+    }
+
+    template <typename Char, typename AStream>
+    AExpect<usize, net::error_code> read_lv(AStream& stream, Span<Char> out) noexcept
+    {
+        using LenBuf = std::array<char, 4>;
+
+        auto len_buf = LenBuf{};
+        if (auto n = co_await read_exact<char>(stream, len_buf); not n) {
+            co_return Unexpect{ n.error() };
+        }
+
+        auto len = ::ntohl(std::bit_cast<u32>(len_buf));
+        if (len > out.size()) {
+            auto res = co_await discard(stream, len);
+            co_return Unexpect{ res.error_or(std::make_error_code(Errc::bad_message)) };
+        }
+
+        co_return co_await read_exact<Char>(stream, { out.data(), len });
+    }
+
+    template <typename Char, typename AStream, template <typename... Ts> typename Tmpl>
+        requires std::same_as<Tmpl<Char>, std::vector<Char>>
+              or std::same_as<Tmpl<Char>, std::basic_string<Char>>
+    AExpect<usize, net::error_code> read_lv(AStream& stream, Tmpl<Char>& out, usize max) noexcept
+    {
+        using LenBuf = std::array<char, 4>;
+
+        auto len_buf = LenBuf{};
+        if (auto n = co_await read_exact<char>(stream, len_buf); not n) {
+            co_return Unexpect{ n.error() };
+        }
+
+        auto len = ::ntohl(std::bit_cast<u32>(len_buf));
+        if (len > max) {
+            auto res = co_await discard(stream, len);
+            co_return Unexpect{ res.error_or(std::make_error_code(Errc::bad_message)) };
+        } else if (len > out.size()) {
+            out.resize(len);
+        }
+
+        co_return co_await read_exact<Char>(stream, { out.data(), len });
+    }
+
+    template <typename Char, typename AStream>
+    AExpect<usize, net::error_code> write_lv(AStream& stream, Span<const Char> in) noexcept
+    {
+        using LenBuf = std::array<char, 4>;
+
+        auto len = std::bit_cast<LenBuf>(::htonl(static_cast<u32>(in.size())));
+        if (auto n = co_await write_exact<char>(stream, len); not n) {
+            co_return Unexpect{ n.error() };
+        }
+
+        co_return co_await write_exact<char>(stream, in);
+    }
+
     inline net::this_coro::executor_t current_executor() noexcept
     {
         return net::this_coro::executor;
