@@ -380,19 +380,21 @@ Some operations only requires `"op"` field, while some requires `"value"` field.
 - Set cache size:
 
   ```json
-  { "op": "set_cache_size", "value": { "mib": <uint> } }
+  { "op": "set_cache_size", "value": <uint> }
   ```
 
-  > - uint must be greater than or equal to 128
+  > - unit is in MiB
+  > - `uint` must be greater than or equal to 128
   > - the value will be rouded up to the nearest multiple of 2
 
 - Set page size:
 
   ```json
-  { "op": "set_page_size", "value": { "kib": <uint> } }
+  { "op": "set_page_size", "value": <uint> }
   ```
 
-  > - uint must be between 64 and 4096
+  > - unit is in KiB
+  > - `uint` must be between 64 and 4096
   > - the value will be rouded up to the nearest multiple of 2
 
 The IPC will reply immediately after an operation is completed. The reply is in a JSON in the form of
@@ -420,11 +422,15 @@ The `<value>` then will be different depending on the operation performed:
   { "status": "success", "value": <uint> }
   ```
 
+  > unit is in MiB
+
 - Get page size
 
   ```json
   { "status": "success", "value": <uint> }
   ```
+
+  > unit is in KiB
 
 - Set cache size:
 
@@ -438,7 +444,7 @@ The `<value>` then will be different depending on the operation performed:
   }
   ```
 
-  > size is in MiB
+  > unit is in MiB
 
 - Set page size:
 
@@ -454,8 +460,8 @@ The `<value>` then will be different depending on the operation performed:
   }
   ```
 
-  > cache size is in MiB
-  > page size is in KiB
+  > - cache size unit is in MiB
+  > - page size unit is in KiB
 
 ## Benchmark
 

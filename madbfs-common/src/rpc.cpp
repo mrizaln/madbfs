@@ -3,15 +3,17 @@
 #include "madbfs-common/log.hpp"
 #include "madbfs-common/util/overload.hpp"
 
+// error handling that adapts error_code into errc
 #define HANDLE_ERROR(Res, Want, Msg)                                                                         \
     if (not(Res)) {                                                                                          \
         madbfs::log_e("{}: " Msg ": {}", __func__, Res.error().message());                                   \
         co_return madbfs::Unexpect{ madbfs::async::to_generic_err(Res.error(), Errc::not_connected) };       \
     } else if (Res.value() != Want) {                                                                        \
         madbfs::log_e("{}: " Msg ": message length mismatch [{} vs {}]", __func__, Res.value(), Want);       \
-        co_return madbfs::Unexpect{ madbfs::Errc::broken_pipe };                                             \
+        co_return madbfs::Unexpect{ madbfs::Errc::bad_message };                                             \
     }
 
+// error handling that adapts error_code into errc with custom handling on failure
 #define HANDLE_ERROR_ELSE(Res, Want, Msg, Else)                                                              \
     if (not(Res)) {                                                                                          \
         madbfs::log_e("{}: " Msg ": {}", __func__, Res.error().message());                                   \
@@ -869,28 +871,30 @@ namespace madbfs::rpc
 
     AExpect<void> handshake(Socket& sock, bool client)
     {
-        if (client) {
-            auto n = co_await async::write_exact<char>(sock, server_ready_string);
-            HANDLE_ERROR(n, server_ready_string.size(), "failed to send handshake to server");
+        const auto message = fmt::format("{}:{}\n", server_ready_string, MADBFS_VERSION_STRING);
 
-            auto buffer = String(server_ready_string.size(), '\0');
-            auto n1     = co_await async::read_exact<char>(sock, buffer);
+        if (client) {
+            auto n = co_await async::write_lv<char>(sock, message);
+            HANDLE_ERROR(n, message.size(), "failed to send handshake to server");
+
+            auto buffer = Vec<char>(message.size(), '\0');
+            auto n1     = co_await async::read_lv<char>(sock, buffer);
             HANDLE_ERROR(n1, buffer.size(), "failed to read handshake from server");
 
-            if (buffer != server_ready_string) {
+            if (not sr::equal(buffer, message)) {
                 co_return Unexpect{ Errc::bad_message };
             }
         } else {
-            auto buffer = String(server_ready_string.size(), '\0');
-            auto n1     = co_await async::read_exact<char>(sock, buffer);
-            HANDLE_ERROR(n1, buffer.size(), "failed to read handshake from client");
+            auto buffer = Vec<char>(message.size(), '\0');
+            auto n      = co_await async::read_lv<char>(sock, buffer);
+            HANDLE_ERROR(n, buffer.size(), "failed to read handshake from client");
 
-            if (buffer != server_ready_string) {
+            if (not sr::equal(buffer, message)) {
                 co_return Unexpect{ Errc::bad_message };
             }
 
-            auto n2 = co_await async::write_exact<char>(sock, server_ready_string);
-            HANDLE_ERROR(n2, server_ready_string.size(), "failed to send handshake to client");
+            auto n1 = co_await async::write_lv<char>(sock, message);
+            HANDLE_ERROR(n1, message.size(), "failed to send handshake to client");
         }
 
         co_return Expect<void>{};
