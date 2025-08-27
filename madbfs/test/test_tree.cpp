@@ -72,7 +72,7 @@ constexpr auto expected_rm = R"(
 
 // NOTE: since there is no ordering guarantee from the VFS, this formatter just order them alphabetically
 template <>
-struct fmt::formatter<madbfs::tree::Node> : fmt::formatter<std::string_view>
+struct fmt::formatter<madbfs::tree::Node> : fmt::formatter<Str>
 {
     auto format(const madbfs::tree::Node& node, auto&& ctx) const
     {
@@ -120,7 +120,7 @@ struct fmt::formatter<madbfs::tree::Node> : fmt::formatter<std::string_view>
 class ExpectError : public std::runtime_error
 {
 public:
-    ExpectError(std::errc errc, std::source_location loc = std::source_location::current())
+    ExpectError(Errc errc, std::source_location loc = std::source_location::current())
         : runtime_error{ fmt::format(
               "{}:{}:{} [{}]",
               loc.file_name(),
@@ -134,7 +134,7 @@ public:
 
 template <typename T>
 [[noreturn]] madbfs::Unit raise_expect_error(
-    std::errc            errc,
+    Errc                 errc,
     std::source_location loc = std::source_location::current()
 )
 {
@@ -335,7 +335,7 @@ int main()
             // there is no recursive delete
             Node& bar      = tree.traverse("/hello/bar"_path).unwrap(Node*);
             auto  bar_path = bar.build_path();
-            auto  paths    = std::vector<madbfs::path::PathBuf>{};
+            auto  paths    = Vec<madbfs::path::PathBuf>{};
 
             _ = bar.list([&](Str name) { paths.push_back(bar_path.extend_copy(name).value()); });
             for (const auto& path : paths) {

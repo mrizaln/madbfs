@@ -55,10 +55,7 @@ namespace madbfs::util
                 ++m_idx;
             }
 
-            auto it = std::ranges::find_if(m_str | std::views::drop(m_idx), [this](char ch) {
-                return m_delim.is_delim(ch);
-            });
-
+            auto it = sr::find_if(m_str | sv::drop(m_idx), [this](char ch) { return m_delim.is_delim(ch); });
             if (it != m_str.end()) {
                 auto pos = static_cast<usize>(it - m_str.begin());
                 auto res = m_str.substr(m_idx, pos - m_idx);
@@ -100,8 +97,8 @@ namespace madbfs::util
     template <usize N>
     struct SplitResult
     {
-        std::array<Str, N> result;
-        Str                remainder;
+        Array<Str, N> result;
+        Str           remainder;
     };
 
     inline Vec<Str> split(Str str, SplitDelim delim)
@@ -115,7 +112,7 @@ namespace madbfs::util
     Opt<SplitResult<N>> split_n(Str str, SplitDelim delim)
     {
         auto splitter = StringSplitter{ str, delim };
-        auto res      = std::array<Str, N>{};
+        auto res      = Array<Str, N>{};
 
         auto idx = 0_usize;
         while (idx < N) {

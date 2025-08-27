@@ -75,8 +75,7 @@ namespace madbfs::log
      */
     inline void shutdown() noexcept
     {
-        auto logger = spdlog::get("logger-file");
-        if (logger) {
+        if (auto logger = spdlog::get("logger-file"); logger) {
             logger->flush();
         }
         spdlog::shutdown();

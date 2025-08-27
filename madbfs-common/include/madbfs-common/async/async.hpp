@@ -41,7 +41,7 @@ namespace madbfs
     template <typename T>
     using Await = net::awaitable<T>;
 
-    template <typename T, typename E = std::errc>
+    template <typename T, typename E = Errc>
     using AExpect = Await<Expect<T, E>>;
 }
 
@@ -101,7 +101,7 @@ namespace madbfs::async
             }
         } else {
             // NOTE: coro needs to be wrapped into a coro that returns void since co_spawn on awaitable<T>
-            // requires T to be default constructible [https://github.com/chriskohlhoff/net/issues/1303]
+            // requires T to be default constructible [https://github.com/chriskohlhoff/asio/issues/1303]
 
             auto ready   = std::atomic<bool>{ false };
             auto except  = std::exception_ptr{};
@@ -225,7 +225,7 @@ namespace madbfs::async
     template <typename Char, typename AStream>
     AExpect<usize, net::error_code> read_lv(AStream& stream, Span<Char> out) noexcept
     {
-        using LenBuf = std::array<char, 4>;
+        using LenBuf = Array<char, 4>;
 
         auto len_buf = LenBuf{};
         if (auto n = co_await read_exact<char>(stream, len_buf); not n) {
@@ -246,7 +246,7 @@ namespace madbfs::async
               or std::same_as<Tmpl<Char>, std::basic_string<Char>>
     AExpect<usize, net::error_code> read_lv(AStream& stream, Tmpl<Char>& out, usize max) noexcept
     {
-        using LenBuf = std::array<char, 4>;
+        using LenBuf = Array<char, 4>;
 
         auto len_buf = LenBuf{};
         if (auto n = co_await read_exact<char>(stream, len_buf); not n) {
@@ -267,7 +267,7 @@ namespace madbfs::async
     template <typename Char, typename AStream>
     AExpect<usize, net::error_code> write_lv(AStream& stream, Span<const Char> in) noexcept
     {
-        using LenBuf = std::array<char, 4>;
+        using LenBuf = Array<char, 4>;
 
         auto len = std::bit_cast<LenBuf>(::htonl(static_cast<u32>(in.size())));
         if (auto n = co_await write_exact<char>(stream, len); not n) {

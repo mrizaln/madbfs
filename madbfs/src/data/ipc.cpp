@@ -25,11 +25,11 @@ namespace madbfs::data
         co_return Expect<void>{};
     }
 
-    Expect<ipc::Op, std::string> parse_msg(Str msg)
+    Expect<ipc::Op, String> parse_msg(Str msg)
     {
         try {
             const auto json = boost::json::parse(msg);
-            const auto op   = boost::json::value_to<std::string>(json.at("op"));
+            const auto op   = boost::json::value_to<String>(json.at("op"));
 
             if (op == ipc::names::help) {
                 return ipc::Op{ ipc::Help{} };
@@ -62,7 +62,7 @@ namespace madbfs::data
     {
         if (m_running) {
             stop();
-            auto sock = m_socket_path.as_path().fullpath();    // underlying is an std::string
+            auto sock = m_socket_path.as_path().fullpath();    // underlying is an String
             if (::unlink(sock.data()) < 0) {
                 log_e("{}: failed to unlink socket: {} [{}]", __func__, sock, strerror(errno));
             }

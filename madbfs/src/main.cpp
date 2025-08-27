@@ -14,6 +14,9 @@
  *
  * This handler is based on Stack Overflow answer:
  * - https://stackoverflow.com/a/77336/16506263
+ *
+ * FIXME: Currently the signal handling is hacky and may not work properly because there are invocations to
+ * functions that are not signal safe inside it.
  */
 void unexpected_program_end(const char* msg, bool is_sigsegv)
 {

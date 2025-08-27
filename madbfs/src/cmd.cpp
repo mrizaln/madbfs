@@ -94,7 +94,7 @@ namespace
     {
         out.clear();
 
-        auto tmp = std::array<char, 1024>{};
+        auto tmp = madbfs::Array<char, 1024>{};
         auto eof = false;
 
         while (not eof) {
@@ -153,13 +153,13 @@ namespace madbfs::cmd
         }
         pipe_in.close();
 
-        auto out = std::string{};
+        auto out = String{};
         if (auto ec = co_await drain_pipe(pipe_out, out); ec and ec != net::error::eof) {
             log_e("{}: failed to read from stdout: {}", __func__, ec.message());
             co_return Unexpect{ async::to_generic_err(ec) };
         }
 
-        auto err = std::string{};
+        auto err = String{};
         if (auto ec = co_await drain_pipe(pipe_err, err); ec and ec != net::error::eof) {
             log_e("{}: failed to read from stderr: {}", __func__, ec.message());
             co_return Unexpect{ async::to_generic_err(ec) };

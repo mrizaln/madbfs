@@ -252,7 +252,7 @@ namespace madbfs::path::inline literals
         {
             char data[N]{};
             constexpr FixedStr() = default;
-            constexpr FixedStr(const char (&str)[N]) { std::ranges::copy_n(str, N, data); }
+            constexpr FixedStr(const char (&str)[N]) { sr::copy_n(str, N, data); }
             constexpr Str str() const { return { data, N - 1 }; }
         };
     }

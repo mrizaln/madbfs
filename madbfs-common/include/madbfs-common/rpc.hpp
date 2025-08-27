@@ -183,7 +183,7 @@ namespace madbfs::rpc
             static constexpr bool has_type = (std::same_as<T, Ts> || ...);
 
             template <usize I>
-            using TypeAt = std::tuple_element_t<I, std::tuple<Ts...>>;    // A hack :D
+            using TypeAt = std::tuple_element_t<I, Tup<Ts...>>;    // A hack :D
 
             template <typename T>
                 requires has_type<T>
@@ -241,7 +241,7 @@ namespace madbfs::rpc
         };
 
         using Inflight = std::unordered_map<Id, Promise, Id::Hash>;
-        using Channel  = async::Channel<std::tuple<Id, Span<const u8>>>;
+        using Channel  = async::Channel<Tup<Id, Span<const u8>>>;
 
         AExpect<void> receive();
         AExpect<void> send();

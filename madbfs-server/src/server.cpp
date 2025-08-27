@@ -13,7 +13,7 @@
 
 namespace
 {
-    std::string err_msg(madbfs::Errc errc)
+    madbfs::String err_msg(madbfs::Errc errc)
     {
         return std::make_error_code(errc).message();
     }
@@ -305,7 +305,8 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Utimens req)
     {
         const auto& [path, atime, mtime] = req;
-        auto to_pair = [](timespec time) { return std::pair{ time.tv_sec, time.tv_nsec }; };
+
+        auto to_pair = [](timespec time) { return Pair{ time.tv_sec, time.tv_nsec }; };
         log_d("utimens: path={:?} atime={} mtime={}", path.data(), to_pair(atime), to_pair(mtime));
 
         auto times = Array{ atime, mtime };

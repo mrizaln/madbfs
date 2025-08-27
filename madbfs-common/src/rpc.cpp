@@ -40,17 +40,17 @@ namespace madbfs::rpc
     }
 
     template <std::integral I>
-    std::array<u8, sizeof(I)> to_net_bytes(I value)
+    Array<u8, sizeof(I)> to_net_bytes(I value)
     {
         if constexpr (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) {    // no std::endian on Android NDK
-            return std::bit_cast<std::array<u8, sizeof(I)>>(value);
+            return std::bit_cast<Array<u8, sizeof(I)>>(value);
         } else {
-            return std::bit_cast<std::array<u8, sizeof(I)>>(std::byteswap(value));
+            return std::bit_cast<Array<u8, sizeof(I)>>(std::byteswap(value));
         }
     }
 
     template <std::integral I>
-    I from_net_bytes(std::array<u8, sizeof(I)> bytes)
+    I from_net_bytes(Array<u8, sizeof(I)> bytes)
     {
         if constexpr (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__) {    // no std::endian on Android NDK
             return std::bit_cast<I>(bytes);
