@@ -9,6 +9,8 @@ namespace madbfs::connection
     public:
         AdbConnection() = default;
 
+        Str name() const override { return "adb"; }
+
         AExpect<Gen<ParsedStat>> statdir(path::Path path) override;
         AExpect<data::Stat>      stat(path::Path path) override;
         AExpect<path::PathBuf>   readlink(path::Path path) override;

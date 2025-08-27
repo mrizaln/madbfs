@@ -18,14 +18,22 @@ namespace madbfs::data
     {
         // clang-format off
         struct Help            { };
+        struct Info            { };
         struct InvalidateCache { };
         struct SetPageSize     { usize kib; };
-        struct GetPageSize     { };
         struct SetCacheSize    { usize mib; };
-        struct GetCacheSize    { };
         // clang-format on
 
-        using Op = Var<Help, InvalidateCache, SetPageSize, GetPageSize, SetCacheSize, GetCacheSize>;
+        namespace names
+        {
+            constexpr auto help             = "help";
+            constexpr auto info             = "info";
+            constexpr auto invalidate_cache = "invalidate_cache";
+            constexpr auto set_page_size    = "set_page_size";
+            constexpr auto set_cache_size   = "set_cache_size";
+        }
+
+        using Op = Var<Help, Info, InvalidateCache, SetPageSize, SetCacheSize>;
     }
 
     class Ipc

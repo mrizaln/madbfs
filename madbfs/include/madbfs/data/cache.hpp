@@ -98,6 +98,7 @@ namespace madbfs::data
 
         usize page_size() const { return m_page_size; }
         usize max_pages() const { return m_max_pages; }
+        usize current_pages() const { return m_lru.size(); }
 
     private:
         Opt<Ref<LookupEntry>> lookup(Id id, Opt<path::Path> path);

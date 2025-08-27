@@ -177,6 +177,8 @@ namespace mock
     public:
         using Stats = Gen<ParsedStat>;
 
+        Str name() const override { return "dummy"; }
+
         AExpect<Stats>   statdir(Path) override { co_return Unexpect{ {} }; }
         AExpect<Stat>    stat(Path) override { co_return Stat{}; }
         AExpect<PathBuf> readlink(Path path) override { co_return path.into_buf(); };

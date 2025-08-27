@@ -21,6 +21,8 @@ namespace madbfs::connection
     class Connection
     {
     public:
+        virtual Str name() const = 0;
+
         // directory operations
         // --------------------
 

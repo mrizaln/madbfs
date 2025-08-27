@@ -6,6 +6,7 @@ import sys
 import time
 from argparse import ArgumentParser
 from socket import AF_UNIX, SOCK_STREAM, socket
+from typing import Any
 
 
 class Protocol:
@@ -70,6 +71,11 @@ def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
 
+def pprint_json(json_value: str):
+    print(json.dumps(json.loads(json_value), indent=2))
+    return None
+
+
 def main() -> int:
     parser = ArgumentParser(
         description="Simple TCP client with length-based message protocol"
@@ -99,21 +105,19 @@ def main() -> int:
         eprint("Failed to connect to server. Exiting...")
         return 1
 
-    # op = {"op": "get_cache_size"}
-    # op = {"op": "set_cache_size", "value": {"mib": 128}}
-
-    # op = {"op": "get_page_size"}
-    # op = {"op": "set_page_size", "value": {"kib": 128}}
-    #
-    op = {"op": "invalidate_cache"}
     # op = {"op": "help"}
+    op = {"op": "info"}
+    # op = {"op": "invalidate_cache"}
+    # op = {"op": "set_page_size", "value": 128}
+    # op = {"op": "set_cache_size", "value": 128}
 
     Protocol.send(sock, json.dumps(op))
     resp = Protocol.receive(sock)
-    if resp is not None:
-        print(resp[0])
+    if resp is None:
+        print("failed to receive data")
+    else:
+        pprint_json(resp[0])
 
-    eprint("closing socket")
     sock.close()
 
     return 0

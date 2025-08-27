@@ -4,70 +4,28 @@
 
 #include <boost/json.hpp>
 
-namespace madbfs::data::ipc::names
-{
-    constexpr auto help             = "help";
-    constexpr auto invalidate_cache = "invalidate_cache";
-    constexpr auto set_page_size    = "set_page_size";
-    constexpr auto get_page_size    = "get_page_size";
-    constexpr auto set_cache_size   = "set_cache_size";
-    constexpr auto get_cache_size   = "get_cache_size";
-}
-
 namespace madbfs::data
 {
-    using LenInfo              = std::array<char, 4>;
     constexpr auto max_msg_len = 4 * 1024uz;    // 4 KiB
 
     AExpect<String> receive(Ipc::Socket& sock)
     {
-        auto len_buffer = LenInfo{};
-        auto count      = co_await async::read_exact<char>(sock, len_buffer);
-        if (not count) {
-            log_w("{}: failed to read from peer: {}", __func__, count.error().message());
-            co_return Unexpect{ async::to_generic_err(count.error()) };
-        } else if (count.value() != len_buffer.size()) {
-            co_return Unexpect{ Errc::connection_reset };
+        auto buffer = String{};
+        if (auto n = co_await async::read_lv(sock, buffer, max_msg_len); not n) {
+            co_return Unexpect{ async::to_generic_err(n.error(), Errc::io_error) };
         }
-
-        auto len = ::ntohl(std::bit_cast<u32>(len_buffer));
-        if (len > max_msg_len) {
-            co_return Unexpect{ Errc::message_size };
-        }
-
-        auto buffer = String(len, '\0');
-        auto count1 = co_await async::read_exact<char>(sock, buffer);
-        if (not count1) {
-            log_w("{}: failed to read from peer: {}", __func__, count1.error().message());
-            co_return Unexpect{ async::to_generic_err(count1.error()) };
-        } else if (count1.value() != len) {
-            co_return Unexpect{ Errc::connection_reset };
-        }
-
-        co_return Str{ buffer.data(), len };
+        co_return buffer;
     }
 
     AExpect<void> send(Ipc::Socket& sock, Str msg)
     {
-        auto len     = std::bit_cast<LenInfo>(::htonl(static_cast<u32>(msg.size())));
-        auto len_str = Str{ len.data(), len.size() };
-        if (auto n = co_await async::write_exact<char>(sock, len_str); not n) {
-            log_w("{}: failed to write to peer: {}", __func__, n.error().message());
-            co_return Unexpect{ async::to_generic_err(n.error()) };
+        if (auto n = co_await async::write_lv<char>(sock, msg); not n) {
+            co_return Unexpect{ async::to_generic_err(n.error(), Errc::not_connected) };
         }
-
-        auto count = co_await async::write_exact<char>(sock, msg);
-        if (not count) {
-            log_w("{}: failed to write to peer: {}", __func__, count.error().message());
-            co_return Unexpect{ async::to_generic_err(count.error()) };
-        } else if (count != msg.size()) {
-            co_return Unexpect{ Errc::connection_reset };
-        }
-
         co_return Expect<void>{};
     }
 
-    std::expected<ipc::Op, std::string> parse_msg(Str msg)
+    Expect<ipc::Op, std::string> parse_msg(Str msg)
     {
         try {
             const auto json = boost::json::parse(msg);
@@ -75,27 +33,25 @@ namespace madbfs::data
 
             if (op == ipc::names::help) {
                 return ipc::Op{ ipc::Help{} };
+            } else if (op == ipc::names::info) {
+                return ipc::Op{ ipc::Info{} };
             } else if (op == ipc::names::invalidate_cache) {
                 return ipc::Op{ ipc::InvalidateCache{} };
             } else if (op == ipc::names::set_page_size) {
                 return ipc::Op{
-                    ipc::SetPageSize{ .kib = boost::json::value_to<u32>(json.at("value").at("kib")) },
+                    ipc::SetPageSize{ .kib = boost::json::value_to<u32>(json.at("value")) },
                 };
-            } else if (op == ipc::names::get_page_size) {
-                return ipc::Op{ ipc::GetPageSize{} };
             } else if (op == ipc::names::set_cache_size) {
                 return ipc::Op{
-                    ipc::SetCacheSize{ .mib = boost::json::value_to<u32>(json.at("value").at("mib")) },
+                    ipc::SetCacheSize{ .mib = boost::json::value_to<u32>(json.at("value")) },
                 };
-            } else if (op == ipc::names::get_cache_size) {
-                return ipc::Op{ ipc::GetCacheSize{} };
             }
 
-            return std::unexpected{ fmt::format("'{}' is not a valid operation, try 'help'", op) };
+            return Unexpect{ fmt::format("'{}' is not a valid operation, try 'help'", op) };
         } catch (const boost::system::system_error& e) {
-            return std::unexpected{ e.code().message() };
+            return Unexpect{ e.code().message() };
         } catch (...) {
-            return std::unexpected{ "unknown error" };
+            return Unexpect{ "unknown error" };
         }
     }
 }
@@ -191,28 +147,27 @@ namespace madbfs::data
         }
 
         log_d("{}: op sent by peer: {:?}", __func__, *op_str);
-        auto op = parse_msg(op_str.value());
 
-        if (op.has_value()) {
-            auto response      = boost::json::object{};
-            response["status"] = "success";
-            response["value"]  = co_await m_on_op(*op);
+        auto op     = parse_msg(op_str.value());
+        auto status = Str{};
+        auto value  = boost::json::value{};
 
-            auto msg = boost::json::serialize(response);
-            if (auto res = co_await send(sock, msg); not res) {
-                const auto msg = std::make_error_code(res.error()).message();
-                log_w("{}: failed to send message: {}", __func__, msg);
-            }
+        if (op) {
+            status = "success";
+            value  = co_await m_on_op(*op);
         } else {
-            auto json       = boost::json::object{};
-            json["status"]  = "error";
-            json["message"] = std::move(op).error();
+            status = "error";
+            value  = op.error();
+        }
 
-            auto msg = boost::json::serialize(json);
-            if (auto res = co_await send(sock, msg); not res) {
-                const auto msg = std::make_error_code(res.error()).message();
-                log_w("{}: failed to send message: {}", __func__, msg);
-            }
+        auto response = boost::json::serialize(boost::json::value{
+            { "status", status },
+            { "value", value },
+        });
+
+        if (auto res = co_await send(sock, response); not res) {
+            const auto msg = std::make_error_code(res.error()).message();
+            log_w("{}: failed to send message: {}", __func__, msg);
         }
     }
 }
