@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 project(
     madbfs-server
-    VERSION 0.7.0
+    VERSION 0.8.0
     LANGUAGES CXX
     DESCRIPTION "Userspace filesystem for Android via adb using FUSE (proxy component)"
 )
