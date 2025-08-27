@@ -326,9 +326,10 @@ $ ./madbfs --log-file=- --log-level=debug -d <mountpoint> 2> /dev/null        # 
 Filesystem parameters can be reconfigured and queried during runtime though IPC using unix socket. The supported operations are:
 
 - help,
+- info,
 - invalidate cache,
-- set/get page size, and
-- set/get cache size.
+- set page size, and
+- set cache size.
 
 The address of the socket in which you can connect to as client is composed of the name of the filesystem and the serial of the device. The socket itself is created in directory defined by `XDG_RUNTIME_DIR` environment variable (it's usually set to `/run/user/<uid>`). If the `XDG_RUNTIME_DIR` is not defined, as fallback, the directory is set to `/tmp`. The socket will be created when the filesystem initializes.
 
@@ -353,28 +354,16 @@ The payload must be a JSON object in the form that depends on the operation requ
 
 Some operations only requires `"op"` field, while some requires `"value"` field. Below is the break down:
 
-- Help
+- Help:
 
   ```json
   { "op": "help" }
   ```
 
-- Invalidate cache:
+- Info:
 
   ```json
-  { "op": "invalidate_cache" }
-  ```
-
-- Get cache size
-
-  ```json
-  { "op": "get_cache_size" }
-  ```
-
-- Get page size
-
-  ```json
-  { "op": "get_page_size" }
+  { "op": "info" }
   ```
 
 - Set cache size:
@@ -401,36 +390,46 @@ The IPC will reply immediately after an operation is completed. The reply is in 
 
 ```json
 {
-  "status", <success|error>,
-  <"value"|"message">: <value>
+  "status", <"success"|"error">,
+  "value": <value>
 }
 ```
 
-The second field will be `"value"` if the `"status"` is `"success"`, else the second field will be `"message"` if the `"status"` is `"error"`.
+The `"value"` field will be filled with the value of the response of the resulting operation. It will contain a string that explains the error if an error status happens.
 
 The `<value>` then will be different depending on the operation performed:
 
 - Invalidate cache:
 
   ```json
-  { "status": "success", "value": null }
-  ```
-
-- Get cache size
-
-  ```json
-  { "status": "success", "value": <uint> }
+  { 
+    "status": "success", 
+    "value": {
+      "size": <uint>
+    }
+  }
   ```
 
   > unit is in MiB
 
-- Get page size
+- Info:
 
   ```json
-  { "status": "success", "value": <uint> }
+  {
+    "status": "success"
+    "value": {
+      "connection": <"server"|"adb">,
+      "page_size": <uint>,
+      "cache_size": {
+          "max": <uint>,
+          "current":  <uint>
+      }
+    }
+  }
   ```
 
-  > unit is in KiB
+  > - `page_size` unit is in KiB
+  > - `cache_size` unit is in MiB
 
 - Set cache size:
 
@@ -438,8 +437,10 @@ The `<value>` then will be different depending on the operation performed:
   {
     "status": "success",
     "value": {
-      "old_cache_size": <old_value>,
-      "new_cache_size": <new_value>
+      "cache_size": {
+        "old": <uint>,
+        "new": <uint> 
+      }
     }
   }
   ```
@@ -452,10 +453,14 @@ The `<value>` then will be different depending on the operation performed:
   {
     "status": "success",
     "value": {
-      "old_cache_size": <old_value>,
-      "new_cache_size": <new_value>,
-      "old_page_size": <old_value>,
-      "new_page_size": <new_value>,
+      "page_size": {
+        "old": <uint>,
+        "new": <uint> 
+      },
+      "cache_size": {
+        "old": <uint>,
+        "new": <uint>
+      }
     }
   }
   ```
