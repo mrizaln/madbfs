@@ -84,7 +84,7 @@ namespace madbfs::rpc
         template <typename Self>
         Self&& write_status(this Self&& self, Status status)
         {
-            return std::forward<Self>(self).write_int(static_cast<u8>(status));
+            return std::forward<Self>(self).write_int(static_cast<i32>(status));
         }
 
         template <typename Self>
@@ -162,7 +162,7 @@ namespace madbfs::rpc
 
         Opt<Status> read_status()
         {
-            return read_int<u8>().transform([](u8 v) { return Status{ v }; });
+            return read_int<i32>().transform([](u8 v) { return Status{ v }; });
         }
 
         Opt<Id> read_id()
@@ -427,8 +427,7 @@ namespace madbfs::rpc
 
             if (not proc) {
                 log_d("{}: RESP RECV  {} [invalid procedure]", __func__, id.inner());
-                auto buffer = Vec<u8>(size);
-                std::ignore = co_await async::read_exact<u8>(m_socket, buffer);
+                co_await async::discard(m_socket, size);
                 continue;
             }
 
@@ -437,14 +436,13 @@ namespace madbfs::rpc
             auto req = m_requests.extract(id);
             if (req.empty()) {
                 log_e("{}: response incoming for id {} but no promise registered", __func__, id.inner());
-                auto buffer = Vec<u8>(size);
-                std::ignore = co_await async::read_exact<u8>(m_socket, buffer);
+                co_await async::discard(m_socket, size);
                 continue;
             }
 
             auto& [buffer, promise] = req.mapped();
-            if (status != Status::Success) {
-                promise.set_value(Unexpect{ static_cast<Errc>(status) });
+            if (status != Status{}) {
+                promise.set_value(Unexpect{ status });
                 continue;
             }
 
@@ -725,8 +723,7 @@ namespace madbfs::rpc
 
             if (not proc) {
                 log_d("{}: recv req: id={} | proc=[invalid] | size={}", __func__, id.inner(), size);
-                auto buffer = Vec<u8>(size);
-                std::ignore = co_await async::read_exact<u8>(m_socket, buffer);
+                co_await async::discard(m_socket, size);
                 continue;
             }
 
@@ -759,7 +756,7 @@ namespace madbfs::rpc
 
     AExpect<void> Server::send_resp(Id id, Procedure proc, Var<Status, Response> response)
     {
-        auto status = Status::Success;
+        auto status = Status{};
         if (auto err = std::get_if<Status>(&response); err) {
             status = *err;
         }
@@ -767,7 +764,7 @@ namespace madbfs::rpc
         auto buffer  = Vec<u8>{};
         auto builder = ResponseBuilder{ buffer, id, proc, status };
 
-        if (status != Status::Success) {
+        if (status != Status{}) {
             auto payload = builder.build();
             auto n       = co_await async::write_exact(m_socket, payload);
             HANDLE_ERROR(n, payload.size(), "failed to send response payload");

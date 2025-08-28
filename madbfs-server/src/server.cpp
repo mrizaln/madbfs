@@ -30,21 +30,7 @@ namespace
 
         auto err = errno;
         log_loc(loc, Level::err, "{}: {} {:?}: {}", name, msg, path, strerror(err));
-        auto status = static_cast<madbfs::rpc::Status>(err);
-
-        switch (status) {
-        case madbfs::rpc::Status::Success:
-        case madbfs::rpc::Status::NoSuchFileOrDirectory:
-        case madbfs::rpc::Status::PermissionDenied:
-        case madbfs::rpc::Status::FileExists:
-        case madbfs::rpc::Status::NotADirectory:
-        case madbfs::rpc::Status::IsADirectory:
-        case madbfs::rpc::Status::InvalidArgument:
-        case madbfs::rpc::Status::DirectoryNotEmpty: return status;
-        }
-
-        // revert to InvalidArgument as default
-        return madbfs::rpc::Status::InvalidArgument;
+        return static_cast<madbfs::rpc::Status>(err);
     }
 }
 
@@ -62,7 +48,7 @@ namespace madbfs::server
 
         DEFER {
             if (::closedir(dir) < 0) {
-                status_from_errno(__func__, path, "failed to close dir");
+                std::ignore = status_from_errno(__func__, path, "failed to close dir");
             }
         };
 
@@ -87,7 +73,7 @@ namespace madbfs::server
 
             struct stat filestat = {};
             if (auto res = ::fstatat(dirfd, entry->d_name, &filestat, AT_SYMLINK_NOFOLLOW); res < 0) {
-                status_from_errno(__func__, name, "failed to stat file");
+                std::ignore = status_from_errno(__func__, name, "failed to stat file");
                 continue;
             }
 
@@ -254,7 +240,7 @@ namespace madbfs::server
 
         DEFER {
             if (::close(fd) < 0) {
-                status_from_errno(__func__, path, "failed to close file");
+                std::ignore = status_from_errno(__func__, path, "failed to close file");
             }
         };
 
@@ -286,7 +272,7 @@ namespace madbfs::server
 
         DEFER {
             if (::close(fd) < 0) {
-                status_from_errno(__func__, path, "failed to close file");
+                std::ignore = status_from_errno(__func__, path, "failed to close file");
             }
         };
 
@@ -328,7 +314,7 @@ namespace madbfs::server
         }
         DEFER {
             if (::close(in_fd) < 0) {
-                status_from_errno(__func__, in, "failed to close file");
+                std::ignore = status_from_errno(__func__, in, "failed to close file");
             }
         };
 
@@ -343,7 +329,7 @@ namespace madbfs::server
 
         DEFER {
             if (::close(out_fd) < 0) {
-                status_from_errno(__func__, out, "failed to close file");
+                std::ignore = status_from_errno(__func__, out, "failed to close file");
             }
         };
 

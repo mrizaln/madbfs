@@ -12,6 +12,9 @@
 namespace madbfs::rpc
 {
     using Socket = async::tcp::Socket;
+    using Status = std::errc;
+
+    static_assert(sizeof(Status) == 4, "huh, unusual system. usually enums without base (int) are 4 bytes.");
 
     // NOTE: if you decided to add/remove one or more entries, do update domain check in read_procedure
     enum class Procedure : u8
@@ -29,18 +32,6 @@ namespace madbfs::rpc
         Write,
         Utimens,
         CopyFileRange,
-    };
-
-    enum class Status : u8
-    {
-        Success               = 0,
-        NoSuchFileOrDirectory = ENOENT,
-        PermissionDenied      = EACCES,
-        FileExists            = EEXIST,
-        NotADirectory         = ENOTDIR,
-        IsADirectory          = EISDIR,
-        InvalidArgument       = EINVAL,    // generic error
-        DirectoryNotEmpty     = ENOTEMPTY,
     };
 
     class Id
