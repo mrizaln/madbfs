@@ -76,8 +76,8 @@ namespace madbfs
         template <typename E = std::errc>
         using Unexpect = std::unexpected<E>;
 
-        using Clock     = std::chrono::system_clock;
-        using Timestamp = Clock::time_point;
+        using SystemClock = std::chrono::system_clock;
+        using SteadyClock = std::chrono::steady_clock;
 
 #ifdef __cpp_lib_generator
         template <typename T>

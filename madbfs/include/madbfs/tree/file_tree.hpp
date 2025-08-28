@@ -17,7 +17,8 @@ namespace madbfs::tree
     class FileTree
     {
     public:
-        using Filler = std::move_only_function<void(const char* name)>;
+        using Filler   = std::move_only_function<void(const char* name)>;
+        using Duration = SteadyClock::duration;
 
         FileTree(connection::Connection& connection, data::Cache& cache);
         ~FileTree() = default;
@@ -81,6 +82,22 @@ namespace madbfs::tree
 
     private:
         /**
+         * @brief Fetch file stat from remote at `path` then create a child node on `parent`.
+         *
+         * @param parent Parent on which the child node will be created.
+         * @param path Path to the file.
+         */
+        AExpect<Ref<Node>> build(Node& parent, path::Path path);
+
+        /**
+         * @brief Same as build but force directory only, fails with `Errc::not_a_directory` if not directory.
+         *
+         * @param parent Parent on which the child node will be created.
+         * @param path Path to the file.
+         */
+        AExpect<Ref<Node>> build_directory(Node& parent, path::Path path);
+
+        /**
          * @brief Traverse the node or build a new node.
          *
          * @param path Path to the node.
@@ -102,5 +119,6 @@ namespace madbfs::tree
         data::Cache&            m_cache;
         std::atomic<u64>        m_fd_counter       = 0;
         bool                    m_root_initialized = false;
+        Duration                m_ttl;
     };
 }

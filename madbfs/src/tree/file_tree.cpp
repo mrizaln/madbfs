@@ -13,6 +13,53 @@ namespace madbfs::tree
     {
     }
 
+    AExpect<Ref<Node>> FileTree::build(Node& parent, path::Path path)
+    {
+        const auto name = path.filename();
+
+        auto stat = co_await m_connection.stat(path);
+        if (not stat.has_value()) {
+            std::ignore = parent.build(name, {}, node::Error{ stat.error() });
+            co_return Unexpect{ stat.error() };
+        }
+
+        switch (stat->mode & S_IFMT) {
+        case S_IFREG: co_return parent.build(name, *stat, node::Regular{}); break;
+        case S_IFDIR: co_return parent.build(name, *stat, node::Directory{}); break;
+        case S_IFLNK: {
+            auto may_target = co_await m_connection.readlink(path);
+            if (not may_target) {
+                co_return Unexpect{ may_target.error() };
+            }
+            auto& target = *may_target;
+
+            co_return (co_await traverse_or_build(target.as_path()))
+                .transform_error([&](Errc err) {
+                    log_e("traverse_or_build: target not found: {:?}", __func__, target.as_path().fullpath());
+                    return err;
+                })
+                .and_then([&](Node& node) { return parent.build(name, *stat, node::Link{ &node }); });
+        } break;
+        default: co_return parent.build(name, *stat, node::Other{}); break;
+        }
+    }
+
+    AExpect<Ref<Node>> FileTree::build_directory(Node& parent, path::Path path)
+    {
+        const auto name = path.filename();
+
+        auto stat = co_await m_connection.stat(path);
+        if (not stat.has_value()) {
+            std::ignore = parent.build(name, {}, node::Error{ stat.error() });
+            co_return Unexpect{ stat.error() };
+        } else if ((stat->mode & S_IFMT) != S_IFDIR) {
+            co_return Unexpect{ Errc::not_a_directory };
+        }
+
+        co_return parent.build(name, *stat, node::Directory{});
+    }
+
+    // TODO: make async
     Expect<Ref<Node>> FileTree::traverse(path::Path path)
     {
         if (path.is_root()) {
@@ -52,68 +99,26 @@ namespace madbfs::tree
 
         // iterate until parent
         for (auto name : path.parent_path().iter() | sv::drop(1)) {
-            auto res = current_path.extend(name);
-            assert(res and "extend failed");
-
+            current_path.extend(name);
             if (auto next = current->traverse(name); next.has_value()) {
                 current = &next->get();
                 continue;
             }
 
-            // get stat from device
-            auto stat = co_await m_connection.stat(current_path.as_path());
-            if (not stat.has_value()) {
-                std::ignore = current->build(name, {}, node::Error{ stat.error() });
-                co_return Unexpect{ stat.error() };
-            }
-            if ((stat->mode & S_IFMT) != S_IFDIR) {
-                co_return Unexpect{ Errc::not_a_directory };
+            auto next = co_await build_directory(*current, current_path.as_path());
+            if (not next) {
+                co_return Unexpect{ next.error() };
             }
 
-            // build the node
-            auto built = current->build(name, *stat, node::Directory{});
-            if (not built.has_value()) {
-                co_return Unexpect{ built.error() };
-            }
-
-            current = &built->get();
+            current = &next->get();
         }
 
         if (auto found = current->traverse(path.filename()); found.has_value()) {
             co_return found;
         }
 
-        auto res = current_path.extend(path.filename());
-        assert(res and "extend failed");
-
-        // get stat from device
-        auto stat = co_await m_connection.stat(current_path.as_path());
-        if (not stat.has_value()) {
-            std::ignore = current->build(path.filename(), {}, node::Error{ stat.error() });
-            co_return Unexpect{ stat.error() };
-        }
-
-        const auto name = path.filename();
-
-        switch (stat->mode & S_IFMT) {
-        case S_IFREG: co_return current->build(name, *stat, node::Regular{}); break;
-        case S_IFDIR: co_return current->build(name, *stat, node::Directory{}); break;
-        case S_IFLNK: {
-            auto may_target = co_await m_connection.readlink(path);
-            if (not may_target) {
-                co_return Unexpect{ may_target.error() };
-            }
-            auto& target = *may_target;
-
-            co_return (co_await traverse_or_build(target.as_path()))
-                .transform_error([&](Errc err) {
-                    log_e("traverse_or_build: target not found: {:?}", __func__, target.as_path().fullpath());
-                    return err;
-                })
-                .and_then([&](Node& node) { return current->build(name, *stat, node::Link{ &node }); });
-        } break;
-        default: co_return current->build(name, *stat, node::Other{}); break;
-        }
+        current_path.extend(path.filename());
+        co_return co_await build(*current, current_path.as_path());
     }
 
     AExpect<void> FileTree::readdir(path::Path path, Filler filler)
