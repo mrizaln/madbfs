@@ -104,6 +104,19 @@ namespace madbfs::tree
          */
         AExpect<Ref<Node>> traverse_or_build(path::Path path);
 
+        /**
+         * @brief Re-fetch file stat from remote and update the node accordingly.
+         *
+         * @param node The node in question.
+         * @param path Path to the corresponding file on remote.
+         */
+        AExpect<void> update(Node& node, path::Path path);
+
+        /**
+         * @brief Helper function to create context for node operations.
+         *
+         * @param path Path of the node operated on.
+         */
         Node::Context make_context(const path::Path& path)
         {
             return {
@@ -119,6 +132,6 @@ namespace madbfs::tree
         data::Cache&            m_cache;
         std::atomic<u64>        m_fd_counter       = 0;
         bool                    m_root_initialized = false;
-        Duration                m_ttl;
+        Duration                m_ttl              = std::chrono::seconds{ 10 };
     };
 }

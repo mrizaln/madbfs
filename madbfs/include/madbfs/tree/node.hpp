@@ -114,7 +114,7 @@ namespace madbfs::tree::node
         Directory() = default;
 
         bool has_readdir() const { return m_has_readdir; }
-        void set_readdir() { m_has_readdir = true; }
+        void set_readdir(bool readdir) { m_has_readdir = readdir; }
 
         /**
          * @brief Check if a node with the given name exists.
@@ -152,6 +152,7 @@ namespace madbfs::tree::node
          */
         Expect<Uniq<Node>> extract(Str name);
 
+        List&       children() { return m_children; }
         const List& children() const { return m_children; }
 
     private:
@@ -218,6 +219,9 @@ namespace madbfs::tree
     class Node
     {
     public:
+        using Timepoint = SteadyClock::time_point;
+        using Duration  = SteadyClock::duration;
+
         struct Context
         {
             connection::Connection& connection;
@@ -253,6 +257,26 @@ namespace madbfs::tree
         Expect<Ref<const data::Stat>> stat() const;
 
         /**
+         * @brief Set expiration from current time + duration.
+         *
+         * @param duration Duration
+         */
+        void expires_from_now(Duration duration);
+
+        /**
+         * @brief Check node expiry.
+         */
+        bool expired() const;
+
+        /**
+         * @brief Change the file variant of the node with the new one.
+         *
+         * @param file The new file type.
+         * @return Old file variant.
+         */
+        File mutate(File file);
+
+        /**
          * @brief Get Error ptr value if the variant is an Error.
          *
          * This function is different from `as<Error>` since it's intended for use outside of Node. It will
@@ -286,10 +310,12 @@ namespace madbfs::tree
         /**
          * @brief Set synced flag.
          *
+         * @param synced The synced status.
+         *
          * You can set this after readdir operation for example to make sure that there is no need to do any
          * readdir again in the future.
          */
-        void set_synced();
+        void set_synced(bool synced);
 
         // operations on Directory
         // -----------------------
@@ -304,11 +330,9 @@ namespace madbfs::tree
         Expect<Ref<Node>> traverse(Str name) const;
 
         /**
-         * @brief List children of this node.
-         *
-         * @param Function to operate on these children.
+         * @brief List children of this node (only works on Directory else return error).
          */
-        Expect<void> list(std::move_only_function<void(Str)>&& fn) const;
+        Expect<Ref<node::Directory::List>> list();
 
         /**
          * @brief Create a new node without any call to connection or cache with this node as its parent.
@@ -520,6 +544,7 @@ namespace madbfs::tree
         String     m_name   = {};
         data::Stat m_stat   = {};
         File       m_value;
+        Timepoint  m_expiration;
     };
 }
 

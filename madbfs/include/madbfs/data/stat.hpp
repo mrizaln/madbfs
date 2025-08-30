@@ -54,5 +54,22 @@ namespace madbfs::data
         mode_t   mode  = 0;    // -rwxrwxrwx
         uid_t    uid   = 0;
         gid_t    gid   = 0;
+
+        /**
+         * @brief Compare all the fields of the stat except for the Id.
+         *
+         * @param other Other stat.
+         */
+        bool detect_modification(const Stat& other) const
+        {
+            // The modification detection only considers the modification time of the file in seconds
+            // resolution. Furthermore this funciton tolerates 2 seconds of difference since the FileTree
+            // can't always tracks the same timestamp of the files stored in the cache and the remote.
+
+            static constexpr auto tolerance_sec = 2;
+
+            auto diff = mtime.tv_sec - other.mtime.tv_sec;
+            return size != other.size or std::abs(diff) > tolerance_sec;
+        }
     };
 }

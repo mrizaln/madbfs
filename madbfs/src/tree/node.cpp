@@ -76,6 +76,21 @@ namespace madbfs::tree
         return m_stat;
     }
 
+    void Node::expires_from_now(Duration duration)
+    {
+        m_expiration = SteadyClock::now() + duration;
+    }
+
+    bool Node::expired() const
+    {
+        return SteadyClock::now() > m_expiration;
+    }
+
+    File Node::mutate(File file)
+    {
+        return std::exchange(m_value, std::move(file));
+    }
+
     const node::Error* Node::as_error() const
     {
         auto err = as<node::Error>();
@@ -103,7 +118,7 @@ namespace madbfs::tree
 
     void Node::refresh_stat(timespec atime, timespec mtime)
     {
-        auto now  = Clock::now().time_since_epoch();
+        auto now  = SystemClock::now().time_since_epoch();
         auto sec  = std::chrono::duration_cast<std::chrono::seconds>(now);
         auto nsec = std::chrono::duration_cast<std::chrono::nanoseconds>(now - sec);
 
@@ -127,9 +142,9 @@ namespace madbfs::tree
         return std::visit(visit, m_value);
     }
 
-    void Node::set_synced()
+    void Node::set_synced(bool synced)
     {
-        std::ignore = as<node::Directory>().transform(&node::Directory::set_readdir);
+        std::ignore = as<node::Directory>().transform(proj(&node::Directory::set_readdir, synced));
     }
 
     Expect<Ref<Node>> Node::traverse(Str name) const
@@ -140,18 +155,13 @@ namespace madbfs::tree
         return as<node::Directory>().and_then(proj(&node::Directory::find, name));
     }
 
-    Expect<void> Node::list(std::move_only_function<void(Str)>&& fn) const
+    Expect<Ref<node::Directory::List>> Node::list()
     {
         if (auto err = as<node::Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
-        return as<node::Directory>().transform([&](const node::Directory& dir) {
-            for (const auto& node : dir.children()) {
-                if (not node->is<node::Error>()) {
-                    fn(node->name());
-                }
-            }
-        });
+        return as<node::Directory>()    //
+            .transform([&](node::Directory& dir) { return std::ref(dir.children()); });
     }
 
     Expect<Ref<Node>> Node::build(Str name, data::Stat stat, File file)
@@ -197,7 +207,7 @@ namespace madbfs::tree
             // NOTE: we can't really make a symlink on android from adb (unless rooted device iirc), so this
             // operation actually not creating any link on the adb device, just on the in-memory filetree.
 
-            auto now  = Clock::now().time_since_epoch();
+            auto now  = SystemClock::now().time_since_epoch();
             auto sec  = std::chrono::duration_cast<std::chrono::seconds>(now);
             auto nsec = std::chrono::duration_cast<std::chrono::nanoseconds>(now - sec);
 

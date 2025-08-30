@@ -333,13 +333,15 @@ int main()
             (co_await tree.unlink("/bye/friends/school/hehe"_path)).unwrap(void);
 
             // there is no recursive delete
-            Node& bar      = tree.traverse("/hello/bar"_path).unwrap(Node*);
-            auto  bar_path = bar.build_path();
-            auto  paths    = Vec<madbfs::path::PathBuf>{};
+            Node& bar   = tree.traverse("/hello/bar"_path).unwrap(Node*);
+            auto  paths = Vec<madbfs::path::PathBuf>{};
 
-            _ = bar.list([&](Str name) { paths.push_back(bar_path.extend_copy(name).value()); });
-            for (const auto& path : paths) {
-                (co_await tree.unlink(path.as_path())).unwrap(void);
+            auto dummy = bar.build_path();
+            dummy.extend("dummy");
+
+            for (const auto& node : bar.list()->get()) {
+                dummy.rename(node->name());
+                (co_await tree.unlink(dummy)).unwrap(void);
             }
 
             (co_await tree.rmdir("/hello/bar"_path)).unwrap(void);
