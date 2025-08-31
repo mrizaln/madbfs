@@ -235,7 +235,7 @@ namespace madbfs::async
         auto len = ::ntohl(std::bit_cast<u32>(len_buf));
         if (len > out.size()) {
             auto res = co_await discard(stream, len);
-            co_return Unexpect{ res.error_or(std::make_error_code(Errc::bad_message)) };
+            co_return Unexpect{ res.error_or(std::make_error_code(Errc::message_size)) };
         }
 
         co_return co_await read_exact<Char>(stream, { out.data(), len });
@@ -256,7 +256,7 @@ namespace madbfs::async
         auto len = ::ntohl(std::bit_cast<u32>(len_buf));
         if (len > max) {
             auto res = co_await discard(stream, len);
-            co_return Unexpect{ res.error_or(std::make_error_code(Errc::bad_message)) };
+            co_return Unexpect{ res.error_or(std::make_error_code(Errc::message_size)) };
         } else if (len > out.size()) {
             out.resize(len);
         }

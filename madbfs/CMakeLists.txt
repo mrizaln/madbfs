@@ -17,7 +17,6 @@ target_sources(
         src/connection/adb_connection.cpp
         src/connection/server_connection.cpp
         src/data/cache.cpp
-        src/data/ipc.cpp
         src/tree/file_tree.cpp
         src/tree/node.cpp
         src/tree/node.cpp

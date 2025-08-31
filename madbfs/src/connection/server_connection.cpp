@@ -22,7 +22,7 @@ namespace madbfs::connection
             co_return Unexpect{ errc };
         }
 
-        if (auto res = co_await rpc::handshake(socket, true); not res) {
+        if (auto res = co_await rpc::handshake(socket); not res) {
             co_return Unexpect{ res.error() };
         }
 

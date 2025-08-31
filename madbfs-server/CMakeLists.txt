@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 project(
     madbfs-server
-    VERSION 0.8.0
+    VERSION 0.8.1
     LANGUAGES CXX
     DESCRIPTION "Userspace filesystem for Android via adb using FUSE (proxy component)"
 )
@@ -28,6 +28,5 @@ target_include_directories(madbfs-server-lib PUBLIC include)
 target_link_libraries(madbfs-server-lib PUBLIC madbfs-common)
 
 add_executable(madbfs-server src/main.cpp)
-target_include_directories(madbfs-server PRIVATE src)
 target_link_libraries(madbfs-server PRIVATE madbfs-server-lib)
 target_compile_options(madbfs-server PRIVATE -Wall -Wextra -Wconversion)

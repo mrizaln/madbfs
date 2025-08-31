@@ -1,3 +1,5 @@
+#pragma once
+
 #include "madbfs-common/rpc.hpp"
 #include "madbfs/connection/connection.hpp"
 

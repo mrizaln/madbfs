@@ -380,7 +380,9 @@ namespace madbfs::server
 
     AExpect<void> Server::run()
     {
+        log_i("{}: madbfs-server version {}", __func__, MADBFS_VERSION_STRING);
         log_i("{}: launching tcp server on port: {}", __func__, m_acceptor.local_endpoint().port());
+
         m_running = true;
 
         while (m_running) {
@@ -390,7 +392,7 @@ namespace madbfs::server
                 break;
             }
 
-            if (auto res = co_await rpc::handshake(*sock, false); not res) {
+            if (auto res = co_await rpc::handshake(*sock); not res) {
                 co_return Unexpect{ res.error() };
             }
 

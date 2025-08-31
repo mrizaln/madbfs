@@ -213,7 +213,7 @@ namespace madbfs::rpc
     public:
         Client(Socket socket)
             : m_socket{ std::move(socket) }
-            , m_channel{ socket.get_executor(), 4096 }
+            , m_channel{ socket.get_executor() }
         {
         }
 
@@ -293,8 +293,6 @@ namespace madbfs::rpc
 
     /**
      * @brief Do a handshake with remote connection.
-     *
-     * Set client to true if you are client, set client to false if you are server.
      */
-    AExpect<void> handshake(Socket& sock, bool client);
+    AExpect<void> handshake(Socket& sock);
 }

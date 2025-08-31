@@ -137,10 +137,9 @@ namespace madbfs::data
 
         log_d("flush: start [id={}|idx={}]", id.inner(), entry->get().pages | sv::keys);
 
-        auto pages = entry->get().pages | sv::values;
-        auto res = co_await async::wait_all(pages | sv::transform([&](auto i) { return flush_at(*i, id); }));
-
-        for (auto&& res : res) {
+        // TODO: redo parallel
+        for (auto [_, page] : entry->get().pages) {
+            auto res = co_await flush_at(*page, id);
             if (not res) {
                 auto msg  = std::make_error_code(res.error()).message();
                 auto path = entry->get().path.as_path().fullpath();

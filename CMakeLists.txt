@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 project(
     madbfs
-    VERSION 0.8.0
+    VERSION 0.8.1
     LANGUAGES CXX
     DESCRIPTION "Userspace filesystem for Android via adb using FUSE"
 )
@@ -18,6 +18,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(MADBFS_USE_NON_BOOST_ASIO OFF CACHE BOOL "use non-boost asio")
 set(MADBFS_ENABLE_RAPIDHASH_BLANKET_IMPL ON CACHE BOOL "enable rapidhash")
+set(MADBFS_BUILD_IPC ON CACHE BOOL "build ipc")
 
 if(MADBFS_ENABLE_TESTS)
     enable_testing()
@@ -25,3 +26,4 @@ endif()
 
 add_subdirectory(madbfs-common)
 add_subdirectory(madbfs)
+add_subdirectory(madbfs-msg)

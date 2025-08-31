@@ -25,7 +25,7 @@ CONFIGURE_OPTIONS = (
     "mpi",
     "nowide",
     # "process",
-    "program_options",
+    # "program_options",
     "python",
     "random",
     "regex",
