@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2025-08-31
+
+### Fixed
+
+- Flushing may fail on file with certain size and/or slow write speed.
+
 ## [0.8.0] - 2025-08-27
 
 ### Added
@@ -163,7 +169,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-file LRU page caching for file read/write.
 - `Path` and `PathBuf` class to separate `madbfs`'s virtual paths from real paths (`std::filesystem`).
 
-[unreleased]: https://github.com/mrizaln/madbfs/compare/v0.8.0...HEAD
+[unreleased]: https://github.com/mrizaln/madbfs/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/mrizaln/madbfs/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/mrizaln/madbfs/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/mrizaln/madbfs/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/mrizaln/madbfs/compare/v0.5.0...v0.6.0
