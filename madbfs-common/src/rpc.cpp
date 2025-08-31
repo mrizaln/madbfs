@@ -866,32 +866,20 @@ namespace madbfs::rpc
         return to_string(response.proc());
     }
 
-    AExpect<void> handshake(Socket& sock, bool client)
+    AExpect<void> handshake(Socket& sock)
     {
         const auto message = fmt::format("{}:{}\n", server_ready_string, MADBFS_VERSION_STRING);
 
-        if (client) {
-            auto n = co_await async::write_lv<char>(sock, message);
-            HANDLE_ERROR(n, message.size(), "failed to send handshake to server");
+        auto n = co_await async::write_lv<char>(sock, message);
+        HANDLE_ERROR(n, message.size(), "failed to send handshake to server");
 
-            auto buffer = Vec<char>(message.size(), '\0');
-            auto n1     = co_await async::read_lv<char>(sock, buffer);
-            HANDLE_ERROR(n1, buffer.size(), "failed to read handshake from server");
+        auto buffer = String(message.size(), '\0');
+        auto n1     = co_await async::read_lv<char>(sock, buffer);
+        HANDLE_ERROR(n1, buffer.size(), "failed to read handshake from server");
 
-            if (not sr::equal(buffer, message)) {
-                co_return Unexpect{ Errc::bad_message };
-            }
-        } else {
-            auto buffer = Vec<char>(message.size(), '\0');
-            auto n      = co_await async::read_lv<char>(sock, buffer);
-            HANDLE_ERROR(n, buffer.size(), "failed to read handshake from client");
-
-            if (not sr::equal(buffer, message)) {
-                co_return Unexpect{ Errc::bad_message };
-            }
-
-            auto n1 = co_await async::write_lv<char>(sock, message);
-            HANDLE_ERROR(n1, message.size(), "failed to send handshake to client");
+        if (not sr::equal(buffer, message)) {
+            log_e("mismatched message: [{:?} vs {:?}]", buffer, message);
+            co_return Unexpect{ Errc::bad_message };
         }
 
         co_return Expect<void>{};
