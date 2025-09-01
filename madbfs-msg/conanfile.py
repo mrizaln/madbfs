@@ -52,13 +52,10 @@ class Recipe(ConanFile):
     settings = ["os", "compiler", "build_type", "arch"]
     generators = ["CMakeToolchain", "CMakeDeps"]
     requires = [
-        "boost/1.87.0",
+        "boost/1.87.0",  # json
         "fmt/11.1.3",
-        "libfuse/3.16.2",
-        "rapidhash/1.0",
         "spdlog/1.15.1",
     ]
-    test_requires = ["boost-ext-ut/1.1.9"]
     default_options = BOOST_DEFAULT_OPTIONS
 
     def layout(self):
