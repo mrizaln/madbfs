@@ -21,7 +21,7 @@ namespace madbfs::tree
             return parent    //
                 .build(name, std::move(stat), std::move(file))
                 .transform([&](Node& node) {
-                    node.expires_from_now(m_ttl);
+                    node.expires_after(m_ttl);
                     return std::ref(node);
                 });
         };
@@ -33,23 +33,16 @@ namespace madbfs::tree
         }
 
         switch (stat->mode & S_IFMT) {
-        case S_IFREG: co_return build_then_expire(name, *stat, node::Regular{}); break;
-        case S_IFDIR: co_return build_then_expire(name, *stat, node::Directory{}); break;
+        case S_IFREG: co_return build_then_expire(name, *stat, node::Regular{});
+        case S_IFDIR: co_return build_then_expire(name, *stat, node::Directory{});
         case S_IFLNK: {
-            auto may_target = co_await m_connection.readlink(path);
-            if (not may_target) {
-                co_return Unexpect{ may_target.error() };
+            if (auto target = co_await m_connection.readlink(path); target) {
+                co_return build_then_expire(name, *stat, node::Link{ std::move(target).value() });
+            } else {
+                co_return build_then_expire(name, *stat, node::Error{ target.error() });
             }
-            auto& target = *may_target;
-
-            co_return (co_await traverse_or_build(target.as_path()))
-                .transform_error([&](Errc err) {
-                    log_e("traverse_or_build: target not found: {:?}", __func__, target.as_path().fullpath());
-                    return err;
-                })
-                .and_then([&](Node& node) { return parent.build(name, *stat, node::Link{ &node }); });
-        } break;
-        default: co_return build_then_expire(name, *stat, node::Other{}); break;
+        }
+        default: co_return build_then_expire(name, *stat, node::Other{});
         }
     }
 
@@ -61,7 +54,7 @@ namespace madbfs::tree
             return parent    //
                 .build(name, std::move(stat), std::move(file))
                 .transform([&](Node& node) {
-                    node.expires_from_now(m_ttl);
+                    node.expires_after(m_ttl);
                     return std::ref(node);
                 });
         };
@@ -165,54 +158,56 @@ namespace madbfs::tree
             auto err = new_stat.error();
             if (err != Errc::not_connected and err != Errc::timed_out) {
                 node.mutate(node::Error{ err });
-                node.expires_from_now(m_ttl);
+                node.expires_after(m_ttl);
             }
             co_return Unexpect{ err };
         }
 
         // no change
-        if (old_stat and not old_stat->get().detect_modification(*new_stat)) {
+        if (old_stat and not detect_modification(old_stat->get(), *new_stat)) {
             log_d("{}: unchanged: {:?}", __func__, path.fullpath());
-            node.expires_from_now(m_ttl);
+            node.expires_after(m_ttl);
             co_return Expect<void>{};
         }
 
-        log_c("{}:   changed: {:?}", __func__, path.fullpath());
-        co_await m_cache.invalidate_one(node.id(), false);
+        log_w("{}:   changed: {:?}", __func__, path.fullpath());
+        co_await m_cache.invalidate_one(node.id(), false);    // maybe conditionally flush?
 
         switch (new_stat->mode & S_IFMT) {
         case S_IFREG: {
+            // TODO: if the file type is unchanged but the data is changed, we need to choose whether to
+            // prioritize data from the host or the remote. maybe add a policy on the VFS itself so the user
+            // can choose what suits them best.
             node.set_stat(*new_stat);
             node.mutate(node::Regular{});
-            node.expires_from_now(m_ttl);
+            node.expires_after(m_ttl);
         } break;
         case S_IFDIR: {
             if (S_ISDIR(old_stat->get().mode)) {
+                node.set_stat(*new_stat);
                 node.set_synced(false);
-                node.expires_from_now(m_ttl);
+                node.expires_after(m_ttl);
             }
         } break;
         case S_IFLNK: {
-            // FIXME: I don't want to work with link at the moment (I don't want to deal with dangling links)
-            node.mutate(node::Error{ Errc::operation_not_supported });
-            node.expires_from_now(m_ttl);
-            co_return Unexpect{ Errc::operation_not_supported };
+            if (auto target = co_await m_connection.readlink(path); target) {
+                node.set_stat(*new_stat);
+                node.mutate(node::Link{ std::move(target).value() });
+            } else {
+                node.mutate(node::Error{ target.error() });
+            }
+            node.expires_after(m_ttl);
         } break;
         default: {
             node.set_stat(*new_stat);
             node.mutate(node::Other{});
-            node.expires_from_now(m_ttl);
+            node.expires_after(m_ttl);
         } break;
         }
 
         co_return Expect<void>{};
     }
 
-    // FIXME: Updating entries will mean removing some files that may be symlinked from other place. If this
-    // happens then the Link target will be a dangling pointer! Fortunately, there are not much symlinks in
-    // an Android device and they are usually system-level which in turn never changes. So for majority of
-    // user who doesn't root their devices this issue won't ever happen. This is further supported by the
-    // fact that user can't create symbolic links in Android at all without root access.
     AExpect<void> FileTree::readdir(path::Path path, Filler filler)
     {
         auto parent = &m_root;
@@ -240,20 +235,12 @@ namespace madbfs::tree
             case S_IFREG: co_return node::Regular{};
             case S_IFDIR: co_return node::Directory{};
             case S_IFLNK: {
-                auto may_target = co_await m_connection.readlink(pathbuf.as_path());
-                if (not may_target) {
-                    auto msg = std::make_error_code(may_target.error()).message();
-                    log_e("readdir: {} [{}/{}]", msg, pathbuf.as_path().parent(), name);
-                    co_return node::Error{ may_target.error() };
+                if (auto target = co_await m_connection.readlink(pathbuf.as_path()); target) {
+                    co_return node::Link{ std::move(target).value() };
+                } else {
+                    co_return node::Error{ target.error() };
                 }
-                auto may_node = co_await traverse_or_build(may_target->as_path());
-                if (not may_node) {
-                    auto msg = std::make_error_code(may_node.error()).message();
-                    log_e("readdir: {} [{}/{}]", msg, pathbuf.as_path().parent(), name);
-                    co_return node::Error{ may_node.error() };
-                }
-                co_return node::Link{ &may_node->get() };
-            } break;
+            }
             default: co_return node::Other{};
             }
         };
@@ -270,7 +257,7 @@ namespace madbfs::tree
 
                     auto file  = co_await build_file(name, stat.mode);
                     auto child = std::make_unique<Node>(name, parent, std::move(stat), std::move(file));
-                    child->expires_from_now(m_ttl);
+                    child->expires_after(m_ttl);
                     list.emplace(std::move(child));
                 }
             } else {
@@ -282,11 +269,11 @@ namespace madbfs::tree
 
                     auto found = list.find(name);
                     if (found == list.end()) {
-                        log_d("{}: [{:?}] new entry    : {:?}", __func__, parent->name(), name);
+                        log_d("{}: [{:?}] new entry: {:?}", __func__, parent->name(), name);
 
                         auto file  = co_await build_file(name, stat.mode);
                         auto child = std::make_unique<Node>(name, parent, std::move(stat), std::move(file));
-                        child->expires_from_now(m_ttl);
+                        child->expires_after(m_ttl);
                         list.emplace(std::move(child));
 
                         continue;
@@ -294,30 +281,28 @@ namespace madbfs::tree
 
                     auto& child = (**found);
                     if (auto child_stat = child.stat(); not child_stat) {    // Error node
-                        log_d("{}: [{:?}] replace error: {:?}", __func__, parent->name(), name);
+                        log_d("{}: [{:?}]   changed: {:?}", __func__, parent->name(), name);
 
                         child.set_stat(std::move(stat));
                         child.mutate(co_await build_file(name, stat.mode));
-                        child.expires_from_now(m_ttl);
-
-                        co_await m_cache.invalidate_one(child.id(), false);
-                    } else if (child_stat->get().detect_modification(stat)) {    // modification made
-                        log_d("{}: [{:?}] modified     : {:?}", __func__, parent->name(), name);
+                        child.expires_after(m_ttl);
+                    } else if (child.expired() and detect_modification(child_stat->get(), stat)) {
+                        log_d("{}: [{:?}]   changed: {:?}", __func__, parent->name(), name);
 
                         child.set_stat(std::move(stat));
                         child.mutate(co_await build_file(name, stat.mode));
-                        child.expires_from_now(m_ttl);
+                        child.expires_after(m_ttl);
 
-                        co_await m_cache.invalidate_one(child.id(), false);
+                        co_await m_cache.invalidate_one(child.id(), false);    // should I flush?
                     }
 
-                    log_d("{}: [{:?}] unchanged    : {:?}", __func__, parent->name(), name);
+                    log_d("{}: [{:?}] unchanged: {:?}", __func__, parent->name(), name);
                 }
 
                 // remove old entries if doesn't exist in new entries
                 for (auto it = list.begin(); it != list.end();) {
                     if (not new_list.contains((**it).name())) {
-                        co_await m_cache.invalidate_one((**it).id(), false);
+                        co_await m_cache.invalidate_one((**it).id(), false);    // should I flush
                         it = list.erase(it);
                         continue;
                     }
@@ -342,7 +327,7 @@ namespace madbfs::tree
         co_return (co_await traverse_or_build(path)).and_then(&Node::stat);
     }
 
-    AExpect<Ref<Node>> FileTree::readlink(path::Path path)
+    AExpect<Str> FileTree::readlink(path::Path path)
     {
         co_return (co_await traverse_or_build(path)).and_then(&Node::readlink);
     }
@@ -541,16 +526,10 @@ namespace madbfs::tree
         co_return co_await node->get().utimens(make_context(path), atime, mtime);
     }
 
-    Expect<void> FileTree::symlink(path::Path path, path::Path target)
+    Expect<void> FileTree::symlink(path::Path path, Str target)
     {
-        // for now, disallow linking to non-existent target
-        auto target_node = traverse(target);
-        if (not target_node) {
-            return target_node.transform(sink_void);
-        }
-
         return traverse(path.parent_path())
-            .and_then(proj(&Node::symlink, path.filename(), &target_node->get()))
+            .and_then(proj(&Node::symlink, path.filename(), target))
             .transform(sink_void);
     }
 

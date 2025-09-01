@@ -19,7 +19,7 @@ namespace madbfs::tree::node
 {
     class Regular;
     class Directory;
-    class Link;
+    struct Link;
     struct Other;
     struct Error;
 
@@ -164,25 +164,10 @@ namespace madbfs::tree::node
      * @class Link
      *
      * @brief Represent a symbolic link.
-     *
-     * This class is only used for preexisting symlink on the device. The behavior of the link is also not the
-     * same to that of POSIX since this class doesn't allow dangling symbolic link.
      */
-    class Link
+    struct Link
     {
-    public:
-        Link(Node* target)
-            : m_target{ target }
-        {
-        }
-
-        /**
-         * @brief Get immediate target of the link.
-         */
-        Node& target() const { return *m_target; }
-
-    private:
-        Node* m_target;    // how do I signal node not exist anymore?
+        String target;
     };
 
     /**
@@ -215,6 +200,9 @@ namespace madbfs::tree::node
 namespace madbfs::tree
 {
     using File = Var<node::Regular, node::Directory, node::Link, node::Other, node::Error>;
+
+    constexpr auto timespec_now  = timespec{ .tv_sec = 0, .tv_nsec = UTIME_NOW };
+    constexpr auto timespec_omit = timespec{ .tv_sec = 0, .tv_nsec = UTIME_OMIT };
 
     class Node
     {
@@ -261,7 +249,7 @@ namespace madbfs::tree
          *
          * @param duration Duration
          */
-        void expires_from_now(Duration duration);
+        void expires_after(Duration duration);
 
         /**
          * @brief Check node expiry.
@@ -384,7 +372,7 @@ namespace madbfs::tree
          *
          * @return The new link node.
          */
-        Expect<Ref<Node>> symlink(Str name, Node* target);
+        Expect<Ref<Node>> symlink(Str name, Str target);
 
         /**
          * @brief Create a new child node as Regular.
@@ -499,7 +487,7 @@ namespace madbfs::tree
         /**
          * @brief Read a link.
          */
-        Expect<Ref<Node>> readlink();
+        Expect<Str> readlink();
 
         // ------------------
 
@@ -517,18 +505,18 @@ namespace madbfs::tree
 
         Expect<Ref<node::Regular>> regular_file_prelude()
         {
-            auto current = this;
             if (is<node::Link>()) {
-                current = &readlink()->get();
+                // ELOOP, mimicking open(2) behavior when O_NOFOLLOW option specified
+                return Unexpect{ Errc::too_many_symbolic_link_levels };
             }
 
             if (auto err = as<node::Error>(); err.has_value()) {
                 return Unexpect{ err->get().error };
             }
 
-            if (current->is<node::Directory>()) {
+            if (is<node::Directory>()) {
                 return Unexpect{ Errc::is_a_directory };
-            } else if (current->is<node::Other>()) {
+            } else if (is<node::Other>()) {
                 // NOTE: reading/writing special files (excluding symlink) is not possible by FUSE alone. One
                 // can present them by disguising it as regular files though.
                 //
@@ -537,7 +525,7 @@ namespace madbfs::tree
                 return Unexpect{ Errc::operation_not_supported };
             }
 
-            return current->as<node::Regular>();
+            return as<node::Regular>();
         }
 
         Node*      m_parent = nullptr;

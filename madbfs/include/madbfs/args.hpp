@@ -39,6 +39,7 @@ namespace madbfs::args
 
     struct ParsedOpt
     {
+        String                     mount;
         String                     serial;
         Opt<std::filesystem::path> server;
         log::Level                 log_level;
@@ -51,7 +52,7 @@ namespace madbfs::args
     struct ParseResult
     {
         // clang-format off
-        struct Opt  { ParsedOpt opt; fuse_args args; String mountpoint; };
+        struct Opt  { ParsedOpt opt; fuse_args args; };
         struct Exit { int status; };
 
         ParseResult() : result{ Exit{ 0} } {}
@@ -395,6 +396,7 @@ namespace madbfs::args
 
         co_return ParseResult::Opt{
             .opt = {
+                .mount     = std::move(mountpoint),
                 .serial    = madbfs_opt.serial,
                 .server    = server,
                 .log_level = log_level.value(),
@@ -404,7 +406,6 @@ namespace madbfs::args
                 .port      = port,
             },
             .args = args,
-            .mountpoint = mountpoint,
         };
     }
 }

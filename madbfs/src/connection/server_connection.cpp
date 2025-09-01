@@ -228,13 +228,13 @@ namespace madbfs::connection
         });
     }
 
-    AExpect<path::PathBuf> ServerConnection::readlink(path::Path path)
+    AExpect<String> ServerConnection::readlink(path::Path path)
     {
         auto buf = Vec<u8>{};
         auto req = rpc::req::Readlink{ .path = path.fullpath() };
 
         co_return (co_await send_req(buf, req)).transform([&](rpc::resp::Readlink resp) {
-            return path::resolve(path.parent_path(), resp.target);
+            return String{ resp.target };
         });
     }
 

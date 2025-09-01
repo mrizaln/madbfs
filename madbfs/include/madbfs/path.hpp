@@ -12,6 +12,10 @@ namespace madbfs::path
      *
      * This class is a simple wrapper over the underlying path string. It is like Str where it doesn't
      * allocate anything. Default constructed Path points to the root path.
+     *
+     * Default constructed PathBuf points to the root path.
+     *
+     * This class only handles absolute paths, relative paths should be represented as plain string instead.
      */
     class Path
     {
@@ -100,6 +104,8 @@ namespace madbfs::path
      * @brief Represent a file path in Linux system that owns its path buffer.
      *
      * Default constructed PathBuf points to the root path.
+     *
+     * This class only handles absolute paths, relative paths should be represented as plain string instead.
      */
     class PathBuf
     {

@@ -144,13 +144,10 @@ namespace madbfs::connection
         });
     }
 
-    AExpect<path::PathBuf> AdbConnection::readlink(path::Path path)
+    AExpect<String> AdbConnection::readlink(path::Path path)
     {
         auto res = co_await cmd::exec({ "adb", "shell", "readlink", quote(path) });
-
-        co_return res.transform([&](Str target) {
-            return path::resolve(path.parent_path(), util::strip(target));
-        });
+        co_return res.transform([&](Str target) { return String{ util::strip(target) }; });
     }
 
     AExpect<void> AdbConnection::mknod(path::Path path, mode_t /* mode */, dev_t /* dev */)

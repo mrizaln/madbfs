@@ -41,7 +41,7 @@ namespace madbfs::tree
         AExpect<void>                  readdir(path::Path path, Filler filler);
         AExpect<Ref<const data::Stat>> getattr(path::Path path);
 
-        AExpect<Ref<Node>> readlink(path::Path path);
+        AExpect<Str>       readlink(path::Path path);
         AExpect<Ref<Node>> mknod(path::Path path, mode_t mode, dev_t dev);
         AExpect<Ref<Node>> mkdir(path::Path path, mode_t mode);
         AExpect<void>      unlink(path::Path path);
@@ -68,7 +68,7 @@ namespace madbfs::tree
         // --------------
 
         // this function only used to link already existing files, user can't and shouldn't use it
-        Expect<void> symlink(path::Path path, path::Path target);
+        Expect<void> symlink(path::Path path, Str target);
 
         /**
          * @brief Safely clean up and sync data.

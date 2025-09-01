@@ -13,7 +13,7 @@ namespace madbfs::connection
 
         AExpect<Gen<ParsedStat>> statdir(path::Path path) override;
         AExpect<data::Stat>      stat(path::Path path) override;
-        AExpect<path::PathBuf>   readlink(path::Path path) override;
+        AExpect<String>          readlink(path::Path path) override;
 
         AExpect<void> mknod(path::Path path, mode_t mode, dev_t dev) override;
         AExpect<void> mkdir(path::Path path, mode_t mode) override;
