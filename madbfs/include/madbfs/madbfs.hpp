@@ -1,8 +1,9 @@
 #pragma once
 
 #include "madbfs/connection/connection.hpp"
-#include "madbfs/data/ipc.hpp"
 #include "madbfs/tree/file_tree.hpp"
+
+#include "madbfs-common/ipc.hpp"
 
 #include <thread>
 
@@ -55,7 +56,7 @@ namespace madbfs
          *
          * @param ctx Async context.
          */
-        static Opt<data::Ipc> create_ipc(async::Context& ctx);
+        static Opt<ipc::Server> create_ipc(async::Context& ctx);
 
         /**
          * @brief Function for work thread on which async context will run on.
@@ -69,7 +70,7 @@ namespace madbfs
          *
          * This function handles all requested operations from peers that comes from `m_ipc` instance.
          */
-        Await<boost::json::value> ipc_handler(data::ipc::Op op);
+        Await<boost::json::value> ipc_handler(ipc::Op op);
 
         async::Context   m_async_ctx;
         async::WorkGuard m_work_guard;    // to prevent `async::Context` from returning immediately
@@ -78,6 +79,6 @@ namespace madbfs
         Uniq<connection::Connection> m_connection;
         data::Cache                  m_cache;
         tree::FileTree               m_tree;
-        Opt<data::Ipc>               m_ipc;
+        Opt<ipc::Server>             m_ipc;
     };
 }
