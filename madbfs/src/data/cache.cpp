@@ -138,7 +138,7 @@ namespace madbfs::data
         log_d("flush: start [id={}|idx={}]", id.inner(), entry->get().pages | sv::keys);
 
         // TODO: redo parallel
-        for (auto [_, page] : entry->get().pages) {
+        for (auto page : entry->get().pages | sv::values) {
             auto res = co_await flush_at(*page, id);
             if (not res) {
                 auto msg  = std::make_error_code(res.error()).message();
@@ -236,23 +236,13 @@ namespace madbfs::data
             }
         }
 
-        co_await evict(m_lru.size());
+        m_table.clear();
+        m_lru.clear();
         m_queue.clear();
-
-        log_d("{}: m_table size: {}", __func__, m_table.size());
-        for (auto [id, entry] : m_table) {
-            auto path = entry.path.as_path().fullpath();
-            log_t("{}:     {}: {} {}", __func__, id.inner(), entry.pages | sv::keys, path);
-        }
     }
 
     Await<void> Cache::invalidate_one(Id id, bool should_flush)
     {
-        auto entry = m_table.extract(id);
-        if (entry.empty()) {
-            co_return;
-        }
-
         if (should_flush) {
             if (auto res = co_await flush(id); not res) {
                 auto msg = std::make_error_code(res.error()).message();
@@ -260,8 +250,15 @@ namespace madbfs::data
             }
         }
 
-        for (auto [_, page] : entry.mapped().pages) {
-            m_lru.erase(page);
+        if (auto entry = m_table.extract(id); not entry.empty()) {
+            auto& [pages, pathbuf, dirty] = entry.mapped();
+            if (dirty and not should_flush) {
+                auto path = pathbuf.as_path().fullpath();
+                log_w("{}: [{}] {:?} is dirty but invalidated without flush!", __func__, id.inner(), path);
+            }
+            for (auto page : entry.mapped().pages | sv::values) {
+                m_lru.erase(page);
+            }
         }
     }
 
