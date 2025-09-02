@@ -2,7 +2,6 @@
 
 #include "madbfs/connection/adb_connection.hpp"
 #include "madbfs/connection/server_connection.hpp"
-#include "madbfs/data/ipc.hpp"
 
 #include <madbfs-common/log.hpp>
 #include <madbfs-common/util/overload.hpp>
@@ -32,16 +31,31 @@ namespace madbfs
         return async::block(ctx, coro());
     }
 
-    Opt<data::Ipc> Madbfs::create_ipc(async::Context& ctx)
+    Opt<ipc::Server> Madbfs::create_ipc(async::Context& ctx)
     {
-        auto ipc = data::Ipc::create(ctx);
+        auto socket_path = [] -> String {
+            const auto* res = std::getenv("XDG_RUNTIME_DIR");
+            return res ? res : "/tmp";
+        }();
+
+        const auto* serial = std::getenv("ANDROID_SERIAL");
+        if (serial == nullptr) {
+            return {};
+        }
+
+        socket_path += '/';
+        socket_path += "madbfs@";
+        socket_path += serial;
+        socket_path += ".sock";
+
+        auto ipc = ipc::Server::create(ctx, socket_path);
         if (not ipc.has_value()) {
             const auto msg = std::make_error_code(ipc.error()).message();
             log_e("Madbfs: failed to initialize ipc: {}", msg);
             return {};
         }
 
-        log_i("Madbfs: succesfully created ipc: {}", ipc->path().fullpath());
+        log_i("Madbfs: succesfully created ipc: {}", ipc->path());
         return std::move(*ipc);
     }
 
@@ -68,7 +82,7 @@ namespace madbfs
         , m_ipc{ create_ipc(m_async_ctx) }
     {
         if (m_ipc) {
-            auto coro = m_ipc->launch([this](data::ipc::Op op) { return ipc_handler(op); });
+            auto coro = m_ipc->launch([this](ipc::Op op) { return ipc_handler(op); });
             async::spawn(m_async_ctx, std::move(coro), async::detached);
         }
     }
@@ -82,9 +96,8 @@ namespace madbfs
         m_work_thread.join();
     }
 
-    Await<boost::json::value> Madbfs::ipc_handler(data::ipc::Op op)
+    Await<boost::json::value> Madbfs::ipc_handler(ipc::Op op)
     {
-        namespace ipc  = data::ipc;
         namespace json = boost::json;
 
         constexpr usize lowest_page_size  = 64 * 1024;
@@ -92,19 +105,19 @@ namespace madbfs
         constexpr usize lowest_max_pages  = 128;
 
         auto overload = util::Overload{
-            [&](ipc::Help) -> Await<json::value> {
+            [&](ipc::op::Help) -> Await<json::value> {
                 co_return json::value{
                     { "operations",
                       {
-                          ipc::names::help,
-                          ipc::names::info,
-                          ipc::names::invalidate_cache,
-                          ipc::names::set_page_size,
-                          ipc::names::set_cache_size,
+                          ipc::op::names::help,
+                          ipc::op::names::info,
+                          ipc::op::names::invalidate_cache,
+                          ipc::op::names::set_page_size,
+                          ipc::op::names::set_cache_size,
                       } },
                 };
             },
-            [&](ipc::Info) -> Await<json::value> {
+            [&](ipc::op::Info) -> Await<json::value> {
                 auto page_size     = m_cache.page_size();
                 auto max_pages     = m_cache.max_pages();
                 auto current_pages = m_cache.current_pages();
@@ -117,14 +130,14 @@ namespace madbfs
                         { "current", page_size * current_pages / 1024 / 1024 } } },
                 };
             },
-            [&](ipc::InvalidateCache) -> Await<json::value> {
+            [&](ipc::op::InvalidateCache) -> Await<json::value> {
                 auto page_size     = m_cache.page_size();
                 auto current_pages = m_cache.current_pages();
 
                 co_await m_cache.invalidate_all();
                 co_return json::value{ { "size", page_size * current_pages / 1024 / 1024 } };
             },
-            [&](ipc::SetPageSize size) -> Await<json::value> {
+            [&](ipc::op::SetPageSize size) -> Await<json::value> {
                 auto old_size = m_cache.page_size();
                 auto new_size = std::bit_ceil(size.kib * 1024);
                 new_size      = std::clamp(new_size, lowest_page_size, highest_page_size);
@@ -144,7 +157,7 @@ namespace madbfs
                         { "new", new_max * new_size / 1024 / 1024 } } },
                 };
             },
-            [&](ipc::SetCacheSize size) -> Await<json::value> {
+            [&](ipc::op::SetCacheSize size) -> Await<json::value> {
                 auto page    = m_cache.page_size();
                 auto old_max = m_cache.max_pages();
                 auto new_max = std::bit_ceil(size.mib * 1024 * 1024 / page);
