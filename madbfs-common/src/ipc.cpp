@@ -64,11 +64,11 @@ namespace madbfs::ipc
 {
     Expect<Client> Client::create(async::Context& context, Str socket_path)
     {
-        auto path = std::filesystem::canonical(socket_path);
+        auto path = std::filesystem::absolute(socket_path);
         auto ep   = async::unix_socket::Endpoint{ path.c_str() };
 
         auto ec   = net::error_code{};
-        auto sock = Socket{ context, ep };
+        auto sock = Socket{ context };
 
         sock.open(ep.protocol(), ec);
         sock.connect(ep, ec);
@@ -130,7 +130,7 @@ namespace madbfs::ipc
 
     Expect<Server> Server::create(async::Context& context, Str socket_path)
     {
-        auto path = std::filesystem::canonical(socket_path);
+        auto path = std::filesystem::absolute(socket_path);
         auto ep   = async::unix_socket::Endpoint{ path.c_str() };
 
         auto ec  = net::error_code{};
