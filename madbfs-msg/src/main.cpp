@@ -1,16 +1,18 @@
-#include <filesystem>
+#include <madbfs-common/async/async.hpp>
 #include <madbfs-common/ipc.hpp>
 #include <madbfs-common/log.hpp>
 
 #include <boost/json.hpp>
 #include <boost/program_options.hpp>
 
+#include <filesystem>
 #include <iostream>
 #include <regex>
 
-namespace po = boost::program_options;
-namespace sv = madbfs::aliases::sv;
-namespace sr = madbfs::aliases::sr;
+namespace po    = boost::program_options;
+namespace json  = boost::json;
+namespace async = madbfs::async;
+namespace fs    = std::filesystem;
 
 enum Mode
 {
@@ -26,20 +28,27 @@ struct Exit
 struct Args
 {
     Mode                     mode;
+    std::string              serial;
     std::string              search_path;
     std::vector<std::string> message;
 };
 
+struct Socket
+{
+    std::string serial;
+    fs::path    path;
+};
+
 std::variant<Exit, Args> parse_args(int argc, char** argv)
 {
-    const char* default_list_path = ::getenv("XDG_RUNTIME_DIR");
-    if (default_list_path == nullptr) {
-        default_list_path = "/tmp";
+    const char* default_serial      = ::getenv("ANDROID_SERIAL");
+    const char* default_search_path = ::getenv("XDG_RUNTIME_DIR");
+    if (default_search_path == nullptr) {
+        default_search_path = "/tmp";
     }
-    const char* default_serial = ::getenv("ANDROID_SERIAL");
 
-    auto list_path = std::string{};
-    auto serial    = std::string{};
+    auto search_path = std::string{};
+    auto serial      = std::string{};
 
     auto desc = po::options_description{ "options" };
     desc.add_options()                    //
@@ -47,9 +56,9 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
         ("version,v", "print version")    //
         ("list,l",
          "list mounted devices with active IPC")    //
-        ("list-dir,d",
-         po::value<std::string>(&list_path)->default_value(default_list_path),
-         "specify the search directory for '--list' option")    //
+        ("search-dir,d",
+         po::value<std::string>(&search_path)->default_value(default_search_path),
+         "specify the search directory for socket files")    //
         ("serial,s",
          default_serial ? po::value<std::string>(&serial)->default_value(default_serial)
                         : po::value<std::string>(&serial),
@@ -92,7 +101,7 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
     }
 
     if (vm.count("list")) {
-        return Args{ .mode = Mode::List, .search_path = list_path, .message = {} };
+        return Args{ .mode = Mode::List, .serial = {}, .search_path = search_path, .message = {} };
     }
 
     if (not vm.count("serial")) {
@@ -111,35 +120,73 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
 
     return Args{
         .mode        = Mode::Message,
-        .search_path = {},
+        .serial      = serial,
+        .search_path = search_path,
         .message     = vm["message"].as<std::vector<std::string>>(),
     };
 }
 
-int perform_list(std::string_view search_path)
+void pretty_print(json::value const& json, std::string* indent = nullptr)
 {
-    namespace fs = std::filesystem;
+    auto indent_str = std::string{};
 
-    auto path = fs::path{ search_path };
-
-    if (not fs::exists(path)) {
-        fmt::println(stderr, "error: path '{}' does not exists", search_path);
-        return 1;
-    } else if (not fs::is_directory(path)) {
-        fmt::println(stderr, "error: path '{}' is not a directory", search_path);
-        return 1;
+    if (!indent) {
+        indent = &indent_str;
     }
 
-    struct Socket
-    {
-        std::string serial;
-        fs::path    path;
-    };
+    switch (json.kind()) {
+    case json::kind::object: {
+        std::cout << "{\n";
+        indent->append(4, ' ');
+        auto const& obj = json.get_object();
+        if (!obj.empty()) {
+            for (auto it = obj.begin(); it != obj.end();) {
+                std::cout << *indent << json::serialize(it->key()) << " : ";
+                pretty_print(it->value(), indent);
+                if (++it != obj.end()) {
+                    std::cout << ",\n";
+                }
+            }
+        }
+        std::cout << "\n";
+        indent->resize(indent->size() - 4);
+        std::cout << *indent << "}";
+    } break;
+    case json::kind::array: {
+        std::cout << "[\n";
+        indent->append(4, ' ');
+        auto const& arr = json.get_array();
+        if (!arr.empty()) {
+            for (auto it = arr.begin(); it != arr.end();) {
+                std::cout << *indent;
+                pretty_print(*it, indent);
+                if (++it != arr.end()) {
+                    std::cout << ",\n";
+                }
+            }
+        }
+        std::cout << "\n";
+        indent->resize(indent->size() - 4);
+        std::cout << *indent << "]";
+    } break;
+    case json::kind::string: std::cout << json::serialize(json.get_string()); break;
+    case json::kind::uint64:
+    case json::kind::int64:
+    case json::kind::double_: std::cout << json; break;
+    case json::kind::bool_: std::cout << (json.get_bool() ? "true" : "false"); break;
+    case json::kind::null: std::cout << "null"; break;
+    }
 
-    auto sockets        = std::vector<Socket>{};
-    auto longest_serial = 0l;
+    if (indent->empty()) {
+        std::cout << "\n";
+    }
+}
 
-    for (auto entry : fs::directory_iterator{ path }) {
+std::vector<Socket> get_socket_list(fs::path search_path)
+{
+    auto sockets = std::vector<Socket>{};
+
+    for (auto entry : fs::directory_iterator{ search_path }) {
         if (not entry.is_socket()) {
             continue;
         }
@@ -150,10 +197,15 @@ int perform_list(std::string_view search_path)
 
         if (std::regex_match(name, match, re)) {
             sockets.emplace_back(match[1], entry.path());
-            longest_serial = std::max(longest_serial, match[1].length());
         }
     }
 
+    return sockets;
+}
+
+int perform_list(fs::path search_path)
+{
+    auto sockets = get_socket_list(search_path);
     if (sockets.empty()) {
         fmt::println("no active sockets at the moment");
         return 0;
@@ -161,19 +213,118 @@ int perform_list(std::string_view search_path)
 
     std::ranges::sort(sockets, std::less{}, &Socket::path);
 
+    auto max_serial_len = 0uz;
+    for (const auto& [serial, _] : sockets) {
+        max_serial_len = std::max(max_serial_len, serial.size());
+    }
+
     fmt::println("active sockets:");
     for (const auto& [serial, path] : sockets) {
-        fmt::println("\t- {:<{}} -> {}", serial, longest_serial, path.c_str());
+        fmt::println("\t- {:<{}} -> {}", serial, max_serial_len, path.c_str());
     }
 
     return 0;
 }
 
-int send_message(std::span<const std::string> message)
+int send_message(std::span<const std::string> message, fs::path socket_path)
 {
-    fmt::println("message: {}", message);
-    fmt::println("error: unimplemented :P");
-    return 1;
+    namespace ipc = madbfs::ipc;
+
+    assert(not message.empty());
+
+    auto too_much = [&](std::string_view cmd, int num) {
+        fmt::println(stderr, "error: too much argument passed to command '{}' (expects {} args)", cmd, num);
+        return 1;
+    };
+
+    auto too_few = [&](std::string_view cmd, int num) {
+        fmt::println(stderr, "error: too few argument passed to command '{}' (expects {} args)", cmd, num);
+        return 1;
+    };
+
+    auto to_int = [](std::string_view str) -> std::optional<std::size_t> {
+        auto value     = std::size_t{};
+        auto [ptr, ec] = std::from_chars(str.begin(), str.end(), value);
+
+        if (ptr != str.end() or ec != std::error_code{}) {
+            fmt::println(stderr, "error: unable to parse '{}' to an integer", str);
+            return {};
+        } else {
+            return value;
+        }
+    };
+
+    auto op_str    = std::string_view{ message[0] };
+    auto value_str = std::optional<std::string_view>{};
+
+    if (message.size() > 1) {
+        value_str = message[1];
+    }
+
+    auto op = std::optional<ipc::Op>{};
+    if (op_str == ipc::op::names::help) {
+        if (value_str) {
+            return too_much(op_str, 0);
+        }
+        op = ipc::op::Help{};
+    } else if (op_str == ipc::op::names::info) {
+        if (value_str) {
+            return too_much(op_str, 0);
+        }
+        op = ipc::op::Info{};
+    } else if (op_str == ipc::op::names::invalidate_cache) {
+        if (value_str) {
+            return too_much(op_str, 0);
+        }
+        op = ipc::op::InvalidateCache{};
+    } else if (op_str == ipc::op::names::set_page_size) {
+        if (not value_str) {
+            return too_few(op_str, 1);
+        } else if (message.size() > 2) {
+            return too_much(op_str, 1);
+        }
+
+        if (auto value = to_int(*value_str); not value) {
+            return 1;
+        } else {
+            op = ipc::op::SetPageSize{ .kib = *value };
+        }
+    } else if (op_str == ipc::op::names::set_cache_size) {
+        if (not value_str) {
+            return too_few(op_str, 1);
+        } else if (message.size() > 2) {
+            return too_much(op_str, 1);
+        }
+
+        if (auto value = to_int(*value_str); not value) {
+            return 1;
+        } else {
+            op = ipc::op::SetCacheSize{ .mib = *value };
+        }
+    } else {
+        fmt::println(stderr, "error: unknown command '{}'", op_str);
+        return 1;
+    }
+
+    auto context = async::Context{};
+    auto client  = ipc::Client::create(context, socket_path.c_str());
+    if (not client) {
+        auto msg = std::make_error_code(client.error()).message();
+        fmt::println(stderr, "error: failed to create client: {}", msg);
+        return 1;
+    }
+
+    auto fut = async::spawn(context, client->send(*op), async::use_future);
+    context.run();
+
+    if (auto response = fut.get(); not response) {
+        auto msg = std::make_error_code(response.error()).message();
+        fmt::println(stderr, "error: failed to send message: {}", msg);
+        return 1;
+    } else {
+        pretty_print(*response);
+        return 0;
+    }
 }
 
 int main(int argc, char** argv)
@@ -183,9 +334,28 @@ int main(int argc, char** argv)
         return std::get<0>(may_args).ret;
     }
 
-    switch (auto args = std::get<1>(may_args); args.mode) {
-    case List: return perform_list(args.search_path);
-    case Message: return send_message(args.message);
+    auto args        = std::get<1>(may_args);
+    auto search_path = fs::path{ args.search_path };
+
+    if (not fs::exists(search_path)) {
+        fmt::println(stderr, "error: path '{}' does not exist", search_path.c_str());
+        return 1;
+    } else if (not fs::is_directory(search_path)) {
+        fmt::println(stderr, "error: path '{}' is not a directory", search_path.c_str());
+        return 1;
+    }
+
+    switch (args.mode) {
+    case List: return perform_list(search_path);
+    case Message: {
+        auto sockets = get_socket_list(search_path);
+        auto socket  = std::ranges::find(sockets, args.serial, &Socket::serial);
+        if (socket == sockets.end()) {
+            fmt::println(stderr, "error: no socket for '{}' in '{}'", args.serial, search_path.c_str());
+            return 1;
+        }
+        return send_message(args.message, socket->path);
+    }
     default: return 1;
     }
 }
