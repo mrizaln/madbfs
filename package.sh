@@ -27,6 +27,9 @@ echo "building madbfs and madbfs-server using build profile: ${CONAN_PROFILE}"
 cp build/Release/madbfs/madbfs ${PACKAGE_DIR}/madbfs/
 strip ${PACKAGE_DIR}/madbfs/madbfs
 
+cp build/Release/madbfs-msg/madbfs-msg ${PACKAGE_DIR}/madbfs/
+strip ${PACKAGE_DIR}/madbfs/madbfs-msg
+
 # build server
 ./madbfs-server/build_all.sh "$CONAN_PROFILE"
 

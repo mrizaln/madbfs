@@ -26,3 +26,4 @@ endif()
 
 add_subdirectory(madbfs-common)
 add_subdirectory(madbfs)
+add_subdirectory(madbfs-msg)
