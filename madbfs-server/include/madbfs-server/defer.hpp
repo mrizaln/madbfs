@@ -1,5 +1,4 @@
-#ifndef DEFER_HPP_3SRMJBZD
-#define DEFER_HPP_3SRMJBZD
+#pragma once
 
 #include <utility>
 
@@ -39,5 +38,3 @@ namespace madbfs::server::defer
         = madbfs::server::defer::Tag{}* [__VA_ARGS__] mutable noexcept -> void
 
 #endif    // defer
-
-#endif /* end of include guard: DEFER_HPP_3SRMJBZD */
