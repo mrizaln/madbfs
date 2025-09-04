@@ -25,6 +25,7 @@ namespace madbfs::args
         const char* log_file   = nullptr;
         int         cache_size = 256;    // in MiB
         int         page_size  = 128;    // in KiB
+        int         ttl        = 10;     // in seconds
         int         port       = 12345;
         int         no_server  = false;
 
@@ -39,19 +40,21 @@ namespace madbfs::args
 
     struct ParsedOpt
     {
+        String                     mount;
         String                     serial;
         Opt<std::filesystem::path> server;
         log::Level                 log_level;
         String                     log_file;
         usize                      cachesize;
         usize                      pagesize;
+        i32                        ttl;
         u16                        port;
     };
 
     struct ParseResult
     {
         // clang-format off
-        struct Opt  { ParsedOpt opt; fuse_args args; String mountpoint; };
+        struct Opt  { ParsedOpt opt; fuse_args args; };
         struct Exit { int status; };
 
         ParseResult() : result{ Exit{ 0} } {}
@@ -74,9 +77,10 @@ namespace madbfs::args
         { "--server=%s",     offsetof(MadbfsOpt, server),     true },
         { "--log-level=%s",  offsetof(MadbfsOpt, log_level),  true },
         { "--log-file=%s",   offsetof(MadbfsOpt, log_file),   true },
-        { "--port=%d",       offsetof(MadbfsOpt, port),       true },
         { "--cache-size=%d", offsetof(MadbfsOpt, cache_size), true },
         { "--page-size=%d",  offsetof(MadbfsOpt, page_size),  true },
+        { "--ttl=%d",        offsetof(MadbfsOpt, ttl),        true },
+        { "--port=%d",       offsetof(MadbfsOpt, port),       true },
         { "--no-server",     offsetof(MadbfsOpt, no_server),  true },
         // clang-format on
         FUSE_OPT_END,
@@ -108,6 +112,9 @@ namespace madbfs::args
             "                             (default: 128)\n"
             "                             (minimum: 64)\n"
             "                             (value will be rounded to the next power of 2)\n"
+            "    --ttl                  set the TTL of the stat cache of the filesystem in seconds\n"
+            "                             (default: 10)\n"
+            "                             (set to negative value to disable it)\n"
             "    --port=<n>             set port the server listens on\n"
             "                             (default: 12345)\n"
             "    --no-server            don't launch server\n"
@@ -395,16 +402,17 @@ namespace madbfs::args
 
         co_return ParseResult::Opt{
             .opt = {
+                .mount     = std::move(mountpoint),
                 .serial    = madbfs_opt.serial,
                 .server    = server,
                 .log_level = log_level.value(),
                 .log_file  = madbfs_opt.log_file,
                 .cachesize = std::bit_ceil(std::max(static_cast<usize>(madbfs_opt.cache_size), 128uz)),
                 .pagesize  = std::bit_ceil(std::max(static_cast<usize>(madbfs_opt.page_size), 64uz)),
+                .ttl       = madbfs_opt.ttl,
                 .port      = port,
             },
             .args = args,
-            .mountpoint = mountpoint,
         };
     }
 }

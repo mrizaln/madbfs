@@ -20,7 +20,15 @@ namespace madbfs
     class Madbfs
     {
     public:
-        Madbfs(Opt<path::Path> server, u16 port, usize max_pages, usize page_size);
+        Madbfs(
+            Opt<path::Path>               server,
+            u16                           port,
+            usize                         max_pages,
+            usize                         page_size,
+            Str                           mount_point,
+            Opt<tree::FileTree::Duration> ttl
+        );
+
         ~Madbfs();
 
         Madbfs(Madbfs&&)            = delete;
@@ -32,6 +40,8 @@ namespace madbfs
         tree::FileTree&    tree() { return m_tree; }
         async::Context&    async_ctx() { return m_async_ctx; }
         const data::Cache& cache() const { return m_cache; }
+
+        Str mountpoint() const { return m_mountpoint; }
 
     private:
         /**
@@ -80,5 +90,6 @@ namespace madbfs
         data::Cache                  m_cache;
         tree::FileTree               m_tree;
         Opt<ipc::Server>             m_ipc;
+        String                       m_mountpoint;
     };
 }

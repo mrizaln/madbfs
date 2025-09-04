@@ -76,6 +76,31 @@ namespace madbfs::tree
         return m_stat;
     }
 
+    void Node::expires_after(Duration duration)
+    {
+        if (duration == Duration::max()) {
+            m_expiration = Timepoint::max();
+        } else {
+            m_expiration = SteadyClock::now() + duration;
+        }
+    }
+
+    bool Node::expired() const
+    {
+        // prevent expiration if the file is dirty
+        if (auto file = as<node::Regular>(); file and file->get().is_dirty()) {
+            return false;
+        }
+        return SteadyClock::now() > m_expiration;
+    }
+
+    // TODO: maybe preserve open file handles? it will be hard though, I may need to do it recursively if
+    // directory is changed, idk
+    File Node::mutate(File file)
+    {
+        return std::exchange(m_value, std::move(file));
+    }
+
     const node::Error* Node::as_error() const
     {
         auto err = as<node::Error>();
@@ -103,7 +128,7 @@ namespace madbfs::tree
 
     void Node::refresh_stat(timespec atime, timespec mtime)
     {
-        auto now  = Clock::now().time_since_epoch();
+        auto now  = SystemClock::now().time_since_epoch();
         auto sec  = std::chrono::duration_cast<std::chrono::seconds>(now);
         auto nsec = std::chrono::duration_cast<std::chrono::nanoseconds>(now - sec);
 
@@ -127,9 +152,9 @@ namespace madbfs::tree
         return std::visit(visit, m_value);
     }
 
-    void Node::set_synced()
+    void Node::set_synced(bool synced)
     {
-        std::ignore = as<node::Directory>().transform(&node::Directory::set_readdir);
+        std::ignore = as<node::Directory>().transform(proj(&node::Directory::set_readdir, synced));
     }
 
     Expect<Ref<Node>> Node::traverse(Str name) const
@@ -140,18 +165,13 @@ namespace madbfs::tree
         return as<node::Directory>().and_then(proj(&node::Directory::find, name));
     }
 
-    Expect<void> Node::list(std::move_only_function<void(Str)>&& fn) const
+    Expect<Ref<node::Directory::List>> Node::list()
     {
         if (auto err = as<node::Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
         }
-        return as<node::Directory>().transform([&](const node::Directory& dir) {
-            for (const auto& node : dir.children()) {
-                if (not node->is<node::Error>()) {
-                    fn(node->name());
-                }
-            }
-        });
+        return as<node::Directory>()    //
+            .transform([&](node::Directory& dir) { return std::ref(dir.children()); });
     }
 
     Expect<Ref<Node>> Node::build(Str name, data::Stat stat, File file)
@@ -184,7 +204,7 @@ namespace madbfs::tree
         return as<node::Directory>().and_then(proj(&node::Directory::insert, std::move(node), overwrite));
     }
 
-    Expect<Ref<Node>> Node::symlink(Str name, Node* target)
+    Expect<Ref<Node>> Node::symlink(Str name, Str target)
     {
         if (auto err = as<node::Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
@@ -197,7 +217,7 @@ namespace madbfs::tree
             // NOTE: we can't really make a symlink on android from adb (unless rooted device iirc), so this
             // operation actually not creating any link on the adb device, just on the in-memory filetree.
 
-            auto now  = Clock::now().time_since_epoch();
+            auto now  = SystemClock::now().time_since_epoch();
             auto sec  = std::chrono::duration_cast<std::chrono::seconds>(now);
             auto nsec = std::chrono::duration_cast<std::chrono::nanoseconds>(now - sec);
 
@@ -205,7 +225,7 @@ namespace madbfs::tree
 
             // dummy stat for symlink based on
             // lrw-r--r--  root root 21 2024-10-05 09:19:29.000000000 +0700 /sdcard -> /storage/self/primary
-            auto dummy_stat = data::Stat{
+            auto stat = data::Stat{
                 .links = 1,
                 .size  = 21,
                 .mtime = time,
@@ -216,7 +236,7 @@ namespace madbfs::tree
                 .gid   = 0,
             };
 
-            auto node = std::make_unique<Node>(name, this, std::move(dummy_stat), node::Link{ target });
+            auto node = std::make_unique<Node>(name, this, std::move(stat), node::Link{ String{ target } });
             return dir.insert(std::move(node), false).transform([&](auto&& pair) { return pair.first; });
         });
     }
@@ -404,7 +424,7 @@ namespace madbfs::tree
         }
 
         co_return (co_await context.cache.read(id(), context.path, out, offset)).transform([&](usize ret) {
-            refresh_stat({ .tv_sec = 0, .tv_nsec = UTIME_NOW }, { .tv_sec = 0, .tv_nsec = UTIME_OMIT });
+            refresh_stat(timespec_now, timespec_omit);
             return ret;
         });
     }
@@ -427,7 +447,7 @@ namespace madbfs::tree
             // NOTE: this may be different for sparse files but I don't think Android has it
             auto new_size = offset + static_cast<off_t>(ret);
             m_stat.size   = std::max(m_stat.size, new_size);
-            refresh_stat({ .tv_sec = 0, .tv_nsec = UTIME_OMIT }, { .tv_sec = 0, .tv_nsec = UTIME_NOW });
+            refresh_stat(timespec_omit, timespec_now);
             return ret;
         });
     }
@@ -447,8 +467,10 @@ namespace madbfs::tree
             co_return Expect<void>{};    // no write, do nothing
         }
 
-        file.set_dirty(false);
-        co_return co_await context.cache.flush(id());
+        co_return (co_await context.cache.flush(id())).transform([&] {
+            refresh_stat(timespec_omit, timespec_now);
+            file.set_dirty(false);
+        });
     }
 
     AExpect<void> Node::release(Context context, u64 fd)
@@ -465,8 +487,10 @@ namespace madbfs::tree
         if (not file.is_dirty()) {
             co_return Expect<void>{};    // no write, do nothing
         }
-        file.set_dirty(false);
-        co_return co_await context.cache.flush(id());
+        co_return (co_await context.cache.flush(id())).transform([&] {
+            refresh_stat(timespec_omit, timespec_now);
+            file.set_dirty(false);
+        });
     }
 
     AExpect<void> Node::utimens(Context context, timespec atime, timespec mtime)
@@ -479,12 +503,12 @@ namespace madbfs::tree
         });
     }
 
-    Expect<Ref<Node>> Node::readlink()
+    Expect<Str> Node::readlink()
     {
-        auto current = this;
-        while (current->is<node::Link>()) {
-            current = &current->as<node::Link>()->get().target();
+        auto link = as<node::Link>();
+        if (not link) {
+            return Unexpect{ link.error() };
         }
-        return *current;
+        return link->get().target;
     }
 }

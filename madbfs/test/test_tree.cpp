@@ -88,10 +88,7 @@ struct fmt::formatter<madbfs::tree::Node> : fmt::formatter<Str>
             }
 
             auto visitor = madbfs::util::Overload{
-                [&](const node::Link& link) {
-                    auto pathbuf = link.target().build_path();
-                    return fmt::format("    ->    {}", pathbuf.as_path().fullpath());
-                },
+                [&](const node::Link& link) { return fmt::format("    ->    {}", link.target); },
                 [&](const node::Directory&) { return String{ "/" }; },
                 [&](const auto&) { return String{ "" }; },
             };
@@ -179,26 +176,25 @@ namespace mock
 
         Str name() const override { return "dummy"; }
 
-        AExpect<Stats>   statdir(Path) override { co_return Unexpect{ {} }; }
-        AExpect<Stat>    stat(Path) override { co_return Stat{}; }
-        AExpect<PathBuf> readlink(Path path) override { co_return path.into_buf(); };
-        AExpect<void>    mknod(Path, mode_t, dev_t) override { co_return Expect<void>{}; }
-        AExpect<void>    mkdir(Path, mode_t) override { co_return Expect<void>{}; }
-        AExpect<void>    unlink(Path) override { co_return Expect<void>{}; }
-        AExpect<void>    rmdir(Path) override { co_return Expect<void>{}; }
-        AExpect<void>    rename(Path, path::Path, u32) override { co_return Expect<void>{}; }
-        AExpect<void>    truncate(Path, off_t) override { co_return Expect<void>{}; }
-        AExpect<usize>   read(Path, Span<char>, off_t) override { co_return Expect<usize>{}; }
-        AExpect<usize>   write(Path, Span<const char>, off_t) override { co_return Expect<usize>{}; }
-        AExpect<void>    utimens(Path, timespec, timespec) override { co_return Expect<void>{}; }
-        AExpect<usize>   copy_file_range(Path, off_t, Path, off_t, usize size) override { co_return size; }
+        AExpect<Stats>  statdir(Path) override { co_return Unexpect{ {} }; }
+        AExpect<Stat>   stat(Path) override { co_return Stat{}; }
+        AExpect<String> readlink(Path path) override { co_return path.fullpath(); };
+        AExpect<void>   mknod(Path, mode_t, dev_t) override { co_return Expect<void>{}; }
+        AExpect<void>   mkdir(Path, mode_t) override { co_return Expect<void>{}; }
+        AExpect<void>   unlink(Path) override { co_return Expect<void>{}; }
+        AExpect<void>   rmdir(Path) override { co_return Expect<void>{}; }
+        AExpect<void>   rename(Path, path::Path, u32) override { co_return Expect<void>{}; }
+        AExpect<void>   truncate(Path, off_t) override { co_return Expect<void>{}; }
+        AExpect<usize>  read(Path, Span<char>, off_t) override { co_return Expect<usize>{}; }
+        AExpect<usize>  write(Path, Span<const char>, off_t) override { co_return Expect<usize>{}; }
+        AExpect<void>   utimens(Path, timespec, timespec) override { co_return Expect<void>{}; }
+        AExpect<usize>  copy_file_range(Path, off_t, Path, off_t, usize size) override { co_return size; }
     };
 }
 
 int main()
 {
     using namespace ut::literals;
-    using namespace ut::operators;
     using ut::expect, ut::that;
 
     auto _ = std::ignore;
@@ -267,8 +263,8 @@ int main()
             Node& wife = (co_await work.mknod(make_context("loughshinny <3.txt"), 0, 0)).unwrap();
 
             _ = (co_await work.mknod(make_context("eblana?.mp4"), 0, 0)).unwrap();
-            _ = school.symlink("hehe", &work).unwrap();
-            _ = hello.symlink("wife", &wife).unwrap();
+            _ = school.symlink("hehe", work.build_path().as_path().fullpath()).unwrap();
+            _ = hello.symlink("wife", wife.build_path().as_path().fullpath()).unwrap();
             _ = (co_await bye.mknod(make_context("theresa.txt"), 0, 0)).unwrap();
 
             auto tree_str = fmt::format("\n{}", root);
@@ -286,7 +282,7 @@ int main()
 
         auto connection = mock::DummyConnection{};
         auto cache      = madbfs::data::Cache{ connection, 64 * 1024, 1024 };
-        auto tree       = FileTree{ connection, cache };
+        auto tree       = FileTree{ connection, cache, std::nullopt };
 
         auto io_context = madbfs::async::Context{};
 
@@ -319,8 +315,8 @@ int main()
             (co_await tree.mknod("/bye/friends/work/loughshinny <3.txt"_path, 0, 0)).unwrap(Node*);
             (co_await tree.mknod("/bye/friends/work/eblana?.mp4"_path, 0, 0)).unwrap(Node*);
 
-            tree.symlink("/bye/friends/school/hehe"_path, "/bye/friends/work"_path).unwrap(void);
-            tree.symlink("/hello/wife"_path, "/bye/friends/work/loughshinny <3.txt"_path).unwrap(void);
+            tree.symlink("/bye/friends/school/hehe"_path, "/bye/friends/work").unwrap(void);
+            tree.symlink("/hello/wife"_path, "/bye/friends/work/loughshinny <3.txt").unwrap(void);
 
             (co_await tree.mknod("/bye/theresa.txt"_path, 0, 0)).unwrap(Node*);
 
@@ -333,13 +329,19 @@ int main()
             (co_await tree.unlink("/bye/friends/school/hehe"_path)).unwrap(void);
 
             // there is no recursive delete
-            Node& bar      = tree.traverse("/hello/bar"_path).unwrap(Node*);
-            auto  bar_path = bar.build_path();
-            auto  paths    = Vec<madbfs::path::PathBuf>{};
+            Node& bar   = tree.traverse("/hello/bar"_path).unwrap(Node*);
+            auto  paths = Vec<madbfs::path::PathBuf>{};
 
-            _ = bar.list([&](Str name) { paths.push_back(bar_path.extend_copy(name).value()); });
-            for (const auto& path : paths) {
-                (co_await tree.unlink(path.as_path())).unwrap(void);
+            auto dummy = bar.build_path();
+            dummy.extend("dummy");
+
+            auto entries = bar.list()->get()                                         //
+                         | sv::transform([](auto& node) { return node->name(); })    //
+                         | sr::to<Vec<String>>();
+
+            for (const auto& name : entries) {
+                dummy.rename(name);
+                (co_await tree.unlink(dummy)).unwrap(void);
             }
 
             (co_await tree.rmdir("/hello/bar"_path)).unwrap(void);

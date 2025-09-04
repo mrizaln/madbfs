@@ -113,10 +113,10 @@ namespace madbfs::operations
         auto cache_size = args->cachesize * 1024 * 1024;
         auto page_size  = args->pagesize * 1024;
         auto max_pages  = cache_size / page_size;
-        auto port       = args->port;
         auto server     = args->server.transform(&std::filesystem::path::c_str).and_then(&path::create);
+        auto ttl        = args->ttl < 0 ? std::nullopt : Opt<FileTree::Duration>{ args->ttl };
 
-        return new Madbfs{ server, port, page_size, max_pages };
+        return new Madbfs{ server, args->port, page_size, max_pages, args->mount, ttl };
     }
 
     void destroy(void* private_data) noexcept
@@ -172,16 +172,30 @@ namespace madbfs::operations
 
         return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([](path::Path p) { return invoke_tree(&FileTree::readlink, p); })
-            .and_then([&](tree::Node& node) -> Expect<void> {
-                auto target_buf = node.build_path();    // this will emits absolute path, which we don't want
-                auto target     = target_buf.as_path();
-                if (auto pathsize = target.fullpath().size(); pathsize - 1 < size) {
-                    std::memcpy(buf, target.fullpath().data() + 1, pathsize);    // copy without initial '/'
-                    return {};
-                } else {
-                    log_e("readlink: path size is too long: {} vs {}", size, pathsize);
-                    return Unexpect{ Errc::filename_too_long };
+            .and_then([&](Str target) -> Expect<void> {
+                if (target.size() < 1) {
+                    return Unexpect{ Errc::invalid_argument };
                 }
+
+                if (target[0] == '/') {    // absolute link
+                    auto mount = get_data().mountpoint();
+                    if (auto pathsize = mount.size() + target.size() + 1; pathsize > size) {
+                        log_e("readlink: path size is too long: {} vs {}", size, pathsize);
+                        return Unexpect{ Errc::filename_too_long };
+                    }
+                    std::memcpy(buf, mount.data(), mount.size());
+                    std::memcpy(buf + mount.size(), target.data(), target.size());
+                    buf[mount.size() + target.size()] = '\0';
+                } else {
+                    if (auto pathsize = target.size(); pathsize + 1 > size) {
+                        log_e("readlink: path size is too long: {} vs {}", size, pathsize);
+                        return Unexpect{ Errc::filename_too_long };
+                    }
+                    std::memcpy(buf, target.data(), target.size());
+                    buf[target.size()] = '\0';
+                }
+
+                return {};
             })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);

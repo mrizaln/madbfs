@@ -17,9 +17,10 @@ namespace madbfs::tree
     class FileTree
     {
     public:
-        using Filler = std::move_only_function<void(const char* name)>;
+        using Filler   = std::move_only_function<void(const char* name)>;
+        using Duration = std::chrono::seconds;
 
-        FileTree(connection::Connection& connection, data::Cache& cache);
+        FileTree(connection::Connection& connection, data::Cache& cache, Opt<Duration> ttl);
         ~FileTree() = default;
 
         FileTree(Node&& root)            = delete;
@@ -40,7 +41,7 @@ namespace madbfs::tree
         AExpect<void>                  readdir(path::Path path, Filler filler);
         AExpect<Ref<const data::Stat>> getattr(path::Path path);
 
-        AExpect<Ref<Node>> readlink(path::Path path);
+        AExpect<Str>       readlink(path::Path path);
         AExpect<Ref<Node>> mknod(path::Path path, mode_t mode, dev_t dev);
         AExpect<Ref<Node>> mkdir(path::Path path, mode_t mode);
         AExpect<void>      unlink(path::Path path);
@@ -67,7 +68,7 @@ namespace madbfs::tree
         // --------------
 
         // this function only used to link already existing files, user can't and shouldn't use it
-        Expect<void> symlink(path::Path path, path::Path target);
+        Expect<void> symlink(path::Path path, Str target);
 
         /**
          * @brief Safely clean up and sync data.
@@ -81,12 +82,41 @@ namespace madbfs::tree
 
     private:
         /**
+         * @brief Fetch file stat from remote at `path` then create a child node on `parent`.
+         *
+         * @param parent Parent on which the child node will be created.
+         * @param path Path to the file.
+         */
+        AExpect<Ref<Node>> build(Node& parent, path::Path path);
+
+        /**
+         * @brief Same as build but force directory only, fails with `Errc::not_a_directory` if not directory.
+         *
+         * @param parent Parent on which the child node will be created.
+         * @param path Path to the file.
+         */
+        AExpect<Ref<Node>> build_directory(Node& parent, path::Path path);
+
+        /**
          * @brief Traverse the node or build a new node.
          *
          * @param path Path to the node.
          */
         AExpect<Ref<Node>> traverse_or_build(path::Path path);
 
+        /**
+         * @brief Re-fetch file stat from remote and update the node accordingly.
+         *
+         * @param node The node in question.
+         * @param path Path to the corresponding file on remote.
+         */
+        AExpect<void> update(Node& node, path::Path path);
+
+        /**
+         * @brief Helper function to create context for node operations.
+         *
+         * @param path Path of the node operated on.
+         */
         Node::Context make_context(const path::Path& path)
         {
             return {
@@ -102,5 +132,6 @@ namespace madbfs::tree
         data::Cache&            m_cache;
         std::atomic<u64>        m_fd_counter       = 0;
         bool                    m_root_initialized = false;
+        Opt<Duration>           m_ttl              = std::nullopt;
     };
 }

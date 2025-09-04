@@ -55,4 +55,23 @@ namespace madbfs::data
         uid_t    uid   = 0;
         gid_t    gid   = 0;
     };
+
+    /**
+     * @brief Detect modification in remote.
+     *
+     * @param host Host side of stat.
+     * @param remote Remote side of stat.
+     *
+     * This function only considers a modification in the remote is made when the remote stat is newer than
+     * the host.
+     */
+    inline bool detect_modification(const Stat& host, const Stat& remote)
+    {
+        // The modification detection only considers the modification time of the file in seconds
+        // resolution. Furthermore this funciton tolerates 2 seconds of difference since the FileTree
+        // can't always tracks the same timestamp of the files stored in the cache and the remote.
+
+        static constexpr auto tolerance_sec = 2;
+        return remote.mtime.tv_sec - host.mtime.tv_sec > tolerance_sec;
+    }
 }

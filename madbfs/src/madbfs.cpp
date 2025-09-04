@@ -21,7 +21,7 @@ namespace madbfs
             if (not result) {
                 auto msg = std::make_error_code(result.error()).message();
                 log_c("prepare_connection: failed to construct ServerConnection: {}", msg);
-                log_i("prepare_connection: falling back to AdbConnection");
+                log_c("prepare_connection: falling back to AdbConnection");
                 co_return std::make_unique<connection::AdbConnection>();
             }
             log_d("prepare_connection: successfully created ServerConnection");
@@ -72,14 +72,22 @@ namespace madbfs
         }
     }
 
-    Madbfs::Madbfs(Opt<path::Path> server, u16 port, usize page_size, usize max_pages)
+    Madbfs::Madbfs(
+        Opt<path::Path>               server,
+        u16                           port,
+        usize                         page_size,
+        usize                         max_pages,
+        Str                           mountpoint,
+        Opt<tree::FileTree::Duration> ttl
+    )
         : m_async_ctx{}
         , m_work_guard{ m_async_ctx.get_executor() }
         , m_work_thread{ [this] { work_thread_function(m_async_ctx); } }
         , m_connection{ prepare_connection(m_async_ctx, server, port) }
         , m_cache{ *m_connection, page_size, max_pages }
-        , m_tree{ *m_connection, m_cache }
+        , m_tree{ *m_connection, m_cache, ttl }
         , m_ipc{ create_ipc(m_async_ctx) }
+        , m_mountpoint{ mountpoint }
     {
         if (m_ipc) {
             auto coro = m_ipc->launch([this](ipc::Op op) { return ipc_handler(op); });

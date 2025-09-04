@@ -48,8 +48,11 @@ namespace madbfs::connection
          * @brief Get the real file pointed by a symlink.
          *
          * @param path The path to the file or directory.
+         *
+         * The returned path may be relative so it's not safe to directly convert it to `path::path` or
+         * `path::PathBuf`, use `path::resolve()` instead in that case.
          */
-        virtual AExpect<path::PathBuf> readlink(path::Path path) = 0;
+        virtual AExpect<String> readlink(path::Path path) = 0;
 
         /**
          * @brief Create a new empty file.

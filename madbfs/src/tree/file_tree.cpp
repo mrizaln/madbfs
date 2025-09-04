@@ -6,13 +6,72 @@
 
 namespace madbfs::tree
 {
-    FileTree::FileTree(connection::Connection& connection, data::Cache& cache)
+    FileTree::FileTree(connection::Connection& connection, data::Cache& cache, Opt<Duration> ttl)
         : m_root{ "/", nullptr, {}, node::Directory{} }
         , m_connection{ connection }
         , m_cache{ cache }
+        , m_ttl{ ttl }
     {
     }
 
+    AExpect<Ref<Node>> FileTree::build(Node& parent, path::Path path)
+    {
+        const auto name = path.filename();
+
+        auto build_then_expire = [&](Str name, data::Stat stat, File file) {
+            return parent    //
+                .build(name, std::move(stat), std::move(file))
+                .transform([&](Node& node) {
+                    node.expires_after(m_ttl.value_or(Duration::max()));
+                    return std::ref(node);
+                });
+        };
+
+        auto stat = co_await m_connection.stat(path);
+        if (not stat.has_value()) {
+            std::ignore = build_then_expire(name, {}, node::Error{ stat.error() });
+            co_return Unexpect{ stat.error() };
+        }
+
+        switch (stat->mode & S_IFMT) {
+        case S_IFREG: co_return build_then_expire(name, *stat, node::Regular{});
+        case S_IFDIR: co_return build_then_expire(name, *stat, node::Directory{});
+        case S_IFLNK: {
+            if (auto target = co_await m_connection.readlink(path); target) {
+                co_return build_then_expire(name, *stat, node::Link{ std::move(target).value() });
+            } else {
+                co_return build_then_expire(name, *stat, node::Error{ target.error() });
+            }
+        }
+        default: co_return build_then_expire(name, *stat, node::Other{});
+        }
+    }
+
+    AExpect<Ref<Node>> FileTree::build_directory(Node& parent, path::Path path)
+    {
+        const auto name = path.filename();
+
+        auto build_then_expire = [&](Str name, data::Stat stat, File file) {
+            return parent    //
+                .build(name, std::move(stat), std::move(file))
+                .transform([&](Node& node) {
+                    node.expires_after(m_ttl.value_or(Duration::max()));
+                    return std::ref(node);
+                });
+        };
+
+        auto stat = co_await m_connection.stat(path);
+        if (not stat.has_value()) {
+            std::ignore = build_then_expire(name, {}, node::Error{ stat.error() });
+            co_return Unexpect{ stat.error() };
+        } else if ((stat->mode & S_IFMT) != S_IFDIR) {
+            co_return Unexpect{ Errc::not_a_directory };
+        }
+
+        co_return build_then_expire(name, *stat, node::Directory{});
+    }
+
+    // TODO: make async
     Expect<Ref<Node>> FileTree::traverse(path::Path path)
     {
         if (path.is_root()) {
@@ -52,133 +111,217 @@ namespace madbfs::tree
 
         // iterate until parent
         for (auto name : path.parent_path().iter() | sv::drop(1)) {
-            auto res = current_path.extend(name);
-            assert(res and "extend failed");
-
+            current_path.extend(name);
             if (auto next = current->traverse(name); next.has_value()) {
+                if (auto& node = next->get(); node.expired()) {
+                    auto res = co_await update(node, current_path.as_path());
+                    if (not res) {
+                        co_return Unexpect{ res.error() };
+                    }
+                }
                 current = &next->get();
                 continue;
             }
 
-            // get stat from device
-            auto stat = co_await m_connection.stat(current_path.as_path());
-            if (not stat.has_value()) {
-                std::ignore = current->build(name, {}, node::Error{ stat.error() });
-                co_return Unexpect{ stat.error() };
-            }
-            if ((stat->mode & S_IFMT) != S_IFDIR) {
-                co_return Unexpect{ Errc::not_a_directory };
+            auto next = co_await build_directory(*current, current_path.as_path());
+            if (not next) {
+                co_return Unexpect{ next.error() };
             }
 
-            // build the node
-            auto built = current->build(name, *stat, node::Directory{});
-            if (not built.has_value()) {
-                co_return Unexpect{ built.error() };
-            }
-
-            current = &built->get();
+            current = &next->get();
         }
 
+        current_path.extend(path.filename());
         if (auto found = current->traverse(path.filename()); found.has_value()) {
+            if (auto& node = found->get(); node.expired()) {
+                auto res = co_await update(node, current_path.as_path());
+                if (not res) {
+                    co_return Unexpect{ res.error() };
+                }
+            }
             co_return found;
         }
 
-        auto res = current_path.extend(path.filename());
-        assert(res and "extend failed");
+        co_return co_await build(*current, current_path.as_path());
+    }
 
-        // get stat from device
-        auto stat = co_await m_connection.stat(current_path.as_path());
-        if (not stat.has_value()) {
-            std::ignore = current->build(path.filename(), {}, node::Error{ stat.error() });
-            co_return Unexpect{ stat.error() };
-        }
+    AExpect<void> FileTree::update(Node& node, path::Path path)
+    {
+        log_d("{}: {:?}", __func__, path.fullpath());
 
-        const auto name = path.filename();
+        auto new_stat = co_await m_connection.stat(path);
+        auto old_stat = node.stat();
 
-        switch (stat->mode & S_IFMT) {
-        case S_IFREG: co_return current->build(name, *stat, node::Regular{}); break;
-        case S_IFDIR: co_return current->build(name, *stat, node::Directory{}); break;
-        case S_IFLNK: {
-            auto may_target = co_await m_connection.readlink(path);
-            if (not may_target) {
-                co_return Unexpect{ may_target.error() };
+        // NOTE: Errc::not_connected and Errc::timed_out should be considered an OK error since it can happen
+        // if the device is disconnected. The error should not be saved into the node.
+
+        if (not new_stat) {
+            auto err = new_stat.error();
+            if (err != Errc::not_connected and err != Errc::timed_out) {
+                node.mutate(node::Error{ err });
+                node.expires_after(m_ttl.value_or(Duration::max()));
             }
-            auto& target = *may_target;
-
-            co_return (co_await traverse_or_build(target.as_path()))
-                .transform_error([&](Errc err) {
-                    log_e("traverse_or_build: target not found: {:?}", __func__, target.as_path().fullpath());
-                    return err;
-                })
-                .and_then([&](Node& node) { return current->build(name, *stat, node::Link{ &node }); });
-        } break;
-        default: co_return current->build(name, *stat, node::Other{}); break;
+            co_return Unexpect{ err };
         }
+
+        // no change
+        if (old_stat and not detect_modification(old_stat->get(), *new_stat)) {
+            log_d("{}: unchanged: {:?}", __func__, path.fullpath());
+            node.expires_after(m_ttl.value_or(Duration::max()));
+            co_return Expect<void>{};
+        }
+
+        log_w("{}:   changed: {:?}", __func__, path.fullpath());
+        co_await m_cache.invalidate_one(node.id(), false);    // maybe conditionally flush?
+
+        switch (new_stat->mode & S_IFMT) {
+        case S_IFREG: {
+            // TODO: if the file type is unchanged but the data is changed, we need to choose whether to
+            // prioritize data from the host or the remote. maybe add a policy on the VFS itself so the user
+            // can choose what suits them best.
+            node.set_stat(*new_stat);
+            node.mutate(node::Regular{});
+            node.expires_after(m_ttl.value_or(Duration::max()));
+        } break;
+        case S_IFDIR: {
+            if (S_ISDIR(old_stat->get().mode)) {
+                node.set_stat(*new_stat);
+                node.set_synced(false);
+                node.expires_after(m_ttl.value_or(Duration::max()));
+            }
+        } break;
+        case S_IFLNK: {
+            if (auto target = co_await m_connection.readlink(path); target) {
+                node.set_stat(*new_stat);
+                node.mutate(node::Link{ std::move(target).value() });
+            } else {
+                node.mutate(node::Error{ target.error() });
+            }
+            node.expires_after(m_ttl.value_or(Duration::max()));
+        } break;
+        default: {
+            node.set_stat(*new_stat);
+            node.mutate(node::Other{});
+            node.expires_after(m_ttl.value_or(Duration::max()));
+        } break;
+        }
+
+        co_return Expect<void>{};
     }
 
     AExpect<void> FileTree::readdir(path::Path path, Filler filler)
     {
-        auto base = &m_root;
+        auto parent = &m_root;
 
         if (not path.is_root()) {
-            auto maybe_base = co_await traverse_or_build(path);
-            if (not maybe_base.has_value()) {
-                co_return Unexpect{ maybe_base.error() };
+            auto maybe_node = co_await traverse_or_build(path);
+            if (not maybe_node.has_value()) {
+                co_return Unexpect{ maybe_node.error() };
             }
-            base = &maybe_base->get();
+            parent = &maybe_node->get();
         }
 
-        if (base->has_synced()) {
-            co_return base->list([&](Str name) {
-                filler(name.data());    // the underlying data is null-terminated string
-            });
+        auto may_list = parent->list();
+        if (not may_list) {
+            co_return Unexpect{ may_list.error() };
         }
+        auto& list = may_list->get();
 
-        // NOTE: base must be a Directory here, since traverse_or_build below code is an else branch of
-        // conditional above
-
-        auto may_stats = co_await m_connection.statdir(path);
-        if (not may_stats) {
-            co_return Unexpect{ may_stats.error() };
-        }
-
-        auto pathbuf = path.extend_copy("dummy").value();
-
-        for (auto [stat, name] : may_stats.value()) {
+        auto pathbuf    = path.extend_copy("dummy").value();
+        auto build_file = [&](Str name, mode_t mode) -> Await<File> {
             auto renamed = pathbuf.rename(name);
-            if (not renamed) {
-                log_w("{}: failed to extend {:?} with {:?}", __func__, path.fullpath(), name);
-                continue;
-            }
+            assert(renamed);
 
-            auto built = Opt<Expect<Ref<Node>>>{};
-
-            switch (stat.mode & S_IFMT) {
-            case S_IFREG: built = base->build(name, stat, node::Regular{}); break;
-            case S_IFDIR: built = base->build(name, stat, node::Directory{}); break;
+            switch (mode & S_IFMT) {
+            case S_IFREG: co_return node::Regular{};
+            case S_IFDIR: co_return node::Directory{};
             case S_IFLNK: {
-                auto may_target = co_await m_connection.readlink(pathbuf.as_path());
-                if (not may_target) {
-                    auto msg = std::make_error_code(may_target.error()).message();
-                    log_e("readdir: {} [{}/{}]", msg, path.fullpath(), name);
-                    continue;
+                if (auto target = co_await m_connection.readlink(pathbuf.as_path()); target) {
+                    co_return node::Link{ std::move(target).value() };
+                } else {
+                    co_return node::Error{ target.error() };
                 }
-                built = (co_await traverse_or_build(may_target->as_path())).and_then([&](Node& node) {
-                    return base->build(name, stat, node::Link{ &node });
-                });
-            } break;
-            default: built = base->build(name, stat, node::Other{}); break;
+            }
+            default: co_return node::Other{};
+            }
+        };
+
+        if (not parent->has_synced()) {
+            auto may_stats = co_await m_connection.statdir(path);
+            if (not may_stats) {
+                co_return Unexpect{ may_stats.error() };
             }
 
-            if (not built.has_value()) {
-                auto msg = std::make_error_code(built->error()).message();
-                log_e("readdir: {} [{}/{}]", msg, path.fullpath(), name);
+            if (list.empty()) {
+                for (auto [stat, name] : may_stats.value()) {
+                    log_d("{}: [{:?}] new entry    : {:?}", __func__, parent->name(), name);
+
+                    auto file  = co_await build_file(name, stat.mode);
+                    auto child = std::make_unique<Node>(name, parent, std::move(stat), std::move(file));
+                    child->expires_after(m_ttl.value_or(Duration::max()));
+                    list.emplace(std::move(child));
+                }
+            } else {
+                auto new_list = std::unordered_set<Str>{};
+
+                // update old entries or add a new one if not exists
+                for (auto [stat, name] : may_stats.value()) {
+                    new_list.emplace(name);
+
+                    auto found = list.find(name);
+                    if (found == list.end()) {
+                        log_d("{}: [{:?}] new entry: {:?}", __func__, parent->name(), name);
+
+                        auto file  = co_await build_file(name, stat.mode);
+                        auto child = std::make_unique<Node>(name, parent, std::move(stat), std::move(file));
+                        child->expires_after(m_ttl.value_or(Duration::max()));
+                        list.emplace(std::move(child));
+
+                        continue;
+                    }
+
+                    auto& child = (**found);
+                    if (auto child_stat = child.stat(); not child_stat) {    // Error node
+                        log_d("{}: [{:?}]   changed: {:?}", __func__, parent->name(), name);
+
+                        child.set_stat(std::move(stat));
+                        child.mutate(co_await build_file(name, stat.mode));
+                        child.expires_after(m_ttl.value_or(Duration::max()));
+                    } else if (child.expired() and detect_modification(child_stat->get(), stat)) {
+                        log_d("{}: [{:?}]   changed: {:?}", __func__, parent->name(), name);
+
+                        child.set_stat(std::move(stat));
+                        child.mutate(co_await build_file(name, stat.mode));
+                        child.expires_after(m_ttl.value_or(Duration::max()));
+
+                        co_await m_cache.invalidate_one(child.id(), false);    // should I flush?
+                    }
+
+                    log_d("{}: [{:?}] unchanged: {:?}", __func__, parent->name(), name);
+                }
+
+                // remove old entries if doesn't exist in new entries
+                for (auto it = list.begin(); it != list.end();) {
+                    auto name = (**it).name();
+                    if (not new_list.contains(name)) {
+                        log_d("{}: [{:?}]   removed: {:?}", __func__, parent->name(), name);
+                        co_await m_cache.invalidate_one((**it).id(), false);    // should I flush
+                        it = list.erase(it);
+                        continue;
+                    }
+                    ++it;
+                }
             }
 
-            filler(pathbuf.as_path().filename().data());
+            parent->set_synced(true);
         }
 
-        base->set_synced();
+        for (const auto& node : std::as_const(list)) {
+            if (not node->as_error()) {
+                filler(node->name().data());
+            }
+        }
+
         co_return Expect<void>{};
     }
 
@@ -187,7 +330,7 @@ namespace madbfs::tree
         co_return (co_await traverse_or_build(path)).and_then(&Node::stat);
     }
 
-    AExpect<Ref<Node>> FileTree::readlink(path::Path path)
+    AExpect<Str> FileTree::readlink(path::Path path)
     {
         co_return (co_await traverse_or_build(path)).and_then(&Node::readlink);
     }
@@ -386,16 +529,10 @@ namespace madbfs::tree
         co_return co_await node->get().utimens(make_context(path), atime, mtime);
     }
 
-    Expect<void> FileTree::symlink(path::Path path, path::Path target)
+    Expect<void> FileTree::symlink(path::Path path, Str target)
     {
-        // for now, disallow linking to non-existent target
-        auto target_node = traverse(target);
-        if (not target_node) {
-            return target_node.transform(sink_void);
-        }
-
         return traverse(path.parent_path())
-            .and_then(proj(&Node::symlink, path.filename(), &target_node->get()))
+            .and_then(proj(&Node::symlink, path.filename(), target))
             .transform(sink_void);
     }
 
