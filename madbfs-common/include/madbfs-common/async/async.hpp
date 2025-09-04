@@ -144,7 +144,11 @@ namespace madbfs::async
     }
 
     template <typename T>
-    Await<Opt<T>> timeout(Await<T>&& awaitable, std::chrono::milliseconds time)
+    Await<Opt<ToUnit<T>>> timeout(
+        Await<T>&&                awaitable,
+        std::chrono::milliseconds time,
+        std::function<void()>     on_timeout = {}
+    )
     {
         using net::experimental::awaitable_operators::operator||;
 
@@ -155,28 +159,14 @@ namespace madbfs::async
 
         switch (res.index()) {
         case 0: co_return Opt{ std::move(std::get<0>(res)) };
-        case 1: co_return std::nullopt;
+        case 1:
+            if (on_timeout) {
+                on_timeout();
+            }
+            co_return std::nullopt;
         }
 
         co_return std::nullopt;
-    }
-
-    template <typename T>
-    AExpect<T> timeout_expect(AExpect<T>&& awaitable, std::chrono::milliseconds time)
-    {
-        using net::experimental::awaitable_operators::operator||;
-
-        auto timer = Timer{ co_await net::this_coro::executor };
-
-        timer.expires_after(time);
-        auto res = co_await (std::move(awaitable) || timer.async_wait());
-
-        switch (res.index()) {
-        case 0: co_return std::move(std::get<0>(res));
-        case 1: co_return Unexpect{ Errc::timed_out };
-        }
-
-        co_return Unexpect{ Errc::io_error };
     }
 
     inline Errc to_generic_err(net::error_code ec, Errc fallback = Errc::io_error) noexcept

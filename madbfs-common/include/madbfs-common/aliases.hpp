@@ -209,6 +209,24 @@ namespace madbfs
         constexpr aliases::f64 operator""_f64(long double value) { return static_cast<aliases::f64>(value); }
         // clang-format on
     }
+
+    inline namespace meta
+    {
+        template <typename T>
+        struct ToUnitTrait
+        {
+            using Type = T;
+        };
+
+        template <>
+        struct ToUnitTrait<void>
+        {
+            using Type = Unit;
+        };
+
+        template <typename T>
+        using ToUnit = ToUnitTrait<T>::Type;
+    }
 }
 
 #ifndef MADBFS_RAPIDHASH_ENABLED

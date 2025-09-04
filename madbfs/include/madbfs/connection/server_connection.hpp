@@ -98,7 +98,7 @@ namespace madbfs::connection
         template <rpc::IsRequest Req>
         AExpect<rpc::ToResp<Req>> send_req(Vec<u8>& buf, Req req)
         {
-            auto res = co_await async::timeout_expect(send(buf, std::move(req)), timeout_delay);
+            auto res = co_await send(buf, std::move(req));
             if (not res) {
                 co_return Unexpect{ res.error() };
             }

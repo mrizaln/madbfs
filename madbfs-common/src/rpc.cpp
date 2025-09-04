@@ -365,6 +365,7 @@ namespace madbfs::rpc
 
     Await<void> Client::start()
     {
+        log_d("{}: called", __func__);
         m_running = true;
 
         auto exec = co_await async::current_executor();
@@ -406,6 +407,7 @@ namespace madbfs::rpc
                 log_e("send: finished with error: {}", msg);
             }
 
+            m_channel.cancel();
             m_channel.reset();
         });
     }
@@ -475,8 +477,9 @@ namespace madbfs::rpc
 
             auto n = co_await async::write_exact(m_socket, payload);
             HANDLE_ERROR_ELSE(n, payload.size(), "failed to send request payload", {
-                m_requests.erase(id);
-                continue;
+                if (auto entry = m_requests.extract(id); not entry.empty()) {
+                    entry.mapped().promise.set_value(Unexpect{ Errc::broken_pipe });
+                }
             });
         }
 
@@ -486,11 +489,13 @@ namespace madbfs::rpc
     void Client::stop()
     {
         m_running = false;
+        m_channel.cancel();
+        m_channel.close();
         m_socket.cancel();
         m_socket.close();
     }
 
-    AExpect<Response> Client::send_req(Vec<u8>& buffer, Request req)
+    AExpect<Response> Client::send_req(Vec<u8>& buffer, Request req, Opt<std::chrono::milliseconds> timeout)
     {
         if (not m_running) {
             co_return Unexpect{ Errc::not_connected };
@@ -586,7 +591,17 @@ namespace madbfs::rpc
         m_requests.emplace(id, Promise{ buffer, std::move(promise) });
         log_d("{}: REQ QUEUED {} [{}]", __func__, id.inner(), to_string(proc));
 
-        co_return co_await future.async_extract();
+        if (timeout) {
+            co_await async::timeout(future.async_wait(async::use_awaitable), *timeout, [&] {
+                if (auto entry = m_requests.extract(id); not entry.empty()) {
+                    entry.mapped().promise.set_value(Unexpect{ Errc::timed_out });
+                }
+            });
+        } else {
+            co_await future.async_wait(async::use_awaitable);
+        }
+
+        co_return future.is_ready() ? future.extract() : Unexpect{ Errc::timed_out };
     }
 }
 

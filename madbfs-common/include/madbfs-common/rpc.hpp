@@ -221,7 +221,7 @@ namespace madbfs::rpc
         bool    running() const { return m_running; }
 
         Await<void>       start();
-        AExpect<Response> send_req(Vec<u8>& buffer, Request req);
+        AExpect<Response> send_req(Vec<u8>& buffer, Request req, Opt<std::chrono::milliseconds> timeout);
         void              stop();
 
     private:

@@ -46,7 +46,7 @@ namespace madbfs::connection
             co_await m_client->start();
         }
 
-        auto res = co_await m_client->send_req(buf, std::move(req));
+        auto res = co_await m_client->send_req(buf, std::move(req), timeout_delay);
         if (not res) {
             if (res.error() == Errc::not_connected or res.error() == Errc::broken_pipe) {
                 log_e("{}: client is disconnected, releasing client", __func__);
@@ -105,12 +105,12 @@ namespace madbfs::connection
         // run server
         auto cmd      = bp::environment::find_executable("adb");
         auto port_str = fmt::format("{}", port);
-        auto args     = Array<boost::string_view, 4>{
+        auto args     = std::to_array<boost::string_view>({
             "shell",
             { serv_file.data(), serv_file.size() },
             "--port",
             port_str,
-        };
+        });
 
         auto cmds = args | sv::transform([](auto s) { return Str{ s.data(), s.size() }; });
         log_d("{}: executing adb {}", __func__, cmds);
