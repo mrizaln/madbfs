@@ -73,6 +73,9 @@ int main(int argc, char** argv)
     }
     auto&& [opt, args] = std::move(maybe_opt).opt();
 
+    fmt::println("[madbfs] mount '{}' [cache={} MiB, page={} KiB]", opt.serial, opt.cachesize, opt.pagesize);
+    fmt::println("[madbfs] unmount with 'fusermount -u {:?}'", opt.mount);
+
     madbfs::log::init(opt.log_level, opt.log_file);
     madbfs::log_i(
         "[madbfs] mount '{}' at '{}' with cache size {} MiB and page size {} KiB",
@@ -81,9 +84,6 @@ int main(int argc, char** argv)
         opt.cachesize,
         opt.pagesize
     );
-
-    fmt::println("[madbfs] mount '{}' [cache={} MiB, page={} KiB]", opt.serial, opt.cachesize, opt.pagesize);
-    fmt::println("[madbfs] unmount with 'fusermount -u {:?}'", opt.mount);
 
     if (::setenv("ANDROID_SERIAL", opt.serial.c_str(), 1) < 0) {
         fmt::println(stderr, "error: failed to set env variable 'ANDROID_SERIAL' ({})", strerror(errno));
@@ -95,7 +95,7 @@ int main(int argc, char** argv)
 
     // on invalid argument (1) and no mount point specified (2)
     if (ret == 1 or ret == 2) {
-        madbfs::args::show_help(argv[0], true);
+        madbfs::args::show_help(argv[0]);
     }
 
     return ret;

@@ -71,7 +71,7 @@ namespace madbfs::args
         // clang-format on
     };
 
-    static constexpr auto madbfs_opt_spec = Array<fuse_opt, 12>{ {
+    static constexpr auto madbfs_opt_spec = std::to_array<fuse_opt>({
         // clang-format off
         { "--serial=%s",     offsetof(MadbfsOpt, serial),     true },
         { "--server=%s",     offsetof(MadbfsOpt, server),     true },
@@ -84,38 +84,37 @@ namespace madbfs::args
         { "--no-server",     offsetof(MadbfsOpt, no_server),  true },
         // clang-format on
         FUSE_OPT_END,
-    } };
+    });
 
-    inline void show_help(const char* prog, bool cerr)
+    inline void show_help(const char* prog)
     {
-        auto out = cerr ? stderr : stdout;
-        fmt::print(out, "usage: {} [options] <mountpoint>\n\n", prog);
+        fmt::print(stdout, "usage: {} [options] <mountpoint>\n\n", prog);
         fmt::print(
-            out,
+            stdout,
             "Options for madbfs:\n"
-            "    --serial=<s>           serial number of the device to mount\n"
+            "    --serial=<str>         serial number of the device to mount\n"
             "                             (you can omit this [detection is similar to adb])\n"
             "                             (will prompt if more than one device exists)\n"
-            "    --server               path to server file\n"
+            "    --server=<path>        path to server file\n"
             "                             (if omitted will search the file automatically)\n"
             "                             (must have the same arch as your phone)\n"
-            "    --log-level=<l>        log level to use\n"
+            "    --log-level=<enum>     log level to use\n"
             "                             (default: warn)\n"
             "                             (values: trace, debug, info, warn, error, critical, off)\n"
-            "    --log-file=<f>         log file to write to\n"
+            "    --log-file=<path>      log file to write to\n"
             "                             (default: '-' for stdout)\n"
-            "    --cache-size=<n>       maximum size of the cache in MiB\n"
+            "    --cache-size=<int>     maximum size of the cache in MiB\n"
             "                             (default: 256)\n"
             "                             (minimum: 128)\n"
-            "                             (value will be rounded to the next power of 2)\n"
-            "    --page-size=<n>        page size for cache & transfer in KiB\n"
+            "                             (value will be rounded up to the next power of 2)\n"
+            "    --page-size=<int>      page size for cache & transfer in KiB\n"
             "                             (default: 128)\n"
             "                             (minimum: 64)\n"
-            "                             (value will be rounded to the next power of 2)\n"
-            "    --ttl                  set the TTL of the stat cache of the filesystem in seconds\n"
+            "                             (value will be rounded up to the next power of 2)\n"
+            "    --ttl=<int>            set the TTL of the stat cache of the filesystem in seconds\n"
             "                             (default: 10)\n"
             "                             (set to negative value to disable it)\n"
-            "    --port=<n>             set port the server listens on\n"
+            "    --port=<int>           set the port number the server will listen on\n"
             "                             (default: 12345)\n"
             "    --no-server            don't launch server\n"
             "                             (will still attempt to connect to specified port)\n"
@@ -267,13 +266,13 @@ namespace madbfs::args
         {
             if (::fuse_parse_cmdline(&args, &opts) != 0) {
                 fmt::println(stderr, "error: failed to parse options\n");
-                show_help(argv[0], true);
+                show_help(argv[0]);
                 ::fuse_opt_free_args(&args);
                 co_return ParseResult{ 1 };
             }
 
             if (opts.show_help) {
-                show_help(argv[0], false);
+                show_help(argv[0]);
                 ::fuse_opt_free_args(&args);
                 ::free(opts.mountpoint);
                 co_return ParseResult{ 0 };
@@ -290,7 +289,7 @@ namespace madbfs::args
 
             if (opts.mountpoint == nullptr) {
                 fmt::println(stderr, "error: no mountpoint specified");
-                show_help(argv[0], true);
+                show_help(argv[0]);
                 ::fuse_opt_free_args(&args);
                 co_return ParseResult{ 2 };
             } else {
@@ -311,7 +310,23 @@ namespace madbfs::args
 
         if (fuse_opt_parse(&args, &madbfs_opt, madbfs_opt_spec.data(), NULL) != 0) {
             fmt::println(stderr, "error: failed to parse options\n");
-            show_help(argv[0], true);
+            show_help(argv[0]);
+            co_return ParseResult{ 1 };
+        }
+
+        if (madbfs_opt.cache_size <= 0) {
+            fmt::println(stderr, "error: cache size must be positive");
+            co_return ParseResult{ 1 };
+        }
+
+        if (madbfs_opt.page_size <= 0) {
+            fmt::println(stderr, "error: page size must be positive");
+            co_return ParseResult{ 1 };
+        }
+
+        if (madbfs_opt.port > std::numeric_limits<u16>::max() or madbfs_opt.port <= 0) {
+            fmt::println("[madbfs] invalid port {}", madbfs_opt.port);
+            ::fuse_opt_free_args(&args);
             co_return ParseResult{ 1 };
         }
 
@@ -391,15 +406,6 @@ namespace madbfs::args
             server = std::filesystem::absolute(madbfs_opt.server);
         }
 
-        auto port = 12345_u16;
-        if (madbfs_opt.port > std::numeric_limits<u16>::max()) {
-            fmt::println("[madbfs] invalid port {}", madbfs_opt.port);
-            ::fuse_opt_free_args(&args);
-            co_return ParseResult{ 1 };
-        } else {
-            port = static_cast<u16>(madbfs_opt.port);
-        }
-
         co_return ParseResult::Opt{
             .opt = {
                 .mount     = std::move(mountpoint),
@@ -410,7 +416,7 @@ namespace madbfs::args
                 .cachesize = std::bit_ceil(std::max(static_cast<usize>(madbfs_opt.cache_size), 128uz)),
                 .pagesize  = std::bit_ceil(std::max(static_cast<usize>(madbfs_opt.page_size), 64uz)),
                 .ttl       = madbfs_opt.ttl,
-                .port      = port,
+                .port      = static_cast<u16>(madbfs_opt.port),
             },
             .args = args,
         };
