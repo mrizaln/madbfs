@@ -112,6 +112,22 @@ namespace madbfs::log
     {
         spdlog::log(to_spdlog_source_loc(loc), level, fmt, std::forward<Args>(args)...);
     }
+
+    template <typename... Args>
+    inline void log_exception(
+        std::exception_ptr   e,
+        Str                  prefix,
+        std::source_location loc = std::source_location::current()
+    )
+    {
+        try {
+            e ? std::rethrow_exception(e) : void();
+        } catch (const std::exception& e) {
+            log_loc(loc, Level::critical, "{}: exception occurred: {}", prefix, e.what());
+        } catch (...) {
+            log_loc(loc, Level::critical, "{}: exception occurred (unknown exception)", prefix);
+        }
+    }
 }
 
 namespace madbfs

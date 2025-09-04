@@ -71,11 +71,6 @@ namespace madbfs::tree
         Expect<void> symlink(path::Path path, Str target);
 
         /**
-         * @brief Safely clean up and sync data.
-         */
-        Await<void> shutdown();
-
-        /**
          * @brief Get root node.
          */
         const Node& root() const { return m_root; }

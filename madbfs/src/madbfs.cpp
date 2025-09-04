@@ -91,13 +91,15 @@ namespace madbfs
     {
         if (m_ipc) {
             auto coro = m_ipc->launch([this](ipc::Op op) { return ipc_handler(op); });
-            async::spawn(m_async_ctx, std::move(coro), async::detached);
+            async::spawn(m_async_ctx, std::move(coro), [](std::exception_ptr e) {
+                log::log_exception(e, "Madbfs");
+            });
         }
     }
 
     Madbfs::~Madbfs()
     {
-        async::block(m_async_ctx, m_tree.shutdown());
+        async::block(m_async_ctx, m_cache.shutdown());
 
         m_work_guard.reset();
         m_async_ctx.stop();

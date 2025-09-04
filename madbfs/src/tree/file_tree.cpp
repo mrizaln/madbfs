@@ -71,7 +71,6 @@ namespace madbfs::tree
         co_return build_then_expire(name, *stat, node::Directory{});
     }
 
-    // TODO: make async
     Expect<Ref<Node>> FileTree::traverse(path::Path path)
     {
         if (path.is_root()) {
@@ -114,8 +113,7 @@ namespace madbfs::tree
             current_path.extend(name);
             if (auto next = current->traverse(name); next.has_value()) {
                 if (auto& node = next->get(); node.expired()) {
-                    auto res = co_await update(node, current_path.as_path());
-                    if (not res) {
+                    if (auto res = co_await update(node, current_path.as_path()); not res) {
                         co_return Unexpect{ res.error() };
                     }
                 }
@@ -134,8 +132,7 @@ namespace madbfs::tree
         current_path.extend(path.filename());
         if (auto found = current->traverse(path.filename()); found.has_value()) {
             if (auto& node = found->get(); node.expired()) {
-                auto res = co_await update(node, current_path.as_path());
-                if (not res) {
+                if (auto res = co_await update(node, current_path.as_path()); not res) {
                     co_return Unexpect{ res.error() };
                 }
             }
@@ -534,10 +531,5 @@ namespace madbfs::tree
         return traverse(path.parent_path())
             .and_then(proj(&Node::symlink, path.filename(), target))
             .transform(sink_void);
-    }
-
-    Await<void> FileTree::shutdown()
-    {
-        co_await m_cache.shutdown();
     }
 }

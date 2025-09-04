@@ -372,15 +372,8 @@ namespace madbfs::rpc
         async::spawn(exec, receive(), [&](std::exception_ptr e, Expect<void> res) {
             m_running = false;
 
-            if (e) {
-                try {
-                    std::rethrow_exception(e);
-                } catch (const std::exception& e) {
-                    log_c("receive: exception occurred: {}", e.what());
-                } catch (...) {
-                    log_c("receive: exception occurred (unknown type)");
-                }
-            } else if (not res) {
+            log::log_exception(e, "receive");
+            if (not res) {
                 auto msg = std::make_error_code(res.error()).message();
                 log_e("receive: finished with error: {}", msg);
             }
@@ -394,15 +387,8 @@ namespace madbfs::rpc
         });
 
         async::spawn(exec, send(), [&](std::exception_ptr e, Expect<void> res) {
-            if (e) {
-                try {
-                    std::rethrow_exception(e);
-                } catch (const std::exception& e) {
-                    log_c("send: exception occurred: {}", e.what());
-                } catch (...) {
-                    log_c("send: exception occurred (unknown type)");
-                }
-            } else if (not res) {
+            log::log_exception(e, "send");
+            if (not res) {
                 auto msg = std::make_error_code(res.error()).message();
                 log_e("send: finished with error: {}", msg);
             }
