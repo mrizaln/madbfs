@@ -337,24 +337,26 @@ namespace madbfs::server
             return status_from_errno(__func__, out, "failed to seek file");
         }
 
-        // TODO: using dynamic buffer size adapted to requested size operation might be better
-        auto buffer = String(256 * 1024, '\0');
+        auto buffer = Array<char, 64 * 1024>{};
 
-        auto copied = 0_i64;
-        auto len    = 0_i64;
+        auto copied = 0_usize;
 
-        while (true) {
-            if (len = ::read(in_fd, buffer.data(), buffer.size()); len <= 0) {
+        auto read    = 0_i64;
+        auto written = 0_i64;
+
+        while (copied < size and written >= 0) {
+            if (read = ::read(in_fd, buffer.data(), buffer.size()); read <= 0) {
                 break;
             }
-            // FIXME: partial write may happen, this operation should handle the remainder
-            if (len = ::write(out_fd, buffer.data(), static_cast<usize>(len)); len < 0) {
-                break;
+            while (read > 0) {
+                if (written = ::write(out_fd, buffer.data(), static_cast<usize>(read)); written < 0) {
+                    break;
+                }
+                copied += static_cast<usize>(written);
             }
-            copied += len;
         }
 
-        if (len < 0) {
+        if (read < 0) {
             return status_from_errno(__func__, out, "failed to copy file");
         }
 

@@ -36,6 +36,7 @@ try {
             fmt::println("{} [--port PORT] [--debug]\n", argv[0]);
             fmt::println("  --port PORT       Port number the server listen on (default: 12345");
             fmt::println("  --debug           Enable debug logging.");
+            fmt::println("  --verbose         Enable verbose logging.");
             return 0;
         } else if (arg == "--debug") {
             log_level = Level::debug;
@@ -69,7 +70,7 @@ try {
     auto context = madbfs::async::Context{};
     auto server  = madbfs::server::Server{ context, port };    // may throw
 
-    madbfs::async::spawn(context, server.run(), madbfs::async::detached);
+    auto future = madbfs::async::spawn(context, server.run(), madbfs::async::use_future);
     auto thread = std::thread{ [&] { context.run(); } };
 
     fmt::println(madbfs::rpc::server_ready_string);
@@ -80,7 +81,8 @@ try {
     server.stop();
     thread.join();
 
-    madbfs::log_i("server exited normally");
+    auto msg = std::make_error_code(future.get().error_or({})).message();
+    madbfs::log_i("server exited normally: {}", msg);
 
     return 0;
 } catch (const std::exception& e) {
