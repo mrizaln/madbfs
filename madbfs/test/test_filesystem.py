@@ -60,6 +60,7 @@ class Environ:
 
 
 @pytest.fixture(params=[True, False])
+# @pytest.fixture(params=[True])
 def environ(request):
     serial = os.environ.get("ANDROID_SERIAL")
     if serial is None:
@@ -530,7 +531,7 @@ def test_filesystem(environ):
 
     serial, abi, mount_point, test_dir, log_file, cmd_base, server = astuple(environ)
 
-    logger.info(f"test is running serial={serial}, abi={abi}, server={server}")
+    logger.info(f"test is [running serial={serial}, abi={abi}, server={server}]")
 
     cmd = cmd_base + [f"--serial={serial}", str(mount_point)]
     proc = Popen(cmd, stdout=PIPE, universal_newlines=True)
@@ -544,9 +545,9 @@ def test_filesystem(environ):
             shutil.rmtree(work_dir)
         work_dir.mkdir(exist_ok=True)
 
-        def call(fn):
+        def call(fn, *args):
             logger.info(f"testing: {fn.__name__}", stacklevel=2)
-            fn(work_dir)
+            fn(work_dir, *args)
 
         call(tst_readdir)
         call(tst_readdir_big)
@@ -560,7 +561,7 @@ def test_filesystem(environ):
         call(tst_unlink)
         call(tst_symlink)
         call(tst_chown)
-        call(tst_utimens)
+        call(tst_utimens, 1000 if server else 1000000000)  # tolerance in nanoseconds
         call(tst_link)
         call(tst_truncate_path)
         call(tst_truncate_fd)
