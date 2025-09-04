@@ -208,7 +208,7 @@ namespace madbfs::tree
     {
     public:
         using Timepoint = SteadyClock::time_point;
-        using Duration  = SteadyClock::duration;
+        using Duration  = std::chrono::seconds;
 
         struct Context
         {
@@ -528,11 +528,11 @@ namespace madbfs::tree
             return as<node::Regular>();
         }
 
-        Node*      m_parent = nullptr;
-        String     m_name   = {};
-        data::Stat m_stat   = {};
+        Node*      m_parent     = nullptr;
+        String     m_name       = {};
+        data::Stat m_stat       = {};
+        Timepoint  m_expiration = Timepoint::max();
         File       m_value;
-        Timepoint  m_expiration;
     };
 }
 

@@ -18,9 +18,9 @@ namespace madbfs::tree
     {
     public:
         using Filler   = std::move_only_function<void(const char* name)>;
-        using Duration = SteadyClock::duration;
+        using Duration = std::chrono::seconds;
 
-        FileTree(connection::Connection& connection, data::Cache& cache);
+        FileTree(connection::Connection& connection, data::Cache& cache, Opt<Duration> ttl);
         ~FileTree() = default;
 
         FileTree(Node&& root)            = delete;
@@ -132,6 +132,6 @@ namespace madbfs::tree
         data::Cache&            m_cache;
         std::atomic<u64>        m_fd_counter       = 0;
         bool                    m_root_initialized = false;
-        Duration                m_ttl              = std::chrono::seconds{ 10 };
+        Opt<Duration>           m_ttl              = std::nullopt;
     };
 }

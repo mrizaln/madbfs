@@ -78,7 +78,11 @@ namespace madbfs::tree
 
     void Node::expires_after(Duration duration)
     {
-        m_expiration = SteadyClock::now() + duration;
+        if (duration == Duration::max()) {
+            m_expiration = Timepoint::max();
+        } else {
+            m_expiration = SteadyClock::now() + duration;
+        }
     }
 
     bool Node::expired() const
@@ -90,6 +94,8 @@ namespace madbfs::tree
         return SteadyClock::now() > m_expiration;
     }
 
+    // TODO: maybe preserve open file handles? it will be hard though, I may need to do it recursively if
+    // directory is changed, idk
     File Node::mutate(File file)
     {
         return std::exchange(m_value, std::move(file));

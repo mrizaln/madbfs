@@ -20,7 +20,15 @@ namespace madbfs
     class Madbfs
     {
     public:
-        Madbfs(Opt<path::Path> server, u16 port, usize max_pages, usize page_size, Str mount_point);
+        Madbfs(
+            Opt<path::Path>               server,
+            u16                           port,
+            usize                         max_pages,
+            usize                         page_size,
+            Str                           mount_point,
+            Opt<tree::FileTree::Duration> ttl
+        );
+
         ~Madbfs();
 
         Madbfs(Madbfs&&)            = delete;

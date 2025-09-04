@@ -6,10 +6,11 @@
 
 namespace madbfs::tree
 {
-    FileTree::FileTree(connection::Connection& connection, data::Cache& cache)
+    FileTree::FileTree(connection::Connection& connection, data::Cache& cache, Opt<Duration> ttl)
         : m_root{ "/", nullptr, {}, node::Directory{} }
         , m_connection{ connection }
         , m_cache{ cache }
+        , m_ttl{ ttl }
     {
     }
 
@@ -21,7 +22,7 @@ namespace madbfs::tree
             return parent    //
                 .build(name, std::move(stat), std::move(file))
                 .transform([&](Node& node) {
-                    node.expires_after(m_ttl);
+                    node.expires_after(m_ttl.value_or(Duration::max()));
                     return std::ref(node);
                 });
         };
@@ -54,7 +55,7 @@ namespace madbfs::tree
             return parent    //
                 .build(name, std::move(stat), std::move(file))
                 .transform([&](Node& node) {
-                    node.expires_after(m_ttl);
+                    node.expires_after(m_ttl.value_or(Duration::max()));
                     return std::ref(node);
                 });
         };
@@ -158,7 +159,7 @@ namespace madbfs::tree
             auto err = new_stat.error();
             if (err != Errc::not_connected and err != Errc::timed_out) {
                 node.mutate(node::Error{ err });
-                node.expires_after(m_ttl);
+                node.expires_after(m_ttl.value_or(Duration::max()));
             }
             co_return Unexpect{ err };
         }
@@ -166,7 +167,7 @@ namespace madbfs::tree
         // no change
         if (old_stat and not detect_modification(old_stat->get(), *new_stat)) {
             log_d("{}: unchanged: {:?}", __func__, path.fullpath());
-            node.expires_after(m_ttl);
+            node.expires_after(m_ttl.value_or(Duration::max()));
             co_return Expect<void>{};
         }
 
@@ -180,13 +181,13 @@ namespace madbfs::tree
             // can choose what suits them best.
             node.set_stat(*new_stat);
             node.mutate(node::Regular{});
-            node.expires_after(m_ttl);
+            node.expires_after(m_ttl.value_or(Duration::max()));
         } break;
         case S_IFDIR: {
             if (S_ISDIR(old_stat->get().mode)) {
                 node.set_stat(*new_stat);
                 node.set_synced(false);
-                node.expires_after(m_ttl);
+                node.expires_after(m_ttl.value_or(Duration::max()));
             }
         } break;
         case S_IFLNK: {
@@ -196,12 +197,12 @@ namespace madbfs::tree
             } else {
                 node.mutate(node::Error{ target.error() });
             }
-            node.expires_after(m_ttl);
+            node.expires_after(m_ttl.value_or(Duration::max()));
         } break;
         default: {
             node.set_stat(*new_stat);
             node.mutate(node::Other{});
-            node.expires_after(m_ttl);
+            node.expires_after(m_ttl.value_or(Duration::max()));
         } break;
         }
 
@@ -257,7 +258,7 @@ namespace madbfs::tree
 
                     auto file  = co_await build_file(name, stat.mode);
                     auto child = std::make_unique<Node>(name, parent, std::move(stat), std::move(file));
-                    child->expires_after(m_ttl);
+                    child->expires_after(m_ttl.value_or(Duration::max()));
                     list.emplace(std::move(child));
                 }
             } else {
@@ -273,7 +274,7 @@ namespace madbfs::tree
 
                         auto file  = co_await build_file(name, stat.mode);
                         auto child = std::make_unique<Node>(name, parent, std::move(stat), std::move(file));
-                        child->expires_after(m_ttl);
+                        child->expires_after(m_ttl.value_or(Duration::max()));
                         list.emplace(std::move(child));
 
                         continue;
@@ -285,13 +286,13 @@ namespace madbfs::tree
 
                         child.set_stat(std::move(stat));
                         child.mutate(co_await build_file(name, stat.mode));
-                        child.expires_after(m_ttl);
+                        child.expires_after(m_ttl.value_or(Duration::max()));
                     } else if (child.expired() and detect_modification(child_stat->get(), stat)) {
                         log_d("{}: [{:?}]   changed: {:?}", __func__, parent->name(), name);
 
                         child.set_stat(std::move(stat));
                         child.mutate(co_await build_file(name, stat.mode));
-                        child.expires_after(m_ttl);
+                        child.expires_after(m_ttl.value_or(Duration::max()));
 
                         co_await m_cache.invalidate_one(child.id(), false);    // should I flush?
                     }
@@ -301,7 +302,9 @@ namespace madbfs::tree
 
                 // remove old entries if doesn't exist in new entries
                 for (auto it = list.begin(); it != list.end();) {
-                    if (not new_list.contains((**it).name())) {
+                    auto name = (**it).name();
+                    if (not new_list.contains(name)) {
+                        log_d("{}: [{:?}]   removed: {:?}", __func__, parent->name(), name);
                         co_await m_cache.invalidate_one((**it).id(), false);    // should I flush
                         it = list.erase(it);
                         continue;

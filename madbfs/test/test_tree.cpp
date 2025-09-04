@@ -282,7 +282,7 @@ int main()
 
         auto connection = mock::DummyConnection{};
         auto cache      = madbfs::data::Cache{ connection, 64 * 1024, 1024 };
-        auto tree       = FileTree{ connection, cache };
+        auto tree       = FileTree{ connection, cache, std::nullopt };
 
         auto io_context = madbfs::async::Context{};
 
