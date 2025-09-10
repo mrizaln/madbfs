@@ -88,7 +88,7 @@ namespace madbfs::data
         for (auto&& res : res) {
             if (not res) {
                 auto msg = std::make_error_code(res.error()).message();
-                log_e("{}: failed to read [{}] {:?}: {}", __func__, id.inner(), path.fullpath(), msg);
+                log_e("{}: failed to read [{}] {:?}: {}", __func__, id.inner(), path, msg);
                 co_return Unexpect{ res.error() };
             }
             read += res.value();
@@ -115,7 +115,7 @@ namespace madbfs::data
         for (auto&& res : res) {
             if (not res) {
                 auto msg = std::make_error_code(res.error()).message();
-                log_e("{}: failed to write [{}] {:?}: {}", __func__, id.inner(), path.fullpath(), msg);
+                log_e("{}: failed to write [{}] {:?}: {}", __func__, id.inner(), path, msg);
                 co_return Unexpect{ res.error() };
             }
             written += res.value();
@@ -135,14 +135,14 @@ namespace madbfs::data
             co_return Expect<void>{};
         }
 
-        log_d("flush: start [id={}|idx={}]", id.inner(), entry->get().pages | sv::keys);
+        const auto& [pages, path, _] = entry->get();
+        log_d("flush: start [id={}|idx={}]", id.inner(), pages | sv::keys);
 
         // TODO: redo parallel
-        for (auto page : entry->get().pages | sv::values) {
+        for (auto page : pages | sv::values) {
             auto res = co_await flush_at(*page, id);
             if (not res) {
-                auto msg  = std::make_error_code(res.error()).message();
-                auto path = entry->get().path.as_path().fullpath();
+                auto msg = std::make_error_code(res.error()).message();
                 log_e("{}: failed to flush [{}] {:?}: {}", __func__, id.inner(), path, msg);
                 co_return Unexpect{ res.error() };
             }
@@ -222,7 +222,7 @@ namespace madbfs::data
     {
         // TODO: wait queue if any
         if (auto found = m_table.find(id); found != m_table.end()) {
-            found->second.path = new_name.into_buf();
+            found->second.path = new_name.owned();
         }
         co_return;
     }
@@ -253,8 +253,7 @@ namespace madbfs::data
         if (auto entry = m_table.extract(id); not entry.empty()) {
             auto& [pages, pathbuf, dirty] = entry.mapped();
             if (dirty and not should_flush) {
-                auto path = pathbuf.as_path().fullpath();
-                log_w("{}: [{}] {:?} is dirty but invalidated without flush!", __func__, id.inner(), path);
+                log_w("{}: [{}] {:?} is dirty but invalidated without flush!", __func__, id.inner(), pathbuf);
             }
             for (auto page : entry.mapped().pages | sv::values) {
                 m_lru.erase(page);
@@ -289,7 +288,7 @@ namespace madbfs::data
         auto entries = m_table.find(id);
         if (entries == m_table.end()) {
             if (path) {
-                auto [p, _] = m_table.emplace(id, LookupEntry{ .pages = {}, .path = path->into_buf() });
+                auto [p, _] = m_table.emplace(id, LookupEntry{ .pages = {}, .path = path->owned() });
                 entries     = p;
             } else {
                 return std::nullopt;
@@ -303,7 +302,7 @@ namespace madbfs::data
         auto found = m_table.find(id);
         assert(found != m_table.end());
 
-        auto path = found->second.path.as_path();
+        auto path = found->second.path.view();
         auto idx  = static_cast<usize>(offset) / m_page_size;
 
         log_d("{}: [id={}|idx={}] cache miss, read from device...", __func__, id.inner(), idx, offset);
@@ -315,7 +314,7 @@ namespace madbfs::data
         auto found = m_table.find(id);
         assert(found != m_table.end());
 
-        auto path = found->second.path.as_path();
+        auto path = found->second.path.view();
         auto idx  = static_cast<usize>(offset) / m_page_size;
 
         log_d("{}: [id={}|idx={}] flush, write to device...", __func__, id.inner(), idx, offset);

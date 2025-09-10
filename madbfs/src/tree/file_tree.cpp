@@ -106,14 +106,14 @@ namespace madbfs::tree
         }
 
         auto* current      = &m_root;
-        auto  current_path = path::PathBuf::root();
+        auto  current_path = path::PathBuf{};
 
         // iterate until parent
         for (auto name : path.parent_path().iter() | sv::drop(1)) {
             current_path.extend(name);
             if (auto next = current->traverse(name); next.has_value()) {
                 if (auto& node = next->get(); node.expired()) {
-                    if (auto res = co_await update(node, current_path.as_path()); not res) {
+                    if (auto res = co_await update(node, current_path); not res) {
                         co_return Unexpect{ res.error() };
                     }
                 }
@@ -121,7 +121,7 @@ namespace madbfs::tree
                 continue;
             }
 
-            auto next = co_await build_directory(*current, current_path.as_path());
+            auto next = co_await build_directory(*current, current_path);
             if (not next) {
                 co_return Unexpect{ next.error() };
             }
@@ -132,19 +132,19 @@ namespace madbfs::tree
         current_path.extend(path.filename());
         if (auto found = current->traverse(path.filename()); found.has_value()) {
             if (auto& node = found->get(); node.expired()) {
-                if (auto res = co_await update(node, current_path.as_path()); not res) {
+                if (auto res = co_await update(node, current_path); not res) {
                     co_return Unexpect{ res.error() };
                 }
             }
             co_return found;
         }
 
-        co_return co_await build(*current, current_path.as_path());
+        co_return co_await build(*current, current_path);
     }
 
     AExpect<void> FileTree::update(Node& node, path::Path path)
     {
-        log_d("{}: {:?}", __func__, path.fullpath());
+        log_d("{}: {:?}", __func__, path);
 
         auto new_stat = co_await m_connection.stat(path);
         auto old_stat = node.stat();
@@ -163,12 +163,12 @@ namespace madbfs::tree
 
         // no change
         if (old_stat and not detect_modification(old_stat->get(), *new_stat)) {
-            log_d("{}: unchanged: {:?}", __func__, path.fullpath());
+            log_d("{}: unchanged: {:?}", __func__, path);
             node.expires_after(m_ttl.value_or(Duration::max()));
             co_return Expect<void>{};
         }
 
-        log_w("{}:   changed: {:?}", __func__, path.fullpath());
+        log_w("{}:   changed: {:?}", __func__, path);
         co_await m_cache.invalidate_one(node.id(), false);    // maybe conditionally flush?
 
         switch (new_stat->mode & S_IFMT) {
@@ -233,7 +233,7 @@ namespace madbfs::tree
             case S_IFREG: co_return node::Regular{};
             case S_IFDIR: co_return node::Directory{};
             case S_IFLNK: {
-                if (auto target = co_await m_connection.readlink(pathbuf.as_path()); target) {
+                if (auto target = co_await m_connection.readlink(pathbuf); target) {
                     co_return node::Link{ std::move(target).value() };
                 } else {
                     co_return node::Error{ target.error() };

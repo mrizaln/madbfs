@@ -84,7 +84,7 @@ namespace
     // NOTE: somehow adb shell needs double escaping
     madbfs::String quote(madbfs::path::Path path)
     {
-        return fmt::format("\"{}\"", path.fullpath());
+        return fmt::format("\"{}\"", path);
     }
 }
 
@@ -138,7 +138,7 @@ namespace madbfs::connection
             return ok_or(parse_file_stat(util::strip(out)), Errc::io_error)
                 .transform([](ParsedStat parsed) { return parsed.stat; })
                 .transform_error([&](auto err) {
-                    log_e("Connection::stat: parsing stat failed [{}]", path.fullpath());
+                    log_e("Connection::stat: parsing stat failed [{}]", path);
                     return err;
                 });
         });
@@ -201,7 +201,7 @@ namespace madbfs::connection
     {
         const auto skip  = fmt::format("skip={}", offset);
         const auto count = fmt::format("count={}", out.size());
-        const auto ifile = fmt::format("if=\"{}\"", path.fullpath());
+        const auto ifile = fmt::format("if=\"{}\"", path);
 
         // `bs` is skipped, relies on `count_bytes`: https://stackoverflow.com/a/40792605/16506263
         auto res = co_await cmd::exec(
@@ -218,7 +218,7 @@ namespace madbfs::connection
     AExpect<usize> AdbConnection::write(path::Path path, Span<const char> in, off_t offset)
     {
         const auto seek  = fmt::format("seek={}", offset);
-        const auto ofile = fmt::format("of=\"{}\"", path.fullpath());
+        const auto ofile = fmt::format("of=\"{}\"", path);
 
         auto in_str = Str{ in.data(), in.size() };
 
@@ -248,11 +248,10 @@ namespace madbfs::connection
                     co_return Unexpect{ Errc::invalid_argument };
                 }
 
-                const auto str = fmt::format("{:%Y%m%d%H%M.%S}{}", tm, time.tv_nsec);
-                log_i("{}: utimens to {}", __func__, str);
+                const auto t = fmt::format("{:%Y%m%d%H%M.%S}{}", tm, time.tv_nsec);
+                log_i("{}: utimens to {}", __func__, t);
 
-                auto res = co_await cmd::exec({ "adb", "shell", "touch", "-c", flag, "-t", str, quote(path) }
-                );
+                auto res = co_await cmd::exec({ "adb", "shell", "touch", "-c", flag, "-t", t, quote(path) });
                 if (not res) {
                     co_return Unexpect{ res.error() };
                 }
@@ -272,9 +271,9 @@ namespace madbfs::connection
     {
         const auto skip  = fmt::format("skip={}", in_off);
         const auto count = fmt::format("count={}", size);
-        const auto ifile = fmt::format("if=\"{}\"", in.fullpath());
+        const auto ifile = fmt::format("if=\"{}\"", in);
         const auto seek  = fmt::format("seek={}", out_off);
-        const auto ofile = fmt::format("of=\"{}\"", out.fullpath());
+        const auto ofile = fmt::format("of=\"{}\"", out);
 
         // count_bytes: https://stackoverflow.com/a/40792605/16506263
         // notrunc    : https://unix.stackexchange.com/a/146923

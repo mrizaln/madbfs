@@ -178,7 +178,7 @@ namespace mock
 
         AExpect<Stats>  statdir(Path) override { co_return Unexpect{ {} }; }
         AExpect<Stat>   stat(Path) override { co_return Stat{}; }
-        AExpect<String> readlink(Path path) override { co_return path.fullpath(); };
+        AExpect<String> readlink(Path path) override { co_return path.str(); };
         AExpect<void>   mknod(Path, mode_t, dev_t) override { co_return Expect<void>{}; }
         AExpect<void>   mkdir(Path, mode_t) override { co_return Expect<void>{}; }
         AExpect<void>   unlink(Path) override { co_return Expect<void>{}; }
@@ -212,12 +212,12 @@ int main()
 
         // NOTE: operations like mknod and mkdir only considers filename
         // NOTE: full path only matter for connection and caching
-        auto dummy = madbfs::path::PathBuf::root();
-        auto path  = madbfs::path::Path::root();
+        auto dummy = madbfs::path::PathBuf{};
+        auto path  = madbfs::path::Path{};
 
         auto make_context = [&](Str name) {
             dummy.extend(name);
-            path = dummy.as_path();
+            path = dummy.view();
             return Node::Context{ connection, cache, counter, path };
         };
 
@@ -263,8 +263,8 @@ int main()
             Node& wife = (co_await work.mknod(make_context("loughshinny <3.txt"), 0, 0)).unwrap();
 
             _ = (co_await work.mknod(make_context("eblana?.mp4"), 0, 0)).unwrap();
-            _ = school.symlink("hehe", work.build_path().as_path().fullpath()).unwrap();
-            _ = hello.symlink("wife", wife.build_path().as_path().fullpath()).unwrap();
+            _ = school.symlink("hehe", work.build_path().str()).unwrap();
+            _ = hello.symlink("wife", wife.build_path().str()).unwrap();
             _ = (co_await bye.mknod(make_context("theresa.txt"), 0, 0)).unwrap();
 
             auto tree_str = fmt::format("\n{}", root);

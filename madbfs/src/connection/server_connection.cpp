@@ -84,10 +84,10 @@ namespace madbfs::connection
             co_return Uniq<ServerConnection>{ new ServerConnection{ port, std::move(*client) } };
         }
 
-        log_i("{}: server path set to {}, pushing server normally", __func__, server->fullpath());
+        log_i("{}: server path set to {}, pushing server normally", __func__, *server);
 
         // push server executable to device
-        if (auto res = co_await cmd::exec({ "adb", "push", server->fullpath(), serv_file }); not res) {
+        if (auto res = co_await cmd::exec({ "adb", "push", *server, serv_file }); not res) {
             auto msg = std::make_error_code(res.error()).message();
             log_e("{}: failed to push 'madbfs-server' to device: {}", __func__, msg);
             co_return Unexpect{ res.error() };
@@ -182,7 +182,7 @@ namespace madbfs::connection
     AExpect<Gen<ParsedStat>> ServerConnection::statdir(path::Path path)
     {
         auto buf  = Vec<u8>{};
-        auto req  = rpc::req::Listdir{ .path = path.fullpath() };
+        auto req  = rpc::req::Listdir{ .path = path };
         auto resp = co_await send_req(buf, req);
         if (not resp) {
             co_return Unexpect{ resp.error() };
@@ -212,7 +212,7 @@ namespace madbfs::connection
     AExpect<data::Stat> ServerConnection::stat(path::Path path)
     {
         auto buf = Vec<u8>{};
-        auto req = rpc::req::Stat{ .path = path.fullpath() };
+        auto req = rpc::req::Stat{ .path = path };
 
         co_return (co_await send_req(buf, req)).transform([](rpc::resp::Stat resp) {
             return data::Stat{
@@ -231,7 +231,7 @@ namespace madbfs::connection
     AExpect<String> ServerConnection::readlink(path::Path path)
     {
         auto buf = Vec<u8>{};
-        auto req = rpc::req::Readlink{ .path = path.fullpath() };
+        auto req = rpc::req::Readlink{ .path = path };
 
         co_return (co_await send_req(buf, req)).transform([&](rpc::resp::Readlink resp) {
             return String{ resp.target };
@@ -241,7 +241,7 @@ namespace madbfs::connection
     AExpect<void> ServerConnection::mknod(path::Path path, mode_t mode, dev_t dev)
     {
         auto buf = Vec<u8>{};
-        auto req = rpc::req::Mknod{ .path = path.fullpath(), .mode = mode, .dev = dev };
+        auto req = rpc::req::Mknod{ .path = path, .mode = mode, .dev = dev };
 
         co_return (co_await send_req(buf, req)).transform(sink_void);
     }
@@ -249,7 +249,7 @@ namespace madbfs::connection
     AExpect<void> ServerConnection::mkdir(path::Path path, mode_t mode)
     {
         auto buf = Vec<u8>{};
-        auto req = rpc::req::Mkdir{ .path = path.fullpath(), .mode = mode };
+        auto req = rpc::req::Mkdir{ .path = path, .mode = mode };
 
         co_return (co_await send_req(buf, req)).transform(sink_void);
     }
@@ -257,7 +257,7 @@ namespace madbfs::connection
     AExpect<void> ServerConnection::unlink(path::Path path)
     {
         auto buf = Vec<u8>{};
-        auto req = rpc::req::Unlink{ .path = path.fullpath() };
+        auto req = rpc::req::Unlink{ .path = path };
 
         co_return (co_await send_req(buf, req)).transform(sink_void);
     }
@@ -265,7 +265,7 @@ namespace madbfs::connection
     AExpect<void> ServerConnection::rmdir(path::Path path)
     {
         auto buf = Vec<u8>{};
-        auto req = rpc::req::Rmdir{ .path = path.fullpath() };
+        auto req = rpc::req::Rmdir{ .path = path };
 
         co_return (co_await send_req(buf, req)).transform(sink_void);
     }
@@ -273,7 +273,7 @@ namespace madbfs::connection
     AExpect<void> ServerConnection::rename(path::Path from, path::Path to, u32 flags)
     {
         auto buf = Vec<u8>{};
-        auto req = rpc::req::Rename{ .from = from.fullpath(), .to = to.fullpath(), .flags = flags };
+        auto req = rpc::req::Rename{ .from = from, .to = to, .flags = flags };
 
         co_return (co_await send_req(buf, req)).transform(sink_void);
     }
@@ -281,7 +281,7 @@ namespace madbfs::connection
     AExpect<void> ServerConnection::truncate(path::Path path, off_t size)
     {
         auto buf = Vec<u8>{};
-        auto req = rpc::req::Truncate{ .path = path.fullpath(), .size = size };
+        auto req = rpc::req::Truncate{ .path = path, .size = size };
 
         co_return (co_await send_req(buf, req)).transform(sink_void);
     }
@@ -289,7 +289,7 @@ namespace madbfs::connection
     AExpect<usize> ServerConnection::read(path::Path path, Span<char> out, off_t offset)
     {
         auto buf = Vec<u8>{};
-        auto req = rpc::req::Read{ .path = path.fullpath(), .offset = offset, .size = out.size() };
+        auto req = rpc::req::Read{ .path = path, .offset = offset, .size = out.size() };
 
         co_return (co_await send_req(buf, req)).transform([&](rpc::resp::Read resp) {
             auto size = std::min(resp.read.size(), out.size());
@@ -302,7 +302,7 @@ namespace madbfs::connection
     {
         auto buf   = Vec<u8>{};
         auto bytes = Span{ reinterpret_cast<const u8*>(in.data()), in.size() };
-        auto req   = rpc::req::Write{ .path = path.fullpath(), .offset = offset, .in = bytes };
+        auto req   = rpc::req::Write{ .path = path, .offset = offset, .in = bytes };
 
         co_return (co_await send_req(buf, req)).transform(proj(&rpc::resp::Write::size));
     }
@@ -310,7 +310,7 @@ namespace madbfs::connection
     AExpect<void> ServerConnection::utimens(path::Path path, timespec atime, timespec mtime)
     {
         auto buf = Vec<u8>{};
-        auto req = rpc::req::Utimens{ .path = path.fullpath(), .atime = atime, .mtime = mtime };
+        auto req = rpc::req::Utimens{ .path = path, .atime = atime, .mtime = mtime };
 
         co_return (co_await send_req(buf, req)).transform(sink_void);
     }
@@ -325,9 +325,9 @@ namespace madbfs::connection
     {
         auto buf = Vec<u8>{};
         auto req = rpc::req::CopyFileRange{
-            .in_path    = in.fullpath(),
+            .in_path    = in,
             .in_offset  = in_off,
-            .out_path   = out.fullpath(),
+            .out_path   = out,
             .out_offset = out_off,
             .size       = size,
         };

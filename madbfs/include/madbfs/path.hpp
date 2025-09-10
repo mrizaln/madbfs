@@ -2,6 +2,8 @@
 
 #include <madbfs-common/aliases.hpp>
 
+#include <fmt/format.h>
+
 namespace madbfs::path
 {
     class PathBuf;
@@ -10,10 +12,10 @@ namespace madbfs::path
      * @class Path
      * @brief Represent a file path in Linux system.
      *
-     * This class is a simple wrapper over the underlying path string. It is like Str where it doesn't
+     * This class is a simple wrapper over the underlying path string. It is like `Str` where it doesn't
      * allocate anything. Default constructed Path points to the root path.
      *
-     * Default constructed PathBuf points to the root path.
+     * Default constructed `Path` points to the root path.
      *
      * This class only handles absolute paths, relative paths should be represented as plain string instead.
      */
@@ -26,55 +28,46 @@ namespace madbfs::path
         /**
          * @brief Default construct a path.
          *
-         * The path will point to root. You can use `root()` static function instead to be more explicit.
+         * The path will point to root.
          */
         constexpr Path() = default;
 
         /**
-         * @brief Create a path that points to root.
+         * @brief Check whether the path points to root.
          */
-        static Path root() { return {}; }
-
         constexpr bool is_root() const { return m_dirname == "/" and m_basename == "/"; }
-        constexpr Str  filename() const { return m_basename; }
-        constexpr Str  parent() const { return m_dirname; }
-        constexpr Str  fullpath() const { return { m_dirname.begin(), m_basename.end() }; }
 
         /**
-         * @brief Create a Path that points to parent as its basename.
+         * @brief Get the filename component of the path.
+         */
+        constexpr Str filename() const { return m_basename; }
+
+        /**
+         * @brief Get the the directory component of the path.
+         *
+         * This operation returns a directory path as if you do `dirname <path>` command. Use `parent_path()`
+         * member function if you want the resulting path as `Path` instead of plain string.
+         */
+        constexpr Str parent() const { return m_dirname; }
+
+        /**
+         * @brief Get the full path as string.
+         */
+        constexpr Str str() const { return { m_dirname.begin(), m_basename.end() }; }
+
+        /**
+         * @brief Create a `Path` that points to parent as its basename.
          *
          * @return New Path.
          */
-        constexpr Path parent_path() const
-        {
-            if (m_dirname == "/") {
-                return Path{};
-            }
-
-            auto base_start = m_dirname.size();
-            while (m_dirname[--base_start] != '/') { }
-
-            auto dir_end = base_start;
-            while (dir_end > 0 and m_dirname[dir_end] == '/') {
-                --dir_end;
-            }
-
-            auto begin = m_dirname.begin();
-            auto end   = m_dirname.end();
-
-            if (dir_end == 0) {
-                return { { begin, begin + base_start + 1 }, { begin + base_start + 1, end } };
-            }
-
-            return { { begin, begin + dir_end + 1 }, { begin + base_start + 1, end } };
-        }
+        constexpr Path parent_path() const;
 
         /**
          * @brief Create a new copy of the path and extend it with a name.
          *
          * @param name The name to extend with.
          *
-         * @return A new PathBuf if extension is successful, std::nullopt otherwise.
+         * @return A new `PathBuf` if extension is successful, `std::nullopt` otherwise.
          */
         Opt<PathBuf> extend_copy(Str name) const;
 
@@ -84,9 +77,16 @@ namespace madbfs::path
         Gen<Str> iter() const;
 
         /**
-         * @brief Create a PathBuf from this Path.
+         * @brief Create a `PathBuf` from this `Path`.
          */
-        PathBuf into_buf() const;
+        PathBuf owned() const;
+
+        /**
+         * @brief Convert `Path` into plain string.
+         *
+         * Same as calling `str()`.
+         */
+        constexpr operator Str() const { return str(); }
 
     private:
         constexpr Path(Str dirname, Str name)
@@ -103,7 +103,7 @@ namespace madbfs::path
      * @class PathBuf
      * @brief Represent a file path in Linux system that owns its path buffer.
      *
-     * Default constructed PathBuf points to the root path.
+     * Default constructed `PathBuf` points to the root path.
      *
      * This class only handles absolute paths, relative paths should be represented as plain string instead.
      */
@@ -116,14 +116,39 @@ namespace madbfs::path
         /**
          * @brief Default construct a path.
          *
-         * The path will point to root. You can use `root()` static function instead to be more explicit.
+         * The path will point to root.
          */
         PathBuf() = default;
 
         /**
-         * @brief Create a path that points to root.
+         * @brief Check whether the path points to root.
          */
-        static PathBuf root() { return {}; }
+        bool is_root() const { return m_buf == "/"; }
+
+        /**
+         * @brief Get the filename component of the path.
+         */
+        Str filename() const { return { m_buf.data() + m_basename_offset, m_basename_size }; }
+
+        /**
+         * @brief Get the the directory component of the path.
+         *
+         * This operation returns a directory path as if you do `dirname <path>` command. Use `parent_path()`
+         * member function if you want the resulting path as `Path` instead of plain string.
+         */
+        Str parent() const { return { m_buf.data(), m_parent_size }; }
+
+        /**
+         * @brief Get the full path as string.
+         */
+        Str str() const { return m_buf; }
+
+        /**
+         * @brief Create a `Path` that points to parent as its basename.
+         *
+         * @return New Path.
+         */
+        Path parent_path() const { return view().parent_path(); }
 
         /**
          * @brief Rename the filename.
@@ -154,18 +179,35 @@ namespace madbfs::path
          *
          * @param name The name to extend with.
          *
-         * @return A new PathBuf if extension is successful, std::nullopt otherwise.
+         * @return A new `PathBuf` if extension is successful, `std::nullopt` otherwise.
          */
         Opt<PathBuf> extend_copy(Str name) const;
+
+        /**
+         * @brief Creates generator that iterates over the path components from root.
+         */
+        Gen<Str> iter() const;
 
         /**
          * @brief Creates a `Path` from `PathBuf`.
          *
          * The backing `PathBuf` must outlive the constructed `Path`.
          */
-        Path as_path() const;
+        Path view() const;
 
-        operator Path() const { return as_path(); }
+        /**
+         * @brief Convert `PathBuf` into `Path`.
+         *
+         * Same as calling `view()`, same rules apply as well.
+         */
+        operator Path() const& { return view(); }
+
+        /**
+         * @brief Convert `PathBuf` into plain string.
+         *
+         * Same as calling str, has same rule as `view()`.
+         */
+        operator Str() const& { return str(); }
 
     private:
         String m_buf             = "/";
@@ -181,6 +223,54 @@ namespace madbfs::path
      * Repeating '/' on the leading and trailing edge are ignored. If the repeating '/' is on the middle
      * however, it will be preserved.
      */
+    constexpr Opt<Path> create(Str path);
+
+    /**
+     * @brief Create a PathBuf from a string and owns the buffer.
+     *
+     * @param path_str The path to create from.
+     */
+    Opt<PathBuf> create_buf(String&& path_str);
+
+    /**
+     * @brief Resolve path relative to parent.
+     *
+     * @param parent Reference path.
+     * @param path Path to be resolved.
+     */
+    PathBuf resolve(madbfs::path::Path parent, madbfs::Str path);
+}
+
+namespace madbfs::path::inline literals
+{
+    namespace detail
+    {
+        template <usize N>
+        struct FixedStr
+        {
+            char data[N]{};
+            constexpr FixedStr() = default;
+            constexpr FixedStr(const char (&str)[N]) { sr::copy_n(str, N, data); }
+            constexpr Str str() const { return { data, N - 1 }; }
+        };
+    }
+
+    /**
+     * @brief Create a path at compile-time.
+     */
+    template <detail::FixedStr Str>
+    consteval Path operator""_path()
+    {
+        if (auto path = create(Str.str()); path.has_value()) {
+            return *path;
+        }
+        throw std::invalid_argument{ "Invalid path" };
+    }
+}
+
+// impl
+namespace madbfs::path
+{
     constexpr Opt<Path> create(Str path)
     {
         if (path.empty() or path.front() != '/') {
@@ -232,46 +322,48 @@ namespace madbfs::path
         return Path{ path.substr(0, dirname_end), path.substr(basename_start) };
     }
 
-    /**
-     * @brief Create a PathBuf from a string and owns the buffer.
-     *
-     * @param path_str The path to create from.
-     */
-    Opt<PathBuf> create_buf(String&& path_str);
-
-    /**
-     * @brief Resolve path relative to parent.
-     *
-     * @param parent Reference path.
-     * @param path Path to be resolved.
-     */
-    PathBuf resolve(madbfs::path::Path parent, madbfs::Str path);
-
-}
-
-namespace madbfs::path::inline literals
-{
-    namespace detail
+    constexpr Path Path::parent_path() const
     {
-        template <usize N>
-        struct FixedStr
-        {
-            char data[N]{};
-            constexpr FixedStr() = default;
-            constexpr FixedStr(const char (&str)[N]) { sr::copy_n(str, N, data); }
-            constexpr Str str() const { return { data, N - 1 }; }
-        };
-    }
-
-    /**
-     * @brief Create a path at compile-time.
-     */
-    template <detail::FixedStr Str>
-    consteval Path operator""_path()
-    {
-        if (auto path = create(Str.str()); path.has_value()) {
-            return *path;
+        if (m_dirname == "/") {
+            return Path{};
         }
-        throw std::invalid_argument{ "Invalid path" };
+
+        auto base_start = m_dirname.size();
+        while (m_dirname[--base_start] != '/') { }
+
+        auto dir_end = base_start;
+        while (dir_end > 0 and m_dirname[dir_end] == '/') {
+            --dir_end;
+        }
+
+        auto begin = m_dirname.begin();
+        auto end   = m_dirname.end();
+
+        if (dir_end == 0) {
+            return { { begin, begin + base_start + 1 }, { begin + base_start + 1, end } };
+        }
+
+        return { { begin, begin + dir_end + 1 }, { begin + base_start + 1, end } };
     }
 }
+
+template <>
+struct fmt::formatter<madbfs::path::Path> : fmt::formatter<madbfs::Str>
+{
+    auto format(const madbfs::path::Path& path, auto& ctx) const
+    {
+        return fmt::formatter<madbfs::Str>::format(path.str(), ctx);
+    }
+};
+
+template <>
+struct fmt::formatter<madbfs::path::PathBuf> : fmt::formatter<madbfs::Str>
+{
+    auto format(const madbfs::path::PathBuf& path, auto& ctx) const
+    {
+        return fmt::formatter<madbfs::Str>::format(path.str(), ctx);
+    }
+};
+
+static_assert(fmt::formattable<madbfs::path::Path>);
+static_assert(fmt::formattable<madbfs::path::PathBuf>);

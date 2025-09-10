@@ -57,7 +57,7 @@ namespace madbfs::args
         struct Opt  { ParsedOpt opt; fuse_args args; };
         struct Exit { int status; };
 
-        ParseResult() : result{ Exit{ 0} } {}
+        ParseResult() : result{ Exit{ 0 } } {}
         ParseResult(Opt opt)    : result{ std::move(opt) } {}
         ParseResult(int status) : result{ Exit{ status } } {}
 

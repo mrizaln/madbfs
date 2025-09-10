@@ -49,7 +49,7 @@ namespace madbfs::path
 
         auto pathbuf = PathBuf{};
 
-        pathbuf.m_buf = fullpath();
+        pathbuf.m_buf = str();
 
         pathbuf.m_parent_size     = pathbuf.m_buf.size();
         pathbuf.m_basename_size   = name.size();
@@ -67,14 +67,14 @@ namespace madbfs::path
 
     Gen<Str> Path::iter() const
     {
-        return iter_path_impl(fullpath());
+        return iter_path_impl(str());
     }
 
-    PathBuf Path::into_buf() const
+    PathBuf Path::owned() const
     {
         auto pathbuf = PathBuf{};
 
-        pathbuf.m_buf             = fullpath();
+        pathbuf.m_buf             = str();
         pathbuf.m_parent_size     = m_dirname.size();
         pathbuf.m_basename_size   = m_basename.size();
         pathbuf.m_basename_offset = static_cast<usize>(m_basename.begin() - m_dirname.begin());
@@ -128,13 +128,22 @@ namespace madbfs::path
         return std::nullopt;
     }
 
-    Path PathBuf::as_path() const
+    Path PathBuf::view() const
     {
         return {
             { m_buf.data(), m_parent_size },
             { m_buf.data() + m_basename_offset, m_basename_size },
         };
     }
+
+    Gen<Str> PathBuf::iter() const
+    {
+        return iter_path_impl(str());
+    }
+}
+
+namespace madbfs::path
+{
 
     Opt<PathBuf> create_buf(String&& path_str)
     {
@@ -157,7 +166,7 @@ namespace madbfs::path
     {
         auto parents = madbfs::Vec<madbfs::Str>{};
         if (path.front() != '/') {
-            parents = madbfs::util::split(parent.fullpath(), '/');
+            parents = madbfs::util::split(parent.str(), '/');
         }
 
         madbfs::util::StringSplitter{ path, '/' }.while_next([&](madbfs::Str str) {
@@ -173,7 +182,7 @@ namespace madbfs::path
         });
 
         if (parents.empty()) {
-            return PathBuf::root();
+            return PathBuf{};
         }
 
         auto resolved = madbfs::String{};

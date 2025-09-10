@@ -291,7 +291,7 @@ int main()
 
         auto parent = path->parent_path();
 
-        expect(path->parent() == parent.fullpath()) << test;
+        expect(path->parent() == parent.str()) << test;
         expect(test.upper_parent == parent.parent()) << test;
         expect(test.upper_filename == parent.filename()) << test;
 
@@ -305,9 +305,9 @@ int main()
             // full path may be modified: repeating '/' is truncated e.g "/home///user -> "/home/user"
             auto full = fmt::format("{}{}{}", path->parent(), parent.is_root() ? "" : "/", path->filename());
 
-            expect(new_path->as_path().fullpath() == full) << test;
-            expect(new_path->as_path().parent() == path->parent()) << test;
-            expect(new_path->as_path().filename() == path->filename()) << test;
+            expect(new_path->str() == full) << test;
+            expect(new_path->parent() == path->parent()) << test;
+            expect(new_path->filename() == path->filename()) << test;
         };
     } | constructible_testcases;
 
@@ -340,12 +340,12 @@ int main()
         auto path = "/home/user/projects/cpp/madbfs"_path;
         expect(path.parent() == "/home/user/projects/cpp");
         expect(path.filename() == "madbfs");
-        expect(path.fullpath() == "/home/user/projects/cpp/madbfs");
+        expect(path.str() == "/home/user/projects/cpp/madbfs");
 
         path = "/////home//user/projects////cpp/madbfs////"_path;
         expect(path.parent() == "/home//user/projects////cpp");
         expect(path.filename() == "madbfs");
-        expect(path.fullpath() == "/home//user/projects////cpp/madbfs");
+        expect(path.str() == "/home//user/projects////cpp/madbfs");
 
         // path = "C:/Users/user0/Documents/Work and School/D"_path;      // won't compile
     };
@@ -356,12 +356,12 @@ int main()
         expect(path.has_value()) << "can't construct: " << test.input;
 
         if (path.has_value()) {
-            auto path_buf = path->into_buf();
+            auto path_buf = path->owned();
 
-            expect(test.parent == path_buf.as_path().parent()) << test;
-            expect(test.filename == path_buf.as_path().filename()) << test;
+            expect(test.parent == path_buf.parent()) << test;
+            expect(test.filename == path_buf.filename()) << test;
 
-            expect((void*)path->fullpath().data() != (void*)path_buf.as_path().fullpath().data())
+            expect((void*)path->str().data() != (void*)path_buf.str().data())
                 << "Address should be different: " << test;
         }
     } | constructible_testcases;
