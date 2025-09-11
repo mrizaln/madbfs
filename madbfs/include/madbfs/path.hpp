@@ -1,12 +1,21 @@
 #pragma once
 
 #include <madbfs-common/aliases.hpp>
+#include <madbfs-common/util/slice.hpp>
 
 #include <fmt/format.h>
 
+// NOTE: I ended up reimplementing `std::filesystem::path` lol, but since std is missing the `path_view` I
+// think it's worth it. Also I want to avoid mistaking the path used by the filesystem as path in the host.
+// Creating a separate encapsulation helps avoid that.
+
 namespace madbfs::path
 {
+    using util::Slice;
+
+    class Path;
     class PathBuf;
+    struct SemiPath;
 
     /**
      * @class Path
@@ -23,24 +32,24 @@ namespace madbfs::path
     {
     public:
         friend class PathBuf;
-        friend constexpr Opt<Path> create(Str path);
+        friend Opt<SemiPath> create(Str path);
 
         /**
          * @brief Default construct a path.
          *
          * The path will point to root.
          */
-        constexpr Path() = default;
+        Path() = default;
 
         /**
          * @brief Check whether the path points to root.
          */
-        constexpr bool is_root() const { return m_dirname == "/" and m_basename == "/"; }
+        bool is_root() const { return m_components.empty(); }
 
         /**
          * @brief Get the filename component of the path.
          */
-        constexpr Str filename() const { return m_basename; }
+        Str filename() const { return is_root() ? "/" : m_components.back().to_str(m_path); }
 
         /**
          * @brief Get the the directory component of the path.
@@ -48,19 +57,32 @@ namespace madbfs::path
          * This operation returns a directory path as if you do `dirname <path>` command. Use `parent_path()`
          * member function if you want the resulting path as `Path` instead of plain string.
          */
-        constexpr Str parent() const { return m_dirname; }
+        Str parent() const
+        {
+            if (is_root() or m_components.size() == 1) {
+                return "/";
+            }
 
-        /**
-         * @brief Get the full path as string.
-         */
-        constexpr Str str() const { return { m_dirname.begin(), m_basename.end() }; }
+            const auto parent = m_components[m_components.size() - 2];
+            const auto size   = parent.offset + parent.size;
+
+            return { m_path.data(), size };
+        }
 
         /**
          * @brief Create a `Path` that points to parent as its basename.
          *
          * @return New Path.
          */
-        constexpr Path parent_path() const;
+        Path parent_path() const
+        {
+            return is_root() ? *this : Path{ parent(), { m_components.begin(), m_components.size() - 1 } };
+        }
+
+        /**
+         * @brief Get the full path as string.
+         */
+        Str str() const { return m_path; }
 
         /**
          * @brief Create a new copy of the path and extend it with a name.
@@ -72,31 +94,34 @@ namespace madbfs::path
         Opt<PathBuf> extend_copy(Str name) const;
 
         /**
-         * @brief Creates generator that iterates over the path components from root.
-         */
-        Gen<Str> iter() const;
-
-        /**
          * @brief Create a `PathBuf` from this `Path`.
          */
         PathBuf owned() const;
+
+        /**
+         * @brief Iterate the path components.
+         *
+         * The root path '/' is not included in the components. A path that points to root will have zero
+         * components.
+         */
+        FRange auto iter() const { return m_components | sv::transform(proj(&Slice::to_str, m_path)); }
 
         /**
          * @brief Convert `Path` into plain string.
          *
          * Same as calling `str()`.
          */
-        constexpr operator Str() const { return str(); }
+        operator Str() const { return str(); }
 
     private:
-        constexpr Path(Str dirname, Str name)
-            : m_dirname{ dirname }
-            , m_basename{ name }
+        Path(Str path, Span<const Slice> components)
+            : m_path{ path }
+            , m_components{ components }
         {
         }
 
-        Str m_dirname  = "/";
-        Str m_basename = "/";
+        Str               m_path       = "/";
+        Span<const Slice> m_components = {};    // zero if points to root
     };
 
     /**
@@ -123,12 +148,12 @@ namespace madbfs::path
         /**
          * @brief Check whether the path points to root.
          */
-        bool is_root() const { return m_buf == "/"; }
+        bool is_root() const { return m_components.empty(); }
 
         /**
          * @brief Get the filename component of the path.
          */
-        Str filename() const { return { m_buf.data() + m_basename_offset, m_basename_size }; }
+        Str filename() const { return is_root() ? "/" : m_components.back().to_str(m_path); }
 
         /**
          * @brief Get the the directory component of the path.
@@ -136,19 +161,32 @@ namespace madbfs::path
          * This operation returns a directory path as if you do `dirname <path>` command. Use `parent_path()`
          * member function if you want the resulting path as `Path` instead of plain string.
          */
-        Str parent() const { return { m_buf.data(), m_parent_size }; }
+        Str parent() const
+        {
+            if (is_root() or m_components.size() == 1) {
+                return "/";
+            }
 
-        /**
-         * @brief Get the full path as string.
-         */
-        Str str() const { return m_buf; }
+            const auto parent = m_components[m_components.size() - 2];
+            const auto size   = parent.offset + parent.size;
+
+            return { m_path.data(), size };
+        }
 
         /**
          * @brief Create a `Path` that points to parent as its basename.
          *
          * @return New Path.
          */
-        Path parent_path() const { return view().parent_path(); }
+        Path parent_path() const
+        {
+            return is_root() ? *this : Path{ parent(), { m_components.begin(), m_components.size() - 1 } };
+        }
+
+        /**
+         * @brief Get the full path as string.
+         */
+        Str str() const { return m_path; }
 
         /**
          * @brief Rename the filename.
@@ -184,16 +222,19 @@ namespace madbfs::path
         Opt<PathBuf> extend_copy(Str name) const;
 
         /**
-         * @brief Creates generator that iterates over the path components from root.
-         */
-        Gen<Str> iter() const;
-
-        /**
          * @brief Creates a `Path` from `PathBuf`.
          *
          * The backing `PathBuf` must outlive the constructed `Path`.
          */
         Path view() const;
+
+        /**
+         * @brief Iterate the path components.
+         *
+         * The root path '/' is not included in the components. A path that points to root will have zero
+         * components.
+         */
+        FRange auto iter() const { return m_components | sv::transform(proj(&Slice::to_str, m_path)); }
 
         /**
          * @brief Convert `PathBuf` into `Path`.
@@ -210,23 +251,45 @@ namespace madbfs::path
         operator Str() const& { return str(); }
 
     private:
-        String m_buf             = "/";
-        usize  m_parent_size     = 1;
-        usize  m_basename_size   = 1;
-        usize  m_basename_offset = 0;
+        PathBuf(String&& path, Vec<Slice>&& components)
+            : m_path{ std::move(path) }
+            , m_components{ std::move(components) }
+        {
+        }
+
+        String     m_path       = "/";
+        Vec<Slice> m_components = {};
+    };
+
+    /**
+     * @class SemiPath
+     * @brief Like `PathBuf` but only own the components vector, not the path string.
+     *
+     * This struct is convertible to `Path` to make it easier to use in place of `Path` as arguments.
+     */
+    struct SemiPath
+    {
+        Vec<Slice> components = {};
+        Path       path       = {};
+
+        operator Path() const& { return path; }
     };
 
     /**
      * @brief Create a Path from a string.
      *
+     * @param path Path string.
+     *
      * If the path pased into this function is not absolute or empty, it will return `std::nullopt`.
      * Repeating '/' on the leading and trailing edge are ignored. If the repeating '/' is on the middle
      * however, it will be preserved.
      */
-    constexpr Opt<Path> create(Str path);
+    Opt<SemiPath> create(Str path);
 
     /**
      * @brief Create a PathBuf from a string and owns the buffer.
+     *
+     * @param path Path string.
      *
      * @param path_str The path to create from.
      */
@@ -258,92 +321,13 @@ namespace madbfs::path::inline literals
     /**
      * @brief Create a path at compile-time.
      */
-    template <detail::FixedStr Str>
-    consteval Path operator""_path()
+    template <detail::FixedStr StrValue>
+    PathBuf operator""_path()
     {
-        if (auto path = create(Str.str()); path.has_value()) {
-            return *path;
+        if (auto path = create_buf(String{ StrValue.str() }); path.has_value()) {
+            return std::move(path).value();
         }
         throw std::invalid_argument{ "Invalid path" };
-    }
-}
-
-// impl
-namespace madbfs::path
-{
-    constexpr Opt<Path> create(Str path)
-    {
-        if (path.empty() or path.front() != '/') {
-            return std::nullopt;
-        }
-
-        while (path.size() > 1 and path.back() == '/') {
-            path.remove_suffix(1);
-        }
-        while (path.size() > 2 and path[0] == '/' and path[1] == '/') {
-            path.remove_prefix(1);
-        }
-
-        if (path == "/") {
-            return Path{ "/", "/" };
-        }
-
-        auto prev    = 1uz;
-        auto current = 1uz;
-
-        while (current < path.size()) {
-            while (current < path.size() and path[current] == '/') {
-                ++current;
-            }
-
-            // current = path.find('/', current);    // can't compile in gcc somehow??
-            // if (current == Str::npos) {
-            //     break;
-            // }
-            // prev = current;
-
-            auto it = sr::find(path | sv::drop(current), '/');
-            if (it == path.end()) {
-                current = path.size();
-                break;
-            }
-            current = static_cast<usize>(it - path.begin());
-            prev    = current;
-        }
-
-        const auto dirname_end = prev;
-
-        // in case the basename contains repeated '/' like in the case '/home/user/documents/////note.md'
-        auto basename_start = prev;
-        while (path[basename_start] == '/') {
-            ++basename_start;
-        }
-
-        return Path{ path.substr(0, dirname_end), path.substr(basename_start) };
-    }
-
-    constexpr Path Path::parent_path() const
-    {
-        if (m_dirname == "/") {
-            return Path{};
-        }
-
-        auto base_start = m_dirname.size();
-        while (m_dirname[--base_start] != '/') { }
-
-        auto dir_end = base_start;
-        while (dir_end > 0 and m_dirname[dir_end] == '/') {
-            --dir_end;
-        }
-
-        auto begin = m_dirname.begin();
-        auto end   = m_dirname.end();
-
-        if (dir_end == 0) {
-            return { { begin, begin + base_start + 1 }, { begin + base_start + 1, end } };
-        }
-
-        return { { begin, begin + dir_end + 1 }, { begin + base_start + 1, end } };
     }
 }
 

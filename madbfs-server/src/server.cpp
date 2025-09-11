@@ -4,6 +4,7 @@
 #include <madbfs-common/log.hpp>
 #include <madbfs-common/rpc.hpp>
 #include <madbfs-common/util/overload.hpp>
+#include <madbfs-common/util/slice.hpp>
 
 #include <dirent.h>
 #include <linux/fs.h>
@@ -52,17 +53,11 @@ namespace madbfs::server
             }
         };
 
-        struct Slice
-        {
-            isize offset;
-            usize size;
-        };
-
         // WARN: invalidates strings and spans from argument
         auto& buf = m_buffer;
         buf.clear();
 
-        auto slices = Vec<Pair<Slice, rpc::resp::Stat>>{};
+        auto slices = Vec<Pair<util::Slice, rpc::resp::Stat>>{};
         auto dirfd  = ::dirfd(dir);
 
         while (auto entry = ::readdir(dir)) {
@@ -82,7 +77,7 @@ namespace madbfs::server
 
             buf.insert(buf.end(), name_u8, name_u8 + name.size());
 
-            auto slice = Slice{ static_cast<isize>(off), name.size() };
+            auto slice = util::Slice{ off, name.size() };
             auto stat  = rpc::resp::Stat{
                  .size  = static_cast<off_t>(filestat.st_size),
                  .links = static_cast<nlink_t>(filestat.st_nlink),

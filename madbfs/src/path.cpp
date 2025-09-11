@@ -4,41 +4,6 @@
 
 #include <cassert>
 
-namespace
-{
-    madbfs::Gen<madbfs::Str> iter_path_impl(madbfs::Str path)
-    {
-        assert(not path.empty() and path.front() == '/');
-        co_yield "/";
-
-        auto index = 1uz;
-
-        while (index < path.size()) {
-            while (index < path.size() and path[index] == '/') {
-                ++index;
-            }
-            if (index >= path.size()) {
-                co_return;
-            }
-
-            auto it = madbfs::sr::find(path | madbfs::sv::drop(index), '/');
-            if (it == path.end()) {
-                auto res = path.substr(index);
-                co_yield res;
-                co_return;
-            }
-
-            auto pos = static_cast<std::size_t>(it - path.begin());
-            auto res = path.substr(index, pos - index);
-
-            index = pos + 1;
-            co_yield res;
-        }
-    }
-}
-
-// TODO: verify offsets if PathBuf is root
-
 namespace madbfs::path
 {
     Opt<PathBuf> Path::extend_copy(Str name) const
@@ -47,39 +12,17 @@ namespace madbfs::path
             return std::nullopt;
         }
 
-        auto pathbuf = PathBuf{};
+        auto path = owned();
+        path.extend(name);
 
-        pathbuf.m_buf = str();
-
-        pathbuf.m_parent_size     = pathbuf.m_buf.size();
-        pathbuf.m_basename_size   = name.size();
-        pathbuf.m_basename_offset = pathbuf.m_buf.size();
-
-        if (not is_root()) {
-            pathbuf.m_basename_offset += 1;
-            pathbuf.m_buf             += '/';
-        }
-
-        pathbuf.m_buf += name;
-
-        return std::move(pathbuf);
-    }
-
-    Gen<Str> Path::iter() const
-    {
-        return iter_path_impl(str());
+        return path;
     }
 
     PathBuf Path::owned() const
     {
-        auto pathbuf = PathBuf{};
-
-        pathbuf.m_buf             = str();
-        pathbuf.m_parent_size     = m_dirname.size();
-        pathbuf.m_basename_size   = m_basename.size();
-        pathbuf.m_basename_offset = static_cast<usize>(m_basename.begin() - m_dirname.begin());
-
-        return pathbuf;
+        auto path       = String{ m_path };
+        auto components = Vec<Slice>{ m_components.begin(), m_components.end() };
+        return { std::move(path), std::move(components) };
     }
 }
 
@@ -89,13 +32,13 @@ namespace madbfs::path
     {
         if (name.empty() or name.contains('/') or name == "." or name == "..") {
             return false;
-        } else if (m_buf == "/") {
+        } else if (is_root()) {
             return false;
         }
 
-        m_buf.resize(m_basename_offset);
-        m_buf           += name;
-        m_basename_size  = name.size();
+        auto& back = m_components.back();
+        m_path.replace(back.offset, back.size, name);
+        back.size = name.size();
 
         return true;
     }
@@ -106,15 +49,13 @@ namespace madbfs::path
             return false;
         }
 
-        m_parent_size     = m_buf.size();
-        m_basename_size   = name.size();
-        m_basename_offset = m_buf.size();
-
-        if (m_buf.size() != 1 or m_buf[0] != '/') {
-            m_basename_offset += 1;
-            m_buf             += '/';
+        if (not is_root()) {
+            m_path.push_back('/');
         }
-        m_buf += name;
+
+        auto offset = m_path.size();
+        m_path.append(name);
+        m_components.emplace_back(offset, name.size());
 
         return true;
     }
@@ -130,36 +71,102 @@ namespace madbfs::path
 
     Path PathBuf::view() const
     {
-        return {
-            { m_buf.data(), m_parent_size },
-            { m_buf.data() + m_basename_offset, m_basename_size },
-        };
-    }
-
-    Gen<Str> PathBuf::iter() const
-    {
-        return iter_path_impl(str());
+        return { m_path, m_components };
     }
 }
 
 namespace madbfs::path
 {
-
-    Opt<PathBuf> create_buf(String&& path_str)
+    // returns components and the cleaned path as slice
+    Opt<Pair<Vec<Slice>, Slice>> split_components(Str path)
     {
-        auto path = create(path_str);
-        if (not path.has_value()) {
+        if (path.empty() or path.front() != '/') {
             return std::nullopt;
         }
 
-        auto pathbuf = PathBuf{};
+        while (path.size() > 1 and path.back() == '/') {
+            path.remove_suffix(1);
+        }
 
-        pathbuf.m_buf             = std::move(path_str);
-        pathbuf.m_parent_size     = path->parent().size();
-        pathbuf.m_basename_size   = path->filename().size();
-        pathbuf.m_basename_offset = static_cast<usize>(path->filename().begin() - path->parent().begin());
+        auto offset_prefix = 0uz;
+        while (path.size() > 2 and path[0] == '/' and path[1] == '/') {
+            path.remove_prefix(1);
+            ++offset_prefix;
+        }
 
-        return std::move(pathbuf);
+        if (path == "/") {
+            return Pair{ Vec<Slice>{}, Slice{} };
+        }
+
+        auto components = Vec<Slice>{};
+
+        auto prev = 1uz;
+
+        while (prev < path.size()) {
+            auto current = prev;
+            while (current < path.size() and path[current] == '/') {
+                ++current;
+            }
+
+            // current = path.find('/', current);    // can't compile in gcc somehow??
+            // if (current == Str::npos) {
+            //     break;
+            // }
+            // prev = current;
+
+            auto it = sr::find(path | sv::drop(current), '/');
+            if (it == path.end()) {
+                break;
+            }
+
+            auto next = static_cast<usize>(it - path.begin());
+            components.emplace_back(current, next - current);
+
+            prev = next;
+        }
+
+        // in case the basename contains repeated '/' like in the case '/home/user/documents/////note.md'
+        auto basename_start = prev;
+        while (path[basename_start] == '/') {
+            ++basename_start;
+        }
+
+        components.emplace_back(basename_start, path.size() - basename_start);
+
+        return Pair{ std::move(components), Slice{ offset_prefix, path.size() } };
+    }
+
+    Opt<SemiPath> create(Str path)
+    {
+        auto split = split_components(path);
+        if (not split) {
+            return std::nullopt;
+        }
+
+        auto&& [comps, slice] = *split;
+        if (comps.empty()) {
+            return SemiPath{};
+        }
+
+        auto path_path = Path{ slice.to_str(path), comps };
+        return SemiPath{ std::move(comps), std::move(path_path) };
+    }
+
+    Opt<PathBuf> create_buf(String&& path_str)
+    {
+        auto split = split_components(path_str);
+        if (not split) {
+            return std::nullopt;
+        }
+
+        auto&& [comps, slice] = *split;
+        if (comps.empty()) {
+            path_str = "/";
+        } else {
+            slice.keep_slice(path_str);
+        }
+
+        return PathBuf{ std::move(path_str), std::move(comps) };
     }
 
     PathBuf resolve(madbfs::path::Path parent, madbfs::Str path)

@@ -79,7 +79,7 @@ namespace madbfs::tree
 
         auto* current = &m_root;
 
-        for (auto name : path.iter() | sv::drop(1)) {
+        for (auto name : path.iter()) {
             auto next = current->traverse(name);
             if (not next.has_value()) {
                 return Unexpect{ next.error() };
@@ -109,7 +109,7 @@ namespace madbfs::tree
         auto  current_path = path::PathBuf{};
 
         // iterate until parent
-        for (auto name : path.parent_path().iter() | sv::drop(1)) {
+        for (auto name : path.parent_path().iter()) {
             current_path.extend(name);
             if (auto next = current->traverse(name); next.has_value()) {
                 if (auto& node = next->get(); node.expired()) {

@@ -101,6 +101,9 @@ namespace madbfs
         template <typename T>
         concept VRange = std::ranges::viewable_range<T>;
 
+        template <typename T>
+        concept FRange = std::ranges::forward_range<T>;
+
         template <Range T>
         using RangeValue = std::ranges::range_value_t<T>;
 
@@ -145,7 +148,7 @@ namespace madbfs
          * This function will convert references into `std::reference_wrapper`
          */
         template <typename T, typename Ret, typename... Args>
-        auto proj(Ret (T::*fn)(Args...) const, std::type_identity_t<Args>... args) noexcept
+        constexpr auto proj(Ret (T::*fn)(Args...) const, std::type_identity_t<Args>... args) noexcept
         {
             if constexpr (std::is_reference_v<Ret>) {
                 return [fn, ... args = std::forward<Args>(args)](const T& t) mutable {
@@ -169,7 +172,7 @@ namespace madbfs
          * This function will convert references into `std::reference_wrapper`
          */
         template <typename T, typename Ret, typename... Args>
-        auto proj(Ret (T::*fn)(Args...), std::type_identity_t<Args>... args) noexcept
+        constexpr auto proj(Ret (T::*fn)(Args...), std::type_identity_t<Args>... args) noexcept
         {
             if constexpr (std::is_reference_v<Ret>) {
                 return [fn, ... args = std::forward<Args>(args)](T& t) mutable {
@@ -183,7 +186,7 @@ namespace madbfs
         }
 
         template <typename T, typename C>
-        auto proj(T C::* mem) noexcept
+        constexpr auto proj(T C::* mem) noexcept
         {
             return [mem]<typename CC>(CC&& c) { return std::forward<CC>(c).*mem; };
         }

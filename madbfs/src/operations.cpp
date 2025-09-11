@@ -116,7 +116,9 @@ namespace madbfs::operations
         auto server     = args->server.transform(&std::filesystem::path::c_str).and_then(&path::create);
         auto ttl        = args->ttl < 0 ? std::nullopt : Opt<FileTree::Duration>{ args->ttl };
 
-        return new Madbfs{ server, args->port, page_size, max_pages, args->mount, ttl };
+        return new Madbfs{
+            server.transform(proj(&path::SemiPath::path)), args->port, page_size, max_pages, args->mount, ttl,
+        };
     }
 
     void destroy(void* private_data) noexcept
