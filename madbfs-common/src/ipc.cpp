@@ -42,13 +42,11 @@ namespace madbfs::ipc
             } else if (op == op::names::invalidate_cache) {
                 return Op{ op::InvalidateCache{} };
             } else if (op == op::names::set_page_size) {
-                return Op{
-                    op::SetPageSize{ .kib = json::value_to<u32>(json.at("value")) },
-                };
+                return Op{ op::SetPageSize{ .kib = json::value_to<u32>(json.at("value")) } };
             } else if (op == op::names::set_cache_size) {
-                return Op{
-                    op::SetCacheSize{ .mib = json::value_to<u32>(json.at("value")) },
-                };
+                return Op{ op::SetCacheSize{ .mib = json::value_to<u32>(json.at("value")) } };
+            } else if (op == op::names::set_ttl) {
+                return Op{ op::SetTTL{ .sec = json::value_to<i32>(json.at("value")) } };
             }
 
             return Unexpect{ fmt::format("'{}' is not a valid operation, try 'help'", op) };
@@ -92,6 +90,7 @@ namespace madbfs::ipc
             [&](op::InvalidateCache) { return json::value{ { "op", n::invalidate_cache }                      }; },
             [&](op::SetPageSize  op) { return json::value{ { "op", n::set_page_size    }, { "value", op.kib } }; },
             [&](op::SetCacheSize op) { return json::value{ { "op", n::set_cache_size   }, { "value", op.mib } }; },
+            [&](op::SetTTL       op) { return json::value{ { "op", n::set_ttl          }, { "value", op.sec } }; },
             // clang-format on
         };
 

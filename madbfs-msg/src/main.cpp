@@ -226,6 +226,20 @@ int perform_list(fs::path search_path)
     return 0;
 }
 
+template <std::integral Int>
+std::optional<Int> to_int(std::string_view str)
+{
+    auto value     = Int{};
+    auto [ptr, ec] = std::from_chars(str.begin(), str.end(), value);
+
+    if (ptr != str.end() or ec != std::error_code{}) {
+        fmt::println(stderr, "error: unable to parse '{}' to an integer", str);
+        return {};
+    } else {
+        return value;
+    }
+};
+
 int send_message(std::span<const std::string> message, fs::path socket_path)
 {
     namespace ipc = madbfs::ipc;
@@ -240,18 +254,6 @@ int send_message(std::span<const std::string> message, fs::path socket_path)
     auto too_few = [&](std::string_view cmd, int num) {
         fmt::println(stderr, "error: too few argument passed to command '{}' (expects {} args)", cmd, num);
         return 1;
-    };
-
-    auto to_int = [](std::string_view str) -> std::optional<std::size_t> {
-        auto value     = std::size_t{};
-        auto [ptr, ec] = std::from_chars(str.begin(), str.end(), value);
-
-        if (ptr != str.end() or ec != std::error_code{}) {
-            fmt::println(stderr, "error: unable to parse '{}' to an integer", str);
-            return {};
-        } else {
-            return value;
-        }
     };
 
     auto op_str    = std::string_view{ message[0] };
@@ -284,7 +286,7 @@ int send_message(std::span<const std::string> message, fs::path socket_path)
             return too_much(op_str, 1);
         }
 
-        if (auto value = to_int(*value_str); not value) {
+        if (auto value = to_int<unsigned long>(*value_str); not value) {
             return 1;
         } else {
             op = ipc::op::SetPageSize{ .kib = *value };
@@ -296,10 +298,22 @@ int send_message(std::span<const std::string> message, fs::path socket_path)
             return too_much(op_str, 1);
         }
 
-        if (auto value = to_int(*value_str); not value) {
+        if (auto value = to_int<unsigned long>(*value_str); not value) {
             return 1;
         } else {
             op = ipc::op::SetCacheSize{ .mib = *value };
+        }
+    } else if (op_str == ipc::op::names::set_ttl) {
+        if (not value_str) {
+            return too_few(op_str, 1);
+        } else if (message.size() > 2) {
+            return too_much(op_str, 1);
+        }
+
+        if (auto value = to_int<long>(*value_str); not value) {
+            return 1;
+        } else {
+            op = ipc::op::SetTTL{ .sec = *value };
         }
     } else {
         fmt::println(stderr, "error: unknown command '{}'", op_str);

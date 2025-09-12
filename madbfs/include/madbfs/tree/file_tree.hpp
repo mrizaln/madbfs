@@ -75,6 +75,22 @@ namespace madbfs::tree
          */
         const Node& root() const { return m_root; }
 
+        /**
+         * @brief Get TTL.
+         *
+         * If expiration is not enabled it will return `std::nullopt`.
+         */
+        Opt<Duration> ttl() const { return m_ttl; }
+
+        /**
+         * @brief Set a new TTL for file tree nodes.
+         *
+         * @param ttl New TTl value (set to `std::nullopt` to disable)
+         *
+         * @return Old TTL value.
+         */
+        Opt<Duration> set_ttl(Opt<Duration> ttl) { return std::exchange(m_ttl, ttl); }
+
     private:
         /**
          * @brief Fetch file stat from remote at `path` then create a child node on `parent`.

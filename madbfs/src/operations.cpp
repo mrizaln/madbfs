@@ -142,7 +142,7 @@ namespace madbfs::operations
     {
         log_i("{}: {:?}", __func__, path);
 
-        auto maybe_stat = ok_or(path::create(path), Errc::operation_not_supported).and_then([](auto p) {
+        auto maybe_stat = ok_or(path::create(path), Errc::operation_not_supported).and_then([](path::Path p) {
             return invoke_tree(&FileTree::getattr, p);
         });
         if (not maybe_stat.has_value()) {
@@ -279,7 +279,7 @@ namespace madbfs::operations
 
         return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([&](path::Path p) { return invoke_tree(&FileTree::open, p, fi->flags); })
-            .transform([&](auto fd) { fi->fh = fd; })
+            .transform([&](u64 fd) { fi->fh = fd; })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -298,7 +298,7 @@ namespace madbfs::operations
     {
         log_i("{}: [offset={}|size={}] {:?}", __func__, offset, size, path);
 
-        auto res = ok_or(path::create(path), Errc::operation_not_supported).and_then([&](auto p) {
+        auto res = ok_or(path::create(path), Errc::operation_not_supported).and_then([&](path::Path p) {
             return invoke_tree(&FileTree::write, p, fi->fh, { buf, size }, offset);
         });
         return res.has_value() ? static_cast<i32>(res.value()) : fuse_err(__func__, path)(res.error());

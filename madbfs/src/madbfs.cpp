@@ -124,6 +124,7 @@ namespace madbfs
                           ipc::op::names::invalidate_cache,
                           ipc::op::names::set_page_size,
                           ipc::op::names::set_cache_size,
+                          ipc::op::names::set_ttl,
                       } },
                 };
             },
@@ -131,9 +132,11 @@ namespace madbfs
                 auto page_size     = m_cache.page_size();
                 auto max_pages     = m_cache.max_pages();
                 auto current_pages = m_cache.current_pages();
+                auto ttl_sec       = m_tree.ttl().transform([](auto t) { return t.count(); });
 
                 co_return json::value{
                     { "connection", m_connection->name() },
+                    { "ttl", ttl_sec.value_or(-1) },
                     { "page_size", page_size / 1024 },
                     { "cache_size",
                       { { "max", page_size * max_pages / 1024 / 1024 },
@@ -179,6 +182,11 @@ namespace madbfs
                       { { "old", old_max * page / 1024 / 1024 },    //
                         { "new", new_max * page / 1024 / 1024 } } },
                 };
+            },
+            [&](ipc::op::SetTTL ttl) -> Await<json::value> {
+                auto new_ttl = ttl.sec < 0 ? std::nullopt : Opt<tree::FileTree::Duration>{ ttl.sec };
+                auto old_ttl = m_tree.set_ttl(new_ttl).transform([](auto t) { return t.count(); });
+                co_return json::value{ "sec", old_ttl.value_or(-1) };
             },
         };
 

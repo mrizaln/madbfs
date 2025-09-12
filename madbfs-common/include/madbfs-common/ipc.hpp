@@ -26,6 +26,7 @@ namespace madbfs::ipc
         struct InvalidateCache { };
         struct SetPageSize     { usize kib; };
         struct SetCacheSize    { usize mib; };
+        struct SetTTL          { isize sec; };
         // clang-format on
 
         namespace names
@@ -35,10 +36,11 @@ namespace madbfs::ipc
             constexpr auto invalidate_cache = "invalidate_cache";
             constexpr auto set_page_size    = "set_page_size";
             constexpr auto set_cache_size   = "set_cache_size";
+            constexpr auto set_ttl          = "set_ttl";
         }
     }
 
-    using Op = Var<op::Help, op::Info, op::InvalidateCache, op::SetPageSize, op::SetCacheSize>;
+    using Op = Var<op::Help, op::Info, op::InvalidateCache, op::SetPageSize, op::SetCacheSize, op::SetTTL>;
 
     class Client
     {

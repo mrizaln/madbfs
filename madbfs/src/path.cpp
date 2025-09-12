@@ -99,39 +99,23 @@ namespace madbfs::path
         }
 
         auto components = Vec<Slice>{};
+        auto index      = 1uz;
 
-        auto prev = 1uz;
-
-        while (prev < path.size()) {
-            auto current = prev;
+        while (index < path.size()) {
+            auto current = index;
             while (current < path.size() and path[current] == '/') {
                 ++current;
             }
 
-            // current = path.find('/', current);    // can't compile in gcc somehow??
-            // if (current == Str::npos) {
-            //     break;
-            // }
-            // prev = current;
-
-            auto it = sr::find(path | sv::drop(current), '/');
-            if (it == path.end()) {
+            auto next = path.find('/', current);
+            if (next == Str::npos) {
+                components.emplace_back(current, path.size() - current);
                 break;
             }
 
-            auto next = static_cast<usize>(it - path.begin());
             components.emplace_back(current, next - current);
-
-            prev = next;
+            index = next;
         }
-
-        // in case the basename contains repeated '/' like in the case '/home/user/documents/////note.md'
-        auto basename_start = prev;
-        while (path[basename_start] == '/') {
-            ++basename_start;
-        }
-
-        components.emplace_back(basename_start, path.size() - basename_start);
 
         return Pair{ std::move(components), Slice{ offset_prefix, path.size() } };
     }
