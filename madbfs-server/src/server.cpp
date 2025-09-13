@@ -1,8 +1,8 @@
 #include "madbfs-server/server.hpp"
-#include "madbfs-server/defer.hpp"    // DEFER macro
 
 #include <madbfs-common/log.hpp>
 #include <madbfs-common/rpc.hpp>
+#include <madbfs-common/util/defer.hpp>
 #include <madbfs-common/util/overload.hpp>
 #include <madbfs-common/util/slice.hpp>
 
@@ -47,11 +47,11 @@ namespace madbfs::server
             return status_from_errno(__func__, path, "failed to open dir");
         }
 
-        DEFER {
+        auto deferred = util::defer([=] {
             if (::closedir(dir) < 0) {
                 std::ignore = status_from_errno(__func__, path, "failed to close dir");
             }
-        };
+        });
 
         // WARN: invalidates strings and spans from argument
         auto& buf = m_buffer;
@@ -233,11 +233,11 @@ namespace madbfs::server
             return status_from_errno(__func__, path, "failed to open file");
         }
 
-        DEFER {
+        auto deferred = util::defer([=] {
             if (::close(fd) < 0) {
                 std::ignore = status_from_errno(__func__, path, "failed to close file");
             }
-        };
+        });
 
         if (::lseek(fd, offset, SEEK_SET) < 0) {
             return status_from_errno(__func__, path, "failed to seek file");
@@ -265,11 +265,11 @@ namespace madbfs::server
             return status_from_errno(__func__, path, "failed to open file");
         }
 
-        DEFER {
+        auto deferred = util::defer([=] {
             if (::close(fd) < 0) {
                 std::ignore = status_from_errno(__func__, path, "failed to close file");
             }
-        };
+        });
 
         if (::lseek(fd, offset, SEEK_SET) < 0) {
             return status_from_errno(__func__, path, "failed to seek file");
@@ -307,11 +307,11 @@ namespace madbfs::server
         if (in_fd < 0) {
             return status_from_errno(__func__, in, "failed to open file");
         }
-        DEFER {
+        auto in_deferred = util::defer([=] {
             if (::close(in_fd) < 0) {
                 std::ignore = status_from_errno(__func__, in, "failed to close file");
             }
-        };
+        });
 
         if (::lseek(in_fd, in_off, SEEK_SET) < 0) {
             return status_from_errno(__func__, in, "failed to seek file");
@@ -321,12 +321,11 @@ namespace madbfs::server
         if (out_fd < 0) {
             return status_from_errno(__func__, out, "failed to open file");
         }
-
-        DEFER {
+        auto out_deferred = util::defer([=] {
             if (::close(out_fd) < 0) {
                 std::ignore = status_from_errno(__func__, out, "failed to close file");
             }
-        };
+        });
 
         if (::lseek(out_fd, out_off, SEEK_SET) < 0) {
             return status_from_errno(__func__, out, "failed to seek file");
