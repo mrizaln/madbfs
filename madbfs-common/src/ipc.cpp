@@ -47,6 +47,8 @@ namespace madbfs::ipc
                 return Op{ op::SetCacheSize{ .mib = json::value_to<u32>(json.at("value")) } };
             } else if (op == op::names::set_ttl) {
                 return Op{ op::SetTTL{ .sec = json::value_to<i32>(json.at("value")) } };
+            } else if (op == op::names::logcat) {
+                return op::Logcat{};
             }
 
             return Unexpect{ fmt::format("'{}' is not a valid operation, try 'help'", op) };
@@ -79,24 +81,27 @@ namespace madbfs::ipc
         return Client{ path.c_str(), std::move(sock) };
     }
 
-    AExpect<json::value> Client::send(Op op)
+    void Client::stop()
+    {
+        m_socket.cancel();
+        m_socket.close();
+    }
+
+    AExpect<json::value> Client::send(FsOp op)
     {
         namespace n = op::names;
 
-        auto overload = util::Overload{
-            // clang-format off
-            [&](op::Help           ) { return json::value{ { "op", n::help             }                      }; },
+        // clang-format off
+        auto op_json = op.visit(util::Overload{
             [&](op::Info           ) { return json::value{ { "op", n::info             }                      }; },
             [&](op::InvalidateCache) { return json::value{ { "op", n::invalidate_cache }                      }; },
             [&](op::SetPageSize  op) { return json::value{ { "op", n::set_page_size    }, { "value", op.kib } }; },
             [&](op::SetCacheSize op) { return json::value{ { "op", n::set_cache_size   }, { "value", op.mib } }; },
             [&](op::SetTTL       op) { return json::value{ { "op", n::set_ttl          }, { "value", op.sec } }; },
-            // clang-format on
-        };
+        });
+        // clang-format on
 
-        auto op_json = std::visit(std::move(overload), op);
-        auto res     = co_await send_message(m_socket, json::serialize(op_json));
-        if (not res) {
+        if (auto res = co_await send_message(m_socket, json::serialize(op_json)); not res) {
             co_return Unexpect{ res.error() };
         }
 
@@ -111,6 +116,40 @@ namespace madbfs::ipc
             log_e("{}: failed to deserialize response: {}", __func__, e.what());
             co_return Unexpect{ Errc::bad_message };
         }
+    }
+
+    AExpect<json::value> Client::help()
+    {
+        auto op_json = json::value{ { "op", op::names::help } };
+        if (auto res = co_await send_message(m_socket, json::serialize(op_json)); not res) {
+            co_return Unexpect{ res.error() };
+        }
+
+        auto response_str = co_await receive_message(m_socket);
+        if (not response_str) {
+            co_return Unexpect{ response_str.error() };
+        }
+
+        try {
+            co_return json::parse(*response_str);
+        } catch (const std::exception& e) {
+            log_e("{}: failed to deserialize response: {}", __func__, e.what());
+            co_return Unexpect{ Errc::bad_message };
+        }
+    }
+
+    AExpect<Gen<AExpect<String>>> Client::logcat()
+    {
+        auto op_json = json::value{ { "op", op::names::logcat } };
+        if (auto res = co_await send_message(m_socket, json::serialize(op_json)); not res) {
+            co_return Unexpect{ res.error() };
+        }
+
+        co_return [sock = &m_socket](this auto) -> Gen<AExpect<String>> {
+            while (sock->is_open()) {
+                co_yield receive_message(*sock);
+            }
+        }();
     }
 }
 
@@ -147,7 +186,7 @@ namespace madbfs::ipc
         return Server{ path.c_str(), std::move(acc) };
     }
 
-    Await<void> Server::launch(OnOp on_op)
+    Await<void> Server::launch(OnFsOp on_op)
     {
         log_d("{}: ipc launched!", __func__);
         m_running = true;
@@ -178,6 +217,20 @@ namespace madbfs::ipc
 
     Await<void> Server::handle_peer(Socket sock)
     {
+        // clang-format off
+        static const auto help_json = json::value{
+            { "operations", {
+                ipc::op::names::help,
+                ipc::op::names::logcat,
+                ipc::op::names::info,
+                ipc::op::names::invalidate_cache,
+                ipc::op::names::set_page_size,
+                ipc::op::names::set_cache_size,
+                ipc::op::names::set_ttl,
+            } },
+        };
+        // clang-format on
+
         auto op_str = co_await receive_message(sock);
         if (not op_str) {
             co_return;
@@ -191,7 +244,13 @@ namespace madbfs::ipc
 
         if (op) {
             status = "success";
-            value  = co_await m_on_op(*op);
+
+            switch (op->index()) {
+            case 0: /* fs_op  */ value = co_await m_on_op(*op->as<FsOp>()); break;
+            case 1: /* help   */ value = help_json; break;
+            case 2: /* logcat */ co_await logcat_handler(std::move(sock)); co_return;
+            default: log_c("{}: [BUG] not all op variants are handled!", __func__); co_return;
+            }
         } else {
             status = "error";
             value  = op.error();
@@ -206,5 +265,41 @@ namespace madbfs::ipc
             const auto msg = std::make_error_code(res.error()).message();
             log_w("{}: failed to send message: {}", __func__, msg);
         }
+    }
+
+    Await<void> Server::logcat_handler(Socket sock)
+    {
+        using namespace std::chrono_literals;
+
+        log_i("{}: start", __func__);
+
+        auto end   = false;
+        auto index = 0uz;
+        auto queue = Array<std::deque<String>, 2>{};
+
+        // TODO: wire up with the logger (spdlog)
+
+        while (m_running and sock.is_open() and not end) {
+            auto  new_index = (index + 1) % 2;
+            auto& front     = queue[std::exchange(index, new_index)];
+
+            for (auto& message : front) {
+                auto res = co_await send_message(sock, message);
+                if (not res) {
+                    auto err_msg = std::make_error_code(res.error()).message();
+                    log_w("{}: failed to send message: {}", __func__, err_msg);
+                    end = true;
+                    break;
+                }
+            }
+            front.clear();
+
+            auto timer = async::Timer{ co_await async::current_executor() };
+            timer.expires_after(100ms);
+
+            co_await timer.async_wait();
+        }
+
+        log_i("{}: end", __func__);
     }
 }

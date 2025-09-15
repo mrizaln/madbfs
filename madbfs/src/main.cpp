@@ -77,13 +77,15 @@ int main(int argc, char** argv)
     fmt::println("[madbfs] unmount with 'fusermount -u {:?}'", opt.mount);
 
     madbfs::log::init(opt.log_level, opt.log_file);
-    madbfs::log_i(
-        "[madbfs] mount '{}' at '{}' with cache size {} MiB and page size {} KiB",
-        opt.serial,
-        opt.mount,
-        opt.cachesize,
-        opt.pagesize
-    );
+    if (opt.log_file != "-") {
+        madbfs::log_i(
+            "[madbfs] mount '{}' at '{}' with cache size {} MiB and page size {} KiB",
+            opt.serial,
+            opt.mount,
+            opt.cachesize,
+            opt.pagesize
+        );
+    }
 
     if (::setenv("ANDROID_SERIAL", opt.serial.c_str(), 1) < 0) {
         fmt::println(stderr, "error: failed to set env variable 'ANDROID_SERIAL' ({})", strerror(errno));

@@ -6,6 +6,7 @@
 
 #include "madbfs-common/aliases.hpp"
 #include "madbfs-common/async/async.hpp"
+#include "madbfs-common/util/var_wrapper.hpp"
 
 #include <functional>
 
@@ -16,17 +17,19 @@ namespace boost::json
 
 namespace madbfs::ipc
 {
-    using Socket = async::unix_socket::Socket;
-
     namespace op
     {
         // clang-format off
+
+        // regular op
         struct Help            { };
         struct Info            { };
         struct InvalidateCache { };
         struct SetPageSize     { usize kib; };
         struct SetCacheSize    { usize mib; };
         struct SetTTL          { isize sec; };
+        struct Logcat          { };
+
         // clang-format on
 
         namespace names
@@ -37,17 +40,48 @@ namespace madbfs::ipc
             constexpr auto set_page_size    = "set_page_size";
             constexpr auto set_cache_size   = "set_cache_size";
             constexpr auto set_ttl          = "set_ttl";
+            constexpr auto logcat           = "logcat";
         }
     }
 
-    using Op = Var<op::Help, op::Info, op::InvalidateCache, op::SetPageSize, op::SetCacheSize, op::SetTTL>;
+    /**
+     * @class FsOp
+     * @brief Operations that involves the FS.
+     */
+    struct FsOp
+        : util::VarWrapper<op::Info, op::InvalidateCache, op::SetPageSize, op::SetCacheSize, op::SetTTL>
+    {
+        using VarWrapper::VarWrapper;
+    };
 
+    /**
+     * @class Op
+     * @brief All possible operations through the IPC.
+     */
+    struct Op : util::VarWrapper<FsOp, op::Help, op::Logcat>
+    {
+        using VarWrapper::VarWrapper;
+    };
+}
+
+namespace madbfs::ipc
+{
+    using Socket = async::unix_socket::Socket;
+
+    /**
+     * @class Client
+     * @brief IPC Client, can send operations to Server.
+     */
     class Client
     {
     public:
         static Expect<Client> create(async::Context& context, Str socket_path);
 
-        AExpect<boost::json::value> send(Op op);
+        void stop();
+
+        AExpect<boost::json::value>   send(FsOp op);
+        AExpect<boost::json::value>   help();
+        AExpect<Gen<AExpect<String>>> logcat();
 
     private:
         Client(Str socket_path, Socket socket)
@@ -60,11 +94,15 @@ namespace madbfs::ipc
         Socket m_socket;
     };
 
+    /**
+     * @class Server
+     * @brief IPC Server, provides information regarding the FS.
+     */
     class Server
     {
     public:
         using Acceptor = async::unix_socket::Acceptor;
-        using OnOp     = std::move_only_function<Await<boost::json::value>(ipc::Op op)>;
+        using OnFsOp   = std::move_only_function<Await<boost::json::value>(ipc::FsOp op)>;
 
         /**
          * @brief Create IPC server.
@@ -82,11 +120,13 @@ namespace madbfs::ipc
         Server& operator=(const Server&) = delete;
 
         /**
-         * @brief Lauch the IPC and listen for request.
+         * @brief Lauch the IPC and listen for request for any `FsOp`.
          *
          * @param on_op Operation request handler.
+         *
+         * The caller only need to handle `FsOp`, other op will be handled by the Server itself.
          */
-        Await<void> launch(OnOp on_op);
+        Await<void> launch(OnFsOp on_op);
 
         /**
          * @brief Stop the IPC.
@@ -104,10 +144,11 @@ namespace madbfs::ipc
 
         Await<void> run();
         Await<void> handle_peer(Socket sock);
+        Await<void> logcat_handler(Socket sock);
 
         String   m_socket_path;
         Acceptor m_socket;
-        OnOp     m_on_op;
+        OnFsOp   m_on_op;
         bool     m_running = false;
     };
 }

@@ -85,5 +85,18 @@ namespace madbfs::util
             using Var = detail::CopyCVRef<Self, Var>;
             return static_cast<Var>(self);
         }
+
+        template <typename T>
+        bool holds()
+        {
+            return std::holds_alternative<T>(as_var());
+        }
+
+        template <typename T>
+        T* as()
+        {
+            auto& var = as_var();
+            return std::get_if<T>(&var);
+        }
     };
 }

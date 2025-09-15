@@ -92,7 +92,7 @@ namespace madbfs
         , m_mountpoint{ mountpoint }
     {
         if (m_ipc) {
-            auto coro = m_ipc->launch([this](ipc::Op op) { return ipc_handler(op); });
+            auto coro = m_ipc->launch([this](ipc::FsOp op) { return ipc_handler(op); });
             async::spawn(m_async_ctx, std::move(coro), [](std::exception_ptr e) {
                 log::log_exception(e, "Madbfs");
             });
@@ -112,7 +112,7 @@ namespace madbfs
         m_work_thread.join();
     }
 
-    Await<boost::json::value> Madbfs::ipc_handler(ipc::Op op)
+    Await<boost::json::value> Madbfs::ipc_handler(ipc::FsOp op)
     {
         namespace json = boost::json;
 
@@ -121,19 +121,6 @@ namespace madbfs
         constexpr usize lowest_max_pages  = 128;
 
         auto overload = util::Overload{
-            [&](ipc::op::Help) -> Await<json::value> {
-                co_return json::value{
-                    { "operations",
-                      {
-                          ipc::op::names::help,
-                          ipc::op::names::info,
-                          ipc::op::names::invalidate_cache,
-                          ipc::op::names::set_page_size,
-                          ipc::op::names::set_cache_size,
-                          ipc::op::names::set_ttl,
-                      } },
-                };
-            },
             [&](ipc::op::Info) -> Await<json::value> {
                 auto page_size     = m_cache.page_size();
                 auto max_pages     = m_cache.max_pages();
