@@ -76,9 +76,9 @@ namespace madbfs::tree
         return m_stat;
     }
 
-    void Node::expires_after(Duration duration)
+    void Node::expires_after(Seconds duration)
     {
-        if (duration == Duration::max()) {
+        if (duration == Seconds::max()) {
             m_expiration = Timepoint::max();
         } else {
             m_expiration = SteadyClock::now() + duration;
@@ -129,8 +129,8 @@ namespace madbfs::tree
     void Node::refresh_stat(timespec atime, timespec mtime)
     {
         auto now  = SystemClock::now().time_since_epoch();
-        auto sec  = std::chrono::duration_cast<std::chrono::seconds>(now);
-        auto nsec = std::chrono::duration_cast<std::chrono::nanoseconds>(now - sec);
+        auto sec  = std::chrono::duration_cast<Seconds>(now);
+        auto nsec = std::chrono::duration_cast<Nanoseconds>(now - sec);
 
         auto time = timespec{ .tv_sec = sec.count(), .tv_nsec = nsec.count() };
 
@@ -218,8 +218,8 @@ namespace madbfs::tree
             // operation actually not creating any link on the adb device, just on the in-memory filetree.
 
             auto now  = SystemClock::now().time_since_epoch();
-            auto sec  = std::chrono::duration_cast<std::chrono::seconds>(now);
-            auto nsec = std::chrono::duration_cast<std::chrono::nanoseconds>(now - sec);
+            auto sec  = std::chrono::duration_cast<Seconds>(now);
+            auto nsec = std::chrono::duration_cast<Nanoseconds>(now - sec);
 
             auto time = timespec{ .tv_sec = sec.count(), .tv_nsec = nsec.count() };
 

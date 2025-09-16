@@ -25,7 +25,8 @@ namespace madbfs::args
         const char* log_file   = nullptr;
         int         cache_size = 256;    // in MiB
         int         page_size  = 128;    // in KiB
-        int         ttl        = 10;     // in seconds
+        int         ttl        = 30;     // in seconds
+        int         timeout    = 10;     // in seconds
         int         port       = 12345;
         int         no_server  = false;
 
@@ -48,6 +49,7 @@ namespace madbfs::args
         usize                      cachesize;
         usize                      pagesize;
         i32                        ttl;
+        i32                        timeout;
         u16                        port;
     };
 
@@ -80,6 +82,7 @@ namespace madbfs::args
         { "--cache-size=%d", offsetof(MadbfsOpt, cache_size), true },
         { "--page-size=%d",  offsetof(MadbfsOpt, page_size),  true },
         { "--ttl=%d",        offsetof(MadbfsOpt, ttl),        true },
+        { "--timeout=%d",    offsetof(MadbfsOpt, timeout),    true },
         { "--port=%d",       offsetof(MadbfsOpt, port),       true },
         { "--no-server",     offsetof(MadbfsOpt, no_server),  true },
         // clang-format on
@@ -112,8 +115,11 @@ namespace madbfs::args
             "                             (minimum: 64)\n"
             "                             (value will be rounded up to the next power of 2)\n"
             "    --ttl=<int>            set the TTL of the stat cache of the filesystem in seconds\n"
-            "                             (default: 10)\n"
+            "                             (default: 30)\n"
             "                             (set to negative value to disable it)\n"
+            "    --timeout=<int>        set the timeout of every remote operation\n"
+            "                             (default: 10)\n"
+            "                             (set to non-positive value to disable it)\n"
             "    --port=<int>           set the port number the server will listen on\n"
             "                             (default: 12345)\n"
             "    --no-server            don't launch server\n"
@@ -416,6 +422,7 @@ namespace madbfs::args
                 .cachesize = std::bit_ceil(std::max(static_cast<usize>(madbfs_opt.cache_size), 128uz)),
                 .pagesize  = std::bit_ceil(std::max(static_cast<usize>(madbfs_opt.page_size), 64uz)),
                 .ttl       = madbfs_opt.ttl,
+                .timeout   = madbfs_opt.timeout,
                 .port      = static_cast<u16>(madbfs_opt.port),
             },
             .args = args,

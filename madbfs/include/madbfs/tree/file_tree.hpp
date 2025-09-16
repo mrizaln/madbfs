@@ -17,10 +17,9 @@ namespace madbfs::tree
     class FileTree
     {
     public:
-        using Filler   = std::move_only_function<void(const char* name)>;
-        using Duration = std::chrono::seconds;
+        using Filler = std::move_only_function<void(const char* name)>;
 
-        FileTree(connection::Connection& connection, data::Cache& cache, Opt<Duration> ttl);
+        FileTree(connection::Connection& connection, data::Cache& cache, Opt<Seconds> ttl);
         ~FileTree() = default;
 
         FileTree(Node&& root)            = delete;
@@ -80,7 +79,7 @@ namespace madbfs::tree
          *
          * If expiration is not enabled it will return `std::nullopt`.
          */
-        Opt<Duration> ttl() const { return m_ttl; }
+        Opt<Seconds> ttl() const { return m_ttl; }
 
         /**
          * @brief Set a new TTL for file tree nodes.
@@ -89,7 +88,7 @@ namespace madbfs::tree
          *
          * @return Old TTL value.
          */
-        Opt<Duration> set_ttl(Opt<Duration> ttl) { return std::exchange(m_ttl, ttl); }
+        Opt<Seconds> set_ttl(Opt<Seconds> ttl) { return std::exchange(m_ttl, ttl); }
 
     private:
         /**
@@ -143,6 +142,6 @@ namespace madbfs::tree
         data::Cache&            m_cache;
         std::atomic<u64>        m_fd_counter       = 0;
         bool                    m_root_initialized = false;
-        Opt<Duration>           m_ttl              = std::nullopt;
+        Opt<Seconds>            m_ttl              = std::nullopt;
     };
 }

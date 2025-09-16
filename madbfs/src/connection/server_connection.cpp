@@ -46,7 +46,7 @@ namespace madbfs::connection
             co_await m_client->start();
         }
 
-        auto res = co_await m_client->send_req(buf, std::move(req), timeout_delay);
+        auto res = co_await m_client->send_req(buf, std::move(req), m_timeout);
         if (not res) {
             if (res.error() == Errc::not_connected or res.error() == Errc::broken_pipe) {
                 log_e("{}: client is disconnected, releasing client", __func__);
@@ -58,7 +58,11 @@ namespace madbfs::connection
         co_return res;
     }
 
-    AExpect<Uniq<ServerConnection>> ServerConnection::prepare_and_create(Opt<path::Path> server, u16 port)
+    AExpect<Uniq<ServerConnection>> ServerConnection::prepare_and_create(
+        Opt<path::Path> server,
+        u16             port,
+        Opt<Seconds>    timeout
+    )
     {
         namespace bp = boost::process::v2;
 
@@ -81,7 +85,7 @@ namespace madbfs::connection
             }
 
             log_i("{}: server is already running, continue normally", __func__);
-            co_return Uniq<ServerConnection>{ new ServerConnection{ port, std::move(*client) } };
+            co_return Uniq<ServerConnection>{ new ServerConnection{ port, std::move(*client), timeout } };
         }
 
         log_i("{}: server path set to {}, pushing server normally", __func__, *server);
@@ -120,7 +124,7 @@ namespace madbfs::connection
         auto proc = Process{ exec, cmd, args, bp::process_stdio{ {}, out, err } };
 
         auto buf = String(rpc::server_ready_string.size(), '\0');
-        auto res = co_await async::timeout(async::read_exact<char>(out, buf), timeout_delay);
+        auto res = co_await async::timeout(async::read_exact<char>(out, buf), Seconds{ 5 });
 
         if (not res) {
             log_e("{}: waited for 5 seconds, server is timed out", __func__);
@@ -149,6 +153,7 @@ namespace madbfs::connection
             std::move(proc),
             std::move(out),
             std::move(err),
+            timeout,
         } };
     }
 

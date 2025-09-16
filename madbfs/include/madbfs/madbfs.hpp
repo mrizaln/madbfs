@@ -21,12 +21,13 @@ namespace madbfs
     {
     public:
         Madbfs(
-            Opt<path::Path>               server,
-            u16                           port,
-            usize                         max_pages,
-            usize                         page_size,
-            Str                           mount_point,
-            Opt<tree::FileTree::Duration> ttl
+            Opt<path::Path> server,
+            u16             port,
+            usize           max_pages,
+            usize           page_size,
+            Str             mount_point,
+            Opt<Seconds>    ttl,
+            Opt<Seconds>    timeout
         );
 
         ~Madbfs();
@@ -50,6 +51,7 @@ namespace madbfs
          * @param ctx Async context.
          * @param server Server binary path.
          * @param port Port on which the server will be ran on.
+         * @param timeout Remote operation timeout.
          *
          * If the server binary path is set, this function will attempt to create a `ServerConnection` and
          * then fall back to `AdbConnection` if the connection failed. If it is not set, it will immediately
@@ -58,7 +60,8 @@ namespace madbfs
         static Uniq<connection::Connection> prepare_connection(
             async::Context& ctx,
             Opt<path::Path> server,
-            u16             port
+            u16             port,
+            Opt<Seconds>    timeout
         );
 
         /**

@@ -208,7 +208,6 @@ namespace madbfs::tree
     {
     public:
         using Timepoint = SteadyClock::time_point;
-        using Duration  = std::chrono::seconds;
 
         struct Context
         {
@@ -247,9 +246,9 @@ namespace madbfs::tree
         /**
          * @brief Set expiration from current time + duration.
          *
-         * @param duration Duration
+         * @param duration Duration.
          */
-        void expires_after(Duration duration);
+        void expires_after(Seconds duration);
 
         /**
          * @brief Check node expiry.

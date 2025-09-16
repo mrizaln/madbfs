@@ -481,7 +481,7 @@ namespace madbfs::rpc
         m_socket.close();
     }
 
-    AExpect<Response> Client::send_req(Vec<u8>& buffer, Request req, Opt<std::chrono::milliseconds> timeout)
+    AExpect<Response> Client::send_req(Vec<u8>& buffer, Request req, Opt<Milliseconds> timeout)
     {
         if (not m_running) {
             co_return Unexpect{ Errc::not_connected };

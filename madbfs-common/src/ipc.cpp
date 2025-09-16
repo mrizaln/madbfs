@@ -120,10 +120,9 @@ namespace madbfs::ipc
     {
         if (m_running) {
             stop();
-            auto sock = m_socket_path.c_str();
-            if (::unlink(sock) < 0) {
-                log_e("{}: failed to unlink socket: {} [{}]", __func__, sock, strerror(errno));
-            }
+        }
+        if (auto sock = m_socket_path.c_str(); ::unlink(sock) < 0) {
+            log_e("{}: failed to unlink socket: {} [{}]", __func__, sock, strerror(errno));
         }
     }
 

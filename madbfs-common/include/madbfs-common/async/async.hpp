@@ -145,9 +145,9 @@ namespace madbfs::async
 
     template <typename T>
     Await<Opt<ToUnit<T>>> timeout(
-        Await<T>&&                awaitable,
-        std::chrono::milliseconds time,
-        std::function<void()>     on_timeout = {}
+        Await<T>&&            awaitable,
+        Milliseconds          time,
+        std::function<void()> on_timeout = {}
     )
     {
         using net::experimental::awaitable_operators::operator||;

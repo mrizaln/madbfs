@@ -14,16 +14,20 @@ namespace madbfs::connection
         using Process = boost::process::v2::process;
         using Pipe    = async::pipe::Read;
 
-        static constexpr auto timeout_delay = std::chrono::seconds{ 1 };
-
         /**
          * @brief Prepare the server connection and create the class.
          *
+         * @param server The server binary path.
          * @param port Port the server will be listening on.
+         * @param timeout Remote operation timeout.
          *
          * The returned Uniq will never be nullptr.
          */
-        static AExpect<Uniq<ServerConnection>> prepare_and_create(Opt<path::Path> server, u16 port);
+        static AExpect<Uniq<ServerConnection>> prepare_and_create(
+            Opt<path::Path> server,
+            u16             port,
+            Opt<Seconds>    timeout
+        );
 
         ~ServerConnection();
 
@@ -54,18 +58,27 @@ namespace madbfs::connection
             override;
 
     private:
-        ServerConnection(u16 port, Uniq<rpc::Client> client)
+        ServerConnection(u16 port, Uniq<rpc::Client> client, Opt<Seconds> timeout)
             : m_port{ port }
             , m_client{ std::move(client) }
+            , m_timeout{ timeout }
         {
         }
 
-        ServerConnection(u16 port, Uniq<rpc::Client> client, Process proc, Pipe out, Pipe err)
+        ServerConnection(
+            u16               port,
+            Uniq<rpc::Client> client,
+            Process           proc,
+            Pipe              out,
+            Pipe              err,
+            Opt<Seconds>      timeout
+        )
             : m_port{ port }
             , m_client{ std::move(client) }
             , m_server_proc{ std::move(proc) }
             , m_server_out{ std::move(out) }
             , m_server_err{ std::move(err) }
+            , m_timeout{ timeout }
         {
         }
 
@@ -115,5 +128,6 @@ namespace madbfs::connection
         Opt<Process>      m_server_proc = {};         // server process handle
         Opt<Pipe>         m_server_out  = {};         // server's stdout
         Opt<Pipe>         m_server_err  = {};         // server's stderr
+        Opt<Seconds>      m_timeout     = {};
     };
 }

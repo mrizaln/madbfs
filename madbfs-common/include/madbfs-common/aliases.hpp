@@ -79,6 +79,10 @@ namespace madbfs
         using SystemClock = std::chrono::system_clock;
         using SteadyClock = std::chrono::steady_clock;
 
+        using Seconds      = std::chrono::seconds;
+        using Milliseconds = std::chrono::milliseconds;
+        using Nanoseconds  = std::chrono::nanoseconds;
+
 #ifdef __cpp_lib_generator
         template <typename T>
         using Gen = std::generator<T>;

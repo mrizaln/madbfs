@@ -13,11 +13,12 @@ namespace madbfs
     Uniq<connection::Connection> Madbfs::prepare_connection(
         async::Context& ctx,
         Opt<path::Path> server,
-        u16             port
+        u16             port,
+        Opt<Seconds>    timeout
     )
     {
         auto coro = [=] noexcept -> Await<Uniq<connection::Connection>> {
-            auto result = co_await connection::ServerConnection::prepare_and_create(server, port);
+            auto result = co_await connection::ServerConnection::prepare_and_create(server, port, timeout);
             if (not result) {
                 auto msg = std::make_error_code(result.error()).message();
                 log_c("prepare_connection: failed to construct ServerConnection: {}", msg);
@@ -73,17 +74,18 @@ namespace madbfs
     }
 
     Madbfs::Madbfs(
-        Opt<path::Path>               server,
-        u16                           port,
-        usize                         page_size,
-        usize                         max_pages,
-        Str                           mountpoint,
-        Opt<tree::FileTree::Duration> ttl
+        Opt<path::Path> server,
+        u16             port,
+        usize           page_size,
+        usize           max_pages,
+        Str             mountpoint,
+        Opt<Seconds>    ttl,
+        Opt<Seconds>    timeout
     )
         : m_async_ctx{}
         , m_work_guard{ m_async_ctx.get_executor() }
         , m_work_thread{ [this] { work_thread_function(m_async_ctx); } }
-        , m_connection{ prepare_connection(m_async_ctx, server, port) }
+        , m_connection{ prepare_connection(m_async_ctx, server, port, timeout) }
         , m_cache{ *m_connection, page_size, max_pages }
         , m_tree{ *m_connection, m_cache, ttl }
         , m_ipc{ create_ipc(m_async_ctx) }
@@ -99,6 +101,10 @@ namespace madbfs
 
     Madbfs::~Madbfs()
     {
+        if (m_ipc) {
+            m_ipc->stop();
+        }
+
         async::block(m_async_ctx, m_cache.shutdown());
 
         m_work_guard.reset();
@@ -184,7 +190,7 @@ namespace madbfs
                 };
             },
             [&](ipc::op::SetTTL ttl) -> Await<json::value> {
-                auto new_ttl = ttl.sec < 0 ? std::nullopt : Opt<tree::FileTree::Duration>{ ttl.sec };
+                auto new_ttl = ttl.sec < 0 ? std::nullopt : Opt<Seconds>{ ttl.sec };
                 auto old_ttl = m_tree.set_ttl(new_ttl).transform([](auto t) { return t.count(); });
                 co_return json::value{ "sec", old_ttl.value_or(-1) };
             },
