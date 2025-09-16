@@ -48,7 +48,7 @@ namespace madbfs::ipc
             } else if (op == op::names::set_ttl) {
                 return Op{ op::SetTTL{ .sec = json::value_to<i32>(json.at("value")) } };
             } else if (op == op::names::logcat) {
-                return op::Logcat{};
+                return op::Logcat{ .color = json::value_to<bool>(json.at("value")) };
             }
 
             return Unexpect{ fmt::format("'{}' is not a valid operation, try 'help'", op) };
@@ -62,7 +62,7 @@ namespace madbfs::ipc
 
 namespace madbfs::ipc
 {
-    LogcatSink::MsgQueue& LogcatSink::swap()
+    std::deque<LogcatSink::Msg>& LogcatSink::swap()
     {
         auto new_index = (m_index + 1) % 2;
         return m_queue[std::exchange(m_index, new_index)];
@@ -71,13 +71,19 @@ namespace madbfs::ipc
     void LogcatSink::sink_it_(const spdlog::details::log_msg& msg)
     {
         auto buf = spdlog::memory_buf_t{};
+
+        msg.color_range_start = 0;
+        msg.color_range_end   = 0;
+
         this->formatter_->format(msg, buf);
 
         auto& queue = m_queue[m_index];
         if (queue.size() == m_max_queue) {
             queue.pop_front();
         }
-        queue.emplace_back(fmt::to_string(buf));
+        queue.emplace_back(
+            fmt::to_string(buf), msg.color_range_start, msg.color_range_end, static_cast<usize>(msg.level)
+        );
     }
 }
 
@@ -159,9 +165,9 @@ namespace madbfs::ipc
         }
     }
 
-    AExpect<Gen<AExpect<String>>> Client::logcat()
+    AExpect<Gen<AExpect<String>>> Client::logcat(op::Logcat opt)
     {
-        auto op_json = json::value{ { "op", op::names::logcat } };
+        auto op_json = json::value{ { "op", op::names::logcat }, { "value", opt.color } };
         if (auto res = co_await send_message(m_socket, json::serialize(op_json)); not res) {
             co_return Unexpect{ res.error() };
         }
@@ -212,8 +218,23 @@ namespace madbfs::ipc
     Await<void> Server::launch(OnFsOp on_op)
     {
         log_d("{}: ipc launched!", __func__);
+
         m_running = true;
         m_on_op   = std::move(on_op);
+
+        if (not m_logcat_sink) {
+            m_logcat_sink = std::make_shared<LogcatSink>();
+            m_logcat_sink->set_level(log::Level::off);
+            m_logcat_sink->set_pattern(log::logger_pattern);
+
+            if (auto logger = spdlog::get(log::logger_name); not logger) {
+                log_e("{}: can't find logger with name '{}'", __func__, log::logger_name);
+                co_return;
+            } else {
+                auto& sinks = logger->sinks();
+                sinks.push_back(m_logcat_sink);
+            }
+        }
 
         std::ignore = co_await async::wait_all(run(), logcat_handler());
     }
@@ -273,7 +294,10 @@ namespace madbfs::ipc
             switch (op->index()) {
             case 0: /* fs_op  */ value = co_await m_on_op(*op->as<FsOp>()); break;
             case 1: /* help   */ value = help_json; break;
-            case 2: /* logcat */ m_logcat_subscribers.push_back(std::move(sock)); co_return;
+            case 2: /* logcat */ {
+                m_logcat_subscribers.emplace_back(std::move(sock), op->as<op::Logcat>()->color);
+                co_return;
+            }
             default: log_c("{}: [BUG] not all op variants are handled!", __func__); co_return;
             }
         } else {
@@ -298,19 +322,16 @@ namespace madbfs::ipc
 
         log_i("{}: start", __func__);
 
-        if (not m_logcat_sink) {
-            m_logcat_sink = std::make_shared<LogcatSink>();
-            m_logcat_sink->set_level(log::Level::off);
-            m_logcat_sink->set_pattern(log::logger_pattern);
-
-            if (auto logger = spdlog::get(log::logger_name); not logger) {
-                log_e("{}: can't find logger with name '{}'", __func__, log::logger_name);
-                co_return;
-            } else {
-                auto& sinks = logger->sinks();
-                sinks.push_back(m_logcat_sink);
-            }
-        }
+        // copying what spdlog do on ansicolor_sink :P
+        const auto colors = Array<Str, log::Level::n_levels>{
+            "\033[37m",           // trace    | white
+            "\033[36m",           // debug    | cyan
+            "\033[32m",           // info     | green
+            "\033[33m\033[1m",    // warn     | yellow_bold
+            "\033[31m\033[1m",    // error    | red bold
+            "\033[1m\033[41m",    // critical | bold on red
+            "\033[m",             // off      | reset
+        };
 
         auto inactive_subscribers = Vec<isize>{};
         auto prev_empty           = m_logcat_subscribers.empty();
@@ -320,20 +341,42 @@ namespace madbfs::ipc
             co_await m_logcat_timer.async_wait();
 
             if (m_logcat_subscribers.empty()) {
+                if (not prev_empty) {
+                    log_i("{}: no subscribers, turning off logcat sink", __func__);
+                    m_logcat_sink->set_level(log::Level::off);
+                }
                 prev_empty = true;
                 continue;
             } else if (prev_empty) {
-                m_logcat_sink->set_level(log::Level::debug);
+                log_i("{}: subscribers not empty anymore, turning on logcat sink", __func__);
+                m_logcat_sink->set_level(spdlog::get(log::logger_name)->level());
                 prev_empty = false;
             }
 
             auto& messages = m_logcat_sink->swap();
+            auto  buffer   = String{};
 
-            for (auto&& [i, sock] : m_logcat_subscribers | sv::enumerate) {
-                for (auto& message : messages) {
-                    auto res = co_await send_message(sock, message);
+            for (auto&& [i, sub] : m_logcat_subscribers | sv::enumerate) {
+                auto& [sock, should_color] = sub;
+                for (auto& [message, col_start, col_end, level] : messages) {
+                    auto res = Expect<void>{};
+
+                    if (should_color) {
+                        auto it = message.begin();
+                        buffer.append(it, it + col_start);              // before
+                        buffer.append(colors.at(level));                // color code
+                        buffer.append(it + col_start, it + col_end);    // color range
+                        buffer.append(colors.back());                   // reset code
+                        buffer.append(it + col_end, message.end());     // after
+                        res = co_await send_message(sock, buffer);
+                        buffer.clear();
+                    } else {
+                        res = co_await send_message(sock, message);
+                    }
+
                     if (not res) {
                         auto err_msg = std::make_error_code(res.error()).message();
+                        log_w("{}: peer error: {}", __func__, i);
                         inactive_subscribers.emplace_back(i);
                         break;
                     }
@@ -344,15 +387,11 @@ namespace madbfs::ipc
                 m_logcat_subscribers.erase(m_logcat_subscribers.begin() + idx);
             }
 
-            if (m_logcat_subscribers.empty()) {
-                m_logcat_sink->set_level(log::Level::off);
-            }
-
             inactive_subscribers.clear();
             messages.clear();
         }
 
-        for (auto& sock : m_logcat_subscribers) {
+        for (auto& [sock, _] : m_logcat_subscribers) {
             sock.cancel();
             sock.close();
         }

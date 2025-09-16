@@ -274,7 +274,7 @@ int send_message(std::span<const std::string> message, fs::path socket_path)
         if (value_str) {
             return too_much(op_str, 0);
         }
-        op = ipc::op::Logcat{};
+        op = ipc::op::Logcat{ .color = ::isatty(::fileno(stdout)) != 0 };
     } else if (op_str == ipc::op::names::info) {
         if (value_str) {
             return too_much(op_str, 0);
@@ -364,8 +364,8 @@ int send_message(std::span<const std::string> message, fs::path socket_path)
             sig_set.cancel();
             co_return 0;
         },
-        [&](this auto, ipc::op::Logcat) -> madbfs::Await<int> {
-            auto response = co_await client->logcat();
+        [&](this auto, ipc::op::Logcat op) -> madbfs::Await<int> {
+            auto response = co_await client->logcat(op);
             if (not response) {
                 auto msg = std::make_error_code(response.error()).message();
                 fmt::println(stderr, "error: failed to send message: {}", msg);

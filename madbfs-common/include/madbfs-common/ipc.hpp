@@ -29,7 +29,7 @@ namespace madbfs::ipc
         struct SetPageSize     { usize kib; };
         struct SetCacheSize    { usize mib; };
         struct SetTTL          { isize sec; };
-        struct Logcat          { };
+        struct Logcat          { bool color; };
 
         // clang-format on
 
@@ -63,6 +63,11 @@ namespace madbfs::ipc
     {
         using VarWrapper::VarWrapper;
     };
+}
+
+namespace madbfs::ipc
+{
+    using Socket = async::unix_socket::Socket;
 
     /**
      * @class LogcatSink
@@ -71,7 +76,13 @@ namespace madbfs::ipc
     class LogcatSink final : public spdlog::sinks::base_sink<std::mutex>
     {
     public:
-        using MsgQueue = std::deque<String>;
+        struct Msg
+        {
+            String message;
+            isize  color_start;
+            isize  color_end;
+            usize  level;    // numeric repr of log level
+        };
 
         LogcatSink() = default;
 
@@ -80,22 +91,23 @@ namespace madbfs::ipc
         {
         }
 
-        MsgQueue& swap();
+        std::deque<Msg>& swap();
 
     protected:
         void sink_it_(const spdlog::details::log_msg& msg) override;
         void flush_() override { /* do nothing */ };
 
     private:
-        Array<MsgQueue, 2> m_queue     = {};
-        usize              m_index     = 0;
-        usize              m_max_queue = 1024;
+        Array<std::deque<Msg>, 2> m_queue     = {};
+        usize                     m_index     = 0;
+        usize                     m_max_queue = 1024;
     };
-}
 
-namespace madbfs::ipc
-{
-    using Socket = async::unix_socket::Socket;
+    struct LogcatSubscriber
+    {
+        Socket socket;
+        bool   color;
+    };
 
     /**
      * @class Client
@@ -110,7 +122,7 @@ namespace madbfs::ipc
 
         AExpect<boost::json::value>   send(FsOp op);
         AExpect<boost::json::value>   help();
-        AExpect<Gen<AExpect<String>>> logcat();
+        AExpect<Gen<AExpect<String>>> logcat(op::Logcat opt);
 
     private:
         Client(Str socket_path, Socket socket)
@@ -181,8 +193,8 @@ namespace madbfs::ipc
         OnFsOp   m_on_op;
         bool     m_running = false;
 
-        Shared<LogcatSink> m_logcat_sink;
-        Vec<Socket>        m_logcat_subscribers;
-        async::Timer       m_logcat_timer;
+        Shared<LogcatSink>    m_logcat_sink;
+        Vec<LogcatSubscriber> m_logcat_subscribers;
+        async::Timer          m_logcat_timer;
     };
 }
