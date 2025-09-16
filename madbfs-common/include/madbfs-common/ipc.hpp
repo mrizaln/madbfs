@@ -1,5 +1,6 @@
 #pragma once
 
+#include <spdlog/sinks/base_sink.h>
 #if not defined(MADBFS_BUILD_IPC)
 #    error "macro MADBFS_BUILD_IPC is not defined, you should not include this header!"
 #endif
@@ -61,6 +62,34 @@ namespace madbfs::ipc
     struct Op : util::VarWrapper<FsOp, op::Help, op::Logcat>
     {
         using VarWrapper::VarWrapper;
+    };
+
+    /**
+     * @class LogcatSink
+     * @brief Logger sink for logcat operation.
+     */
+    class LogcatSink final : public spdlog::sinks::base_sink<std::mutex>
+    {
+    public:
+        using MsgQueue = std::deque<String>;
+
+        LogcatSink() = default;
+
+        LogcatSink(usize max_queue)
+            : m_max_queue{ max_queue }
+        {
+        }
+
+        MsgQueue& swap();
+
+    protected:
+        void sink_it_(const spdlog::details::log_msg& msg) override;
+        void flush_() override { /* do nothing */ };
+
+    private:
+        Array<MsgQueue, 2> m_queue     = {};
+        usize              m_index     = 0;
+        usize              m_max_queue = 1024;
     };
 }
 
@@ -139,16 +168,21 @@ namespace madbfs::ipc
         Server(Str path, Acceptor acceptor)
             : m_socket_path{ path }
             , m_socket{ std::move(acceptor) }
+            , m_logcat_timer{ m_socket.get_executor() }
         {
         }
 
         Await<void> run();
         Await<void> handle_peer(Socket sock);
-        Await<void> logcat_handler(Socket sock);
+        Await<void> logcat_handler();
 
         String   m_socket_path;
         Acceptor m_socket;
         OnFsOp   m_on_op;
         bool     m_running = false;
+
+        Shared<LogcatSink> m_logcat_sink;
+        Vec<Socket>        m_logcat_subscribers;
+        async::Timer       m_logcat_timer;
     };
 }

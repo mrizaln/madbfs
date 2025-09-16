@@ -143,6 +143,18 @@ namespace madbfs::async
         co_return res;
     }
 
+    template <typename... Ts>
+    Await<Tup<ToUnit<Ts>...>> wait_all(Await<Ts>&&... awaitables) noexcept(false)
+    {
+        using net::experimental::awaitable_operators::operator&&;
+        if constexpr ((std::same_as<Ts, void> and ...)) {
+            co_await (std::move(awaitables) && ...);
+            co_return Tup<ToUnit<Ts>...>{};
+        } else {
+            co_return co_await (std::move(awaitables) && ...);
+        }
+    }
+
     template <typename T>
     Await<Opt<ToUnit<T>>> timeout(
         Await<T>&&            awaitable,

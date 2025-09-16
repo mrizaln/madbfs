@@ -62,6 +62,27 @@ namespace madbfs::ipc
 
 namespace madbfs::ipc
 {
+    LogcatSink::MsgQueue& LogcatSink::swap()
+    {
+        auto new_index = (m_index + 1) % 2;
+        return m_queue[std::exchange(m_index, new_index)];
+    }
+
+    void LogcatSink::sink_it_(const spdlog::details::log_msg& msg)
+    {
+        auto buf = spdlog::memory_buf_t{};
+        this->formatter_->format(msg, buf);
+
+        auto& queue = m_queue[m_index];
+        if (queue.size() == m_max_queue) {
+            queue.pop_front();
+        }
+        queue.emplace_back(fmt::to_string(buf));
+    }
+}
+
+namespace madbfs::ipc
+{
     Expect<Client> Client::create(async::Context& context, Str socket_path)
     {
         auto path = std::filesystem::absolute(socket_path);
@@ -160,8 +181,10 @@ namespace madbfs::ipc
         if (m_running) {
             stop();
         }
-        if (auto sock = m_socket_path.c_str(); ::unlink(sock) < 0) {
-            log_e("{}: failed to unlink socket: {} [{}]", __func__, sock, strerror(errno));
+        if (not m_socket_path.empty()) {
+            if (auto sock = m_socket_path.c_str(); ::unlink(sock) < 0) {
+                log_e("{}: failed to unlink socket: {} [{}]", __func__, sock, strerror(errno));
+            }
         }
     }
 
@@ -191,7 +214,8 @@ namespace madbfs::ipc
         log_d("{}: ipc launched!", __func__);
         m_running = true;
         m_on_op   = std::move(on_op);
-        co_await run();
+
+        std::ignore = co_await async::wait_all(run(), logcat_handler());
     }
 
     void Server::stop()
@@ -199,6 +223,7 @@ namespace madbfs::ipc
         m_running = false;
         m_socket.cancel();
         m_socket.close();
+        m_logcat_timer.cancel();
     }
 
     Await<void> Server::run()
@@ -248,7 +273,7 @@ namespace madbfs::ipc
             switch (op->index()) {
             case 0: /* fs_op  */ value = co_await m_on_op(*op->as<FsOp>()); break;
             case 1: /* help   */ value = help_json; break;
-            case 2: /* logcat */ co_await logcat_handler(std::move(sock)); co_return;
+            case 2: /* logcat */ m_logcat_subscribers.push_back(std::move(sock)); co_return;
             default: log_c("{}: [BUG] not all op variants are handled!", __func__); co_return;
             }
         } else {
@@ -267,38 +292,72 @@ namespace madbfs::ipc
         }
     }
 
-    Await<void> Server::logcat_handler(Socket sock)
+    Await<void> Server::logcat_handler()
     {
         using namespace std::chrono_literals;
 
         log_i("{}: start", __func__);
 
-        auto end   = false;
-        auto index = 0uz;
-        auto queue = Array<std::deque<String>, 2>{};
+        if (not m_logcat_sink) {
+            m_logcat_sink = std::make_shared<LogcatSink>();
+            m_logcat_sink->set_level(log::Level::off);
+            m_logcat_sink->set_pattern(log::logger_pattern);
 
-        // TODO: wire up with the logger (spdlog)
+            if (auto logger = spdlog::get(log::logger_name); not logger) {
+                log_e("{}: can't find logger with name '{}'", __func__, log::logger_name);
+                co_return;
+            } else {
+                auto& sinks = logger->sinks();
+                sinks.push_back(m_logcat_sink);
+            }
+        }
 
-        while (m_running and sock.is_open() and not end) {
-            auto  new_index = (index + 1) % 2;
-            auto& front     = queue[std::exchange(index, new_index)];
+        auto inactive_subscribers = Vec<isize>{};
+        auto prev_empty           = m_logcat_subscribers.empty();
 
-            for (auto& message : front) {
-                auto res = co_await send_message(sock, message);
-                if (not res) {
-                    auto err_msg = std::make_error_code(res.error()).message();
-                    log_w("{}: failed to send message: {}", __func__, err_msg);
-                    end = true;
-                    break;
+        while (m_running) {
+            m_logcat_timer.expires_after(100ms);
+            co_await m_logcat_timer.async_wait();
+
+            if (m_logcat_subscribers.empty()) {
+                prev_empty = true;
+                continue;
+            } else if (prev_empty) {
+                m_logcat_sink->set_level(log::Level::debug);
+                prev_empty = false;
+            }
+
+            auto& messages = m_logcat_sink->swap();
+
+            for (auto&& [i, sock] : m_logcat_subscribers | sv::enumerate) {
+                for (auto& message : messages) {
+                    auto res = co_await send_message(sock, message);
+                    if (not res) {
+                        auto err_msg = std::make_error_code(res.error()).message();
+                        inactive_subscribers.emplace_back(i);
+                        break;
+                    }
                 }
             }
-            front.clear();
 
-            auto timer = async::Timer{ co_await async::current_executor() };
-            timer.expires_after(100ms);
+            for (auto idx : inactive_subscribers | sv::reverse) {
+                m_logcat_subscribers.erase(m_logcat_subscribers.begin() + idx);
+            }
 
-            co_await timer.async_wait();
+            if (m_logcat_subscribers.empty()) {
+                m_logcat_sink->set_level(log::Level::off);
+            }
+
+            inactive_subscribers.clear();
+            messages.clear();
         }
+
+        for (auto& sock : m_logcat_subscribers) {
+            sock.cancel();
+            sock.close();
+        }
+
+        m_logcat_subscribers.clear();
 
         log_i("{}: end", __func__);
     }
