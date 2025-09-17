@@ -14,6 +14,10 @@ namespace madbfs::log
 {
     using Level = spdlog::level::level_enum;
 
+    // I need to use const char* here because spdlog's doesn't support string_view... :(
+    static constexpr auto logger_pattern = "[%Y-%m-%d|%H:%M:%S] [%^-%L-%$] [%s:%#] %v";
+    static constexpr auto logger_name    = "madbfs-log";
+
     constexpr static spdlog::source_loc to_spdlog_source_loc(const std::source_location& loc) noexcept
     {
         return { loc.file_name(), static_cast<int>(loc.line()), loc.function_name() };
@@ -45,27 +49,38 @@ namespace madbfs::log
     };
 
     /**
-     * @brief Initialize the logger at a specific log level with predefined pattern and sink.
+     * @brief Initialize a logger at a specific log level with predefined pattern.
      *
      * @param level The log level to use.
-     * @param log_file The log file to write to. If set to "-", the logger will write to stdout.
+     * @param log_file The log file to write to.
+     *
+     * If the `log_file` is set to "-", the logger will write to stdout. If the `log_file` is set to "" (empty
+     * string) logger will be created with empty sinks.
      */
-    inline void init(spdlog::level::level_enum level, Str log_file) noexcept
+    inline bool init(spdlog::level::level_enum level, Str log_file) noexcept
     {
         constexpr auto max_size  = 10 * 1000 * 1000_usize;    // 10 MB
-        constexpr auto max_files = 3_usize;
+        constexpr auto max_files = 5_usize;
 
-        auto logger = [&] {
-            if (log_file == "-") {
-                return spdlog::stdout_color_mt("logger-stdout", spdlog::color_mode::always);
-            } else {
-                return spdlog::rotating_logger_mt("logger-file", log_file.data(), max_size, max_files);
-            }
-        }();
+        auto logger = std::make_shared<spdlog::logger>(logger_name);
 
+        if (log_file == "-") {
+            logger->sinks().push_back(
+                std::make_shared<spdlog::sinks::stdout_color_sink_mt>(spdlog::color_mode::always)
+            );
+        } else if (not log_file.empty()) {
+            logger->sinks().push_back(std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+                log_file.data(), max_size, max_files, true
+            ));
+        }
+
+        logger->set_pattern(logger_pattern);
+
+        spdlog::register_logger(logger);
         spdlog::set_default_logger(logger);
-        spdlog::set_pattern("[%Y-%m-%d|%H:%M:%S] [%^-%L-%$] [%s:%#] %v");
         spdlog::set_level(level);
+
+        return true;
     }
 
     /**
@@ -75,7 +90,7 @@ namespace madbfs::log
      */
     inline void shutdown() noexcept
     {
-        if (auto logger = spdlog::get("logger-file"); logger) {
+        if (auto logger = spdlog::get(logger_name); logger) {
             logger->flush();
         }
         spdlog::shutdown();

@@ -412,13 +412,18 @@ namespace madbfs::args
             server = std::filesystem::absolute(madbfs_opt.server);
         }
 
+        // if logfile is set to stdout but not in foreground mode, ignore it.
+        auto log_file = std::strcmp(madbfs_opt.log_file, "-") == 0 and not opts.foreground
+                          ? ""
+                          : madbfs_opt.log_file;
+
         co_return ParseResult::Opt{
             .opt = {
                 .mount     = std::move(mountpoint),
                 .serial    = madbfs_opt.serial,
                 .server    = server,
                 .log_level = log_level.value(),
-                .log_file  = madbfs_opt.log_file,
+                .log_file  = log_file,
                 .cachesize = std::bit_ceil(std::max(static_cast<usize>(madbfs_opt.cache_size), 128uz)),
                 .pagesize  = std::bit_ceil(std::max(static_cast<usize>(madbfs_opt.page_size), 64uz)),
                 .ttl       = madbfs_opt.ttl,

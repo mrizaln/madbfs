@@ -1,6 +1,7 @@
 #include <madbfs-common/async/async.hpp>
 #include <madbfs-common/ipc.hpp>
 #include <madbfs-common/log.hpp>
+#include <madbfs-common/util/overload.hpp>
 
 #include <boost/json.hpp>
 #include <boost/program_options.hpp>
@@ -269,6 +270,11 @@ int send_message(std::span<const std::string> message, fs::path socket_path)
             return too_much(op_str, 0);
         }
         op = ipc::op::Help{};
+    } else if (op_str == ipc::op::names::logcat) {
+        if (value_str) {
+            return too_much(op_str, 0);
+        }
+        op = ipc::op::Logcat{ .color = ::isatty(::fileno(stdout)) != 0 };
     } else if (op_str == ipc::op::names::info) {
         if (value_str) {
             return too_much(op_str, 0);
@@ -328,17 +334,68 @@ int send_message(std::span<const std::string> message, fs::path socket_path)
         return 1;
     }
 
-    auto fut = async::spawn(context, client->send(*op), async::use_future);
+    auto sig_set = madbfs::net::signal_set{ context, SIGINT, SIGTERM };
+    sig_set.async_wait([&](auto, auto) { client->stop(); });
+
+    auto coro = op->visit(madbfs::util::Overload{
+        [&](this auto, ipc::FsOp op) -> madbfs::Await<int> {
+            auto response = co_await client->send(op);
+            if (not response) {
+                auto msg = std::make_error_code(response.error()).message();
+                fmt::println(stderr, "error: failed to send message: {}", msg);
+                co_return 1;
+            }
+
+            pretty_print(*response);
+
+            sig_set.cancel();
+            co_return 0;
+        },
+        [&](this auto, ipc::op::Help) -> madbfs::Await<int> {
+            auto response = co_await client->help();
+            if (not response) {
+                auto msg = std::make_error_code(response.error()).message();
+                fmt::println(stderr, "error: failed to send message: {}", msg);
+                co_return 1;
+            }
+
+            pretty_print(*response);
+
+            sig_set.cancel();
+            co_return 0;
+        },
+        [&](this auto, ipc::op::Logcat op) -> madbfs::Await<int> {
+            auto response = co_await client->logcat(op);
+            if (not response) {
+                auto msg = std::make_error_code(response.error()).message();
+                fmt::println(stderr, "error: failed to send message: {}", msg);
+                co_return 1;
+            }
+
+            fmt::println("{:-^80}", "[ LOGCAT START ]");
+
+            for (auto awaitable : *response) {
+                auto message = co_await std::move(awaitable);
+                if (not message) {
+                    break;
+                }
+
+                // the newline is already in the message :P
+                fmt::print("{}", *message);
+            }
+
+            fmt::println("{:-^80}", "[ LOGCAT END ]");
+
+            sig_set.cancel();
+            co_return 0;
+        },
+    });
+
+    auto fut = async::spawn(context, std::move(coro), async::use_future);
+
     context.run();
 
-    if (auto response = fut.get(); not response) {
-        auto msg = std::make_error_code(response.error()).message();
-        fmt::println(stderr, "error: failed to send message: {}", msg);
-        return 1;
-    } else {
-        pretty_print(*response);
-        return 0;
-    }
+    return fut.get();
 }
 
 int main(int argc, char** argv)
