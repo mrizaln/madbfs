@@ -174,7 +174,9 @@ namespace mock
     public:
         using Stats = Gen<ParsedStat>;
 
-        Str name() const override { return "dummy"; }
+        Str          name() const override { return "dummy"; }
+        Opt<Seconds> timeout() const override { return std::nullopt; }
+        Opt<Seconds> set_timeout(Opt<Seconds>) override { return std::nullopt; }
 
         AExpect<Stats>  statdir(Path) override { co_return Unexpect{ {} }; }
         AExpect<Stat>   stat(Path) override { co_return Stat{}; }

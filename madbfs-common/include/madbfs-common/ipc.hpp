@@ -28,12 +28,14 @@ namespace madbfs::ipc
         struct InvalidateCache { };
         struct SetPageSize     { usize kib; };
         struct SetCacheSize    { usize mib; };
-        struct SetTTL          { isize sec; };
+        struct SetTTL          { usize sec; };
+        struct SetTimeout      { usize sec; };
+        struct SetLogLevel     { String lvl; };
         struct Logcat          { bool color; };
 
         // clang-format on
 
-        namespace names
+        namespace name
         {
             constexpr auto help             = "help";
             constexpr auto info             = "info";
@@ -41,16 +43,37 @@ namespace madbfs::ipc
             constexpr auto set_page_size    = "set_page_size";
             constexpr auto set_cache_size   = "set_cache_size";
             constexpr auto set_ttl          = "set_ttl";
+            constexpr auto set_timeout      = "set_timeout";
+            constexpr auto set_log_level    = "set_log_level";
             constexpr auto logcat           = "logcat";
         }
+
+        constexpr auto names = std::to_array({
+            name::help,
+            name::info,
+            name::invalidate_cache,
+            name::set_page_size,
+            name::set_cache_size,
+            name::set_ttl,
+            name::set_timeout,
+            name::set_log_level,
+            name::logcat,
+        });
     }
 
     /**
      * @class FsOp
      * @brief Operations that involves the FS.
      */
-    struct FsOp
-        : util::VarWrapper<op::Info, op::InvalidateCache, op::SetPageSize, op::SetCacheSize, op::SetTTL>
+    struct FsOp    //
+        : util::VarWrapper<
+              op::Info,
+              op::InvalidateCache,
+              op::SetPageSize,
+              op::SetCacheSize,
+              op::SetTTL,
+              op::SetTimeout,
+              op::SetLogLevel>
     {
         using VarWrapper::VarWrapper;
     };

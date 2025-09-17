@@ -37,7 +37,9 @@ namespace madbfs::connection
         ServerConnection(const ServerConnection&)            = delete;
         ServerConnection& operator=(const ServerConnection&) = delete;
 
-        Str name() const override { return "server"; }
+        Str          name() const override { return "server"; }
+        Opt<Seconds> timeout() const override { return m_timeout; }
+        Opt<Seconds> set_timeout(Opt<Seconds> timeout) override { return std::exchange(m_timeout, timeout); }
 
         AExpect<Gen<ParsedStat>> statdir(path::Path path) override;
         AExpect<data::Stat>      stat(path::Path path) override;

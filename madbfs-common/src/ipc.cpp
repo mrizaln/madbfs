@@ -35,19 +35,29 @@ namespace madbfs::ipc
             const auto json = json::parse(msg);
             const auto op   = json::value_to<String>(json.at("op"));
 
-            if (op == op::names::help) {
+            if (op == op::name::help) {
                 return Op{ op::Help{} };
-            } else if (op == op::names::info) {
+            } else if (op == op::name::info) {
                 return Op{ op::Info{} };
-            } else if (op == op::names::invalidate_cache) {
+            } else if (op == op::name::invalidate_cache) {
                 return Op{ op::InvalidateCache{} };
-            } else if (op == op::names::set_page_size) {
+            } else if (op == op::name::set_page_size) {
                 return Op{ op::SetPageSize{ .kib = json::value_to<u32>(json.at("value")) } };
-            } else if (op == op::names::set_cache_size) {
+            } else if (op == op::name::set_cache_size) {
                 return Op{ op::SetCacheSize{ .mib = json::value_to<u32>(json.at("value")) } };
-            } else if (op == op::names::set_ttl) {
-                return Op{ op::SetTTL{ .sec = json::value_to<i32>(json.at("value")) } };
-            } else if (op == op::names::logcat) {
+            } else if (op == op::name::set_ttl) {
+                return Op{ op::SetTTL{ .sec = json::value_to<u32>(json.at("value")) } };
+            } else if (op == op::name::set_timeout) {
+                return Op{ op::SetTimeout{ .sec = json::value_to<u32>(json.at("value")) } };
+            } else if (op == op::name::set_log_level) {
+                auto level = json::value_to<String>(json.at("value"));
+                if (not log::level_from_str(level)) {
+                    return Unexpect{
+                        fmt::format("'{}' is not a valid log level {}", level, log::level_names)
+                    };
+                }
+                return Op{ op::SetLogLevel{ .lvl = level } };
+            } else if (op == op::name::logcat) {
                 return op::Logcat{ .color = json::value_to<bool>(json.at("value")) };
             }
 
@@ -116,15 +126,17 @@ namespace madbfs::ipc
 
     AExpect<json::value> Client::send(FsOp op)
     {
-        namespace n = op::names;
+        namespace n = op::name;
 
         // clang-format off
-        auto op_json = op.visit(util::Overload{
+        auto op_json = std::move(op).visit(util::Overload{
             [&](op::Info           ) { return json::value{ { "op", n::info             }                      }; },
             [&](op::InvalidateCache) { return json::value{ { "op", n::invalidate_cache }                      }; },
             [&](op::SetPageSize  op) { return json::value{ { "op", n::set_page_size    }, { "value", op.kib } }; },
             [&](op::SetCacheSize op) { return json::value{ { "op", n::set_cache_size   }, { "value", op.mib } }; },
             [&](op::SetTTL       op) { return json::value{ { "op", n::set_ttl          }, { "value", op.sec } }; },
+            [&](op::SetTimeout   op) { return json::value{ { "op", n::set_timeout      }, { "value", op.sec } }; },
+            [&](op::SetLogLevel  op) { return json::value{ { "op", n::set_log_level    }, { "value", op.lvl } }; },
         });
         // clang-format on
 
@@ -147,7 +159,7 @@ namespace madbfs::ipc
 
     AExpect<json::value> Client::help()
     {
-        auto op_json = json::value{ { "op", op::names::help } };
+        auto op_json = json::value{ { "op", op::name::help } };
         if (auto res = co_await send_message(m_socket, json::serialize(op_json)); not res) {
             co_return Unexpect{ res.error() };
         }
@@ -167,7 +179,7 @@ namespace madbfs::ipc
 
     AExpect<Gen<AExpect<String>>> Client::logcat(op::Logcat opt)
     {
-        auto op_json = json::value{ { "op", op::names::logcat }, { "value", opt.color } };
+        auto op_json = json::value{ { "op", op::name::logcat }, { "value", opt.color } };
         if (auto res = co_await send_message(m_socket, json::serialize(op_json)); not res) {
             co_return Unexpect{ res.error() };
         }
@@ -227,7 +239,7 @@ namespace madbfs::ipc
             m_logcat_sink->set_level(log::Level::off);
             m_logcat_sink->set_pattern(log::logger_pattern);
 
-            if (auto logger = spdlog::get(log::logger_name); not logger) {
+            if (auto logger = log::get_logger(); not logger) {
                 log_e("{}: can't find logger with name '{}'", __func__, log::logger_name);
                 co_return;
             } else {
@@ -263,20 +275,6 @@ namespace madbfs::ipc
 
     Await<void> Server::handle_peer(Socket sock)
     {
-        // clang-format off
-        static const auto help_json = json::value{
-            { "operations", {
-                ipc::op::names::help,
-                ipc::op::names::logcat,
-                ipc::op::names::info,
-                ipc::op::names::invalidate_cache,
-                ipc::op::names::set_page_size,
-                ipc::op::names::set_cache_size,
-                ipc::op::names::set_ttl,
-            } },
-        };
-        // clang-format on
-
         auto op_str = co_await receive_message(sock);
         if (not op_str) {
             co_return;
@@ -292,13 +290,18 @@ namespace madbfs::ipc
             status = "success";
 
             switch (op->index()) {
-            case 0: /* fs_op  */ value = co_await m_on_op(*op->as<FsOp>()); break;
-            case 1: /* help   */ value = help_json; break;
-            case 2: /* logcat */ {
+            case Op::index_of<FsOp>():
+                value = co_await m_on_op(std::move(*op->as<FsOp>()));    //
+                break;
+            case Op::index_of<op::Help>():
+                value = json::value{ { "operations", json::value_from(op::names) } };
+                break;
+            case Op::index_of<op::Logcat>():
                 m_logcat_subscribers.emplace_back(std::move(sock), op->as<op::Logcat>()->color);
                 co_return;
-            }
-            default: log_c("{}: [BUG] not all op variants are handled!", __func__); co_return;
+            default:
+                log_c("{}: [BUG] not all op variants are handled!", __func__);    //
+                co_return;
             }
         } else {
             status = "error";
@@ -344,12 +347,14 @@ namespace madbfs::ipc
                 if (not prev_empty) {
                     log_i("{}: no subscribers, turning off logcat sink", __func__);
                     m_logcat_sink->set_level(log::Level::off);
+                    m_logcat_sink->swap().clear();
+                    m_logcat_sink->swap().clear();
                 }
                 prev_empty = true;
                 continue;
             } else if (prev_empty) {
                 log_i("{}: subscribers not empty anymore, turning on logcat sink", __func__);
-                m_logcat_sink->set_level(spdlog::get(log::logger_name)->level());
+                m_logcat_sink->set_level(log::Level::trace);    // capture all
                 prev_empty = false;
             }
 
@@ -376,7 +381,6 @@ namespace madbfs::ipc
 
                     if (not res) {
                         auto err_msg = std::make_error_code(res.error()).message();
-                        log_w("{}: peer error: {}", __func__, i);
                         inactive_subscribers.emplace_back(i);
                         break;
                     }

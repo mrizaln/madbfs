@@ -9,7 +9,9 @@ namespace madbfs::connection
     public:
         AdbConnection() = default;
 
-        Str name() const override { return "adb"; }
+        Str          name() const override { return "adb"; }
+        Opt<Seconds> timeout() const override { return m_timeout; }
+        Opt<Seconds> set_timeout(Opt<Seconds> timeout) override { return std::exchange(m_timeout, timeout); }
 
         AExpect<Gen<ParsedStat>> statdir(path::Path path) override;
         AExpect<data::Stat>      stat(path::Path path) override;
@@ -28,5 +30,8 @@ namespace madbfs::connection
 
         AExpect<usize> copy_file_range(path::Path in, off_t in_off, path::Path out, off_t out_off, usize size)
             override;
+
+    private:
+        Opt<Seconds> m_timeout;
     };
 }

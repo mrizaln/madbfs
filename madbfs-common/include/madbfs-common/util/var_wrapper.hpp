@@ -48,6 +48,38 @@ namespace madbfs::util
         concept VisitorComplete = visitor_complete<Visit, Var>();
     }
 
+    template <typename>
+    struct VarTraits
+    {
+    };
+
+    template <template <typename...> typename VT, typename... Ts>
+    struct VarTraits<VT<Ts...>>
+    {
+        static consteval std::size_t size() { return sizeof...(Ts); }
+
+        template <typename T>
+        static consteval bool has_type()
+        {
+            return (std::same_as<T, Ts> || ...);
+        }
+
+        template <typename T>
+            requires (has_type<T>())
+        static consteval std::size_t type_index()
+        {
+            return []<std::size_t... Is>(std::index_sequence<Is...>) {
+                return ((std::same_as<T, Ts> ? Is : 0) + ...);
+            }(std::make_index_sequence<size()>{});
+        }
+
+        template <std::size_t I>
+        using TypeAt = std::variant_alternative_t<I, std::variant<Ts...>>;
+
+        template <typename T, typename Var>
+        using Swap = VarTraits<Var>::template TypeAt<type_index<T>()>;
+    };
+
     /**
      * @class VarWrapper
      * @brief CRTP struct for types that inherits `std::variant`
@@ -57,7 +89,8 @@ namespace madbfs::util
     template <typename... Ts>
     struct VarWrapper : std::variant<Ts...>
     {
-        using Var = std::variant<Ts...>;
+        using Var    = std::variant<Ts...>;
+        using Traits = VarTraits<Var>;
 
         template <typename... Args>
             requires std::constructible_from<Var, Args...>
@@ -71,6 +104,12 @@ namespace madbfs::util
         VarWrapper(T&& t)
             : Var{ std::forward<T>(t) }
         {
+        }
+
+        template <typename T>
+        static consteval std::size_t index_of()
+        {
+            return Traits::template type_index<T>();
         }
 
         template <typename Self, detail::VisitorComplete<detail::CopyCVRef<Self, Var>> Visitor>
@@ -87,7 +126,7 @@ namespace madbfs::util
         }
 
         template <typename T>
-        bool holds()
+        bool holds() const
         {
             return std::holds_alternative<T>(as_var());
         }
@@ -97,6 +136,13 @@ namespace madbfs::util
         {
             auto& var = as_var();
             return std::get_if<T>(&var);
+        }
+
+        template <typename T>
+        const T* as() const
+        {
+            auto& var = as_var();
+            return std::get_if<const T>(&var);
         }
     };
 }

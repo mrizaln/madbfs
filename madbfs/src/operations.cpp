@@ -114,7 +114,7 @@ namespace madbfs::operations
         auto page_size  = args->pagesize * 1024;
         auto max_pages  = cache_size / page_size;
         auto server     = args->server.transform(&std::filesystem::path::c_str).and_then(&path::create);
-        auto ttl        = args->ttl < 0 ? std::nullopt : Opt<Seconds>{ args->ttl };
+        auto ttl        = args->ttl < 1 ? std::nullopt : Opt<Seconds>{ args->ttl };
         auto timeout    = args->timeout < 1 ? std::nullopt : Opt<Seconds>{ args->timeout };
 
         return new Madbfs{

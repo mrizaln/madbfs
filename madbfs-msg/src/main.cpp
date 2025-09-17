@@ -14,6 +14,7 @@ namespace po    = boost::program_options;
 namespace json  = boost::json;
 namespace async = madbfs::async;
 namespace fs    = std::filesystem;
+namespace ipc   = madbfs::ipc;
 
 enum Mode
 {
@@ -142,7 +143,7 @@ void pretty_print(json::value const& json, std::string* indent = nullptr)
         auto const& obj = json.get_object();
         if (!obj.empty()) {
             for (auto it = obj.begin(); it != obj.end();) {
-                std::cout << *indent << json::serialize(it->key()) << " : ";
+                std::cout << *indent << json::serialize(it->key()) << ": ";
                 pretty_print(it->value(), indent);
                 if (++it != obj.end()) {
                     std::cout << ",\n";
@@ -241,20 +242,14 @@ std::optional<Int> to_int(std::string_view str)
     }
 };
 
-int send_message(std::span<const std::string> message, fs::path socket_path)
+std::optional<ipc::Op> parse_message(std::span<const std::string> message)
 {
-    namespace ipc = madbfs::ipc;
-
-    assert(not message.empty());
-
     auto too_much = [&](std::string_view cmd, int num) {
         fmt::println(stderr, "error: too much argument passed to command '{}' (expects {} args)", cmd, num);
-        return 1;
     };
 
     auto too_few = [&](std::string_view cmd, int num) {
         fmt::println(stderr, "error: too few argument passed to command '{}' (expects {} args)", cmd, num);
-        return 1;
     };
 
     auto op_str    = std::string_view{ message[0] };
@@ -265,64 +260,85 @@ int send_message(std::span<const std::string> message, fs::path socket_path)
     }
 
     auto op = std::optional<ipc::Op>{};
-    if (op_str == ipc::op::names::help) {
+    if (op_str == ipc::op::name::help) {
         if (value_str) {
-            return too_much(op_str, 0);
-        }
-        op = ipc::op::Help{};
-    } else if (op_str == ipc::op::names::logcat) {
-        if (value_str) {
-            return too_much(op_str, 0);
-        }
-        op = ipc::op::Logcat{ .color = ::isatty(::fileno(stdout)) != 0 };
-    } else if (op_str == ipc::op::names::info) {
-        if (value_str) {
-            return too_much(op_str, 0);
-        }
-        op = ipc::op::Info{};
-    } else if (op_str == ipc::op::names::invalidate_cache) {
-        if (value_str) {
-            return too_much(op_str, 0);
-        }
-        op = ipc::op::InvalidateCache{};
-    } else if (op_str == ipc::op::names::set_page_size) {
-        if (not value_str) {
-            return too_few(op_str, 1);
-        } else if (message.size() > 2) {
-            return too_much(op_str, 1);
-        }
-
-        if (auto value = to_int<unsigned long>(*value_str); not value) {
-            return 1;
+            too_much(op_str, 0);
         } else {
+            op = ipc::op::Help{};
+        }
+    } else if (op_str == ipc::op::name::logcat) {
+        if (value_str) {
+            too_much(op_str, 0);
+        } else {
+            op = ipc::op::Logcat{ .color = ::isatty(::fileno(stdout)) != 0 };
+        }
+    } else if (op_str == ipc::op::name::info) {
+        if (value_str) {
+            too_much(op_str, 0);
+        } else {
+            op = ipc::op::Info{};
+        }
+    } else if (op_str == ipc::op::name::invalidate_cache) {
+        if (value_str) {
+            too_much(op_str, 0);
+        } else {
+            op = ipc::op::InvalidateCache{};
+        }
+    } else if (op_str == ipc::op::name::set_page_size) {
+        if (not value_str) {
+            too_few(op_str, 1);
+        } else if (message.size() > 2) {
+            too_much(op_str, 1);
+        } else if (auto value = to_int<unsigned long>(*value_str); value) {
             op = ipc::op::SetPageSize{ .kib = *value };
         }
-    } else if (op_str == ipc::op::names::set_cache_size) {
+    } else if (op_str == ipc::op::name::set_cache_size) {
         if (not value_str) {
-            return too_few(op_str, 1);
+            too_few(op_str, 1);
         } else if (message.size() > 2) {
-            return too_much(op_str, 1);
-        }
-
-        if (auto value = to_int<unsigned long>(*value_str); not value) {
-            return 1;
-        } else {
+            too_much(op_str, 1);
+        } else if (auto value = to_int<unsigned long>(*value_str); value) {
             op = ipc::op::SetCacheSize{ .mib = *value };
         }
-    } else if (op_str == ipc::op::names::set_ttl) {
+    } else if (op_str == ipc::op::name::set_ttl) {
         if (not value_str) {
-            return too_few(op_str, 1);
+            too_few(op_str, 1);
         } else if (message.size() > 2) {
-            return too_much(op_str, 1);
-        }
-
-        if (auto value = to_int<long>(*value_str); not value) {
-            return 1;
-        } else {
+            too_much(op_str, 1);
+        } else if (auto value = to_int<unsigned long>(*value_str); value) {
             op = ipc::op::SetTTL{ .sec = *value };
+        }
+    } else if (op_str == ipc::op::name::set_timeout) {
+        if (not value_str) {
+            too_few(op_str, 1);
+        } else if (message.size() > 2) {
+            too_much(op_str, 1);
+        } else if (auto value = to_int<unsigned long>(*value_str); value) {
+            op = ipc::op::SetTimeout{ .sec = *value };
+        }
+    } else if (op_str == ipc::op::name::set_log_level) {
+        if (not value_str) {
+            too_few(op_str, 1);
+        } else if (message.size() > 2) {
+            too_much(op_str, 1);
+        } else if (not madbfs::log::level_from_str(*value_str)) {
+            fmt::println(stderr, "'{} is not a valid log level {}", *value_str, madbfs::log::level_names);
+        } else {
+            op = ipc::op::SetLogLevel{ .lvl = std::string{ *value_str } };
         }
     } else {
         fmt::println(stderr, "error: unknown command '{}'", op_str);
+    }
+
+    return op;
+}
+
+int send_message(std::span<const std::string> message, fs::path socket_path)
+{
+    assert(not message.empty());
+
+    auto op = parse_message(message);
+    if (not op) {
         return 1;
     }
 
@@ -399,7 +415,7 @@ int send_message(std::span<const std::string> message, fs::path socket_path)
 }
 
 int main(int argc, char** argv)
-{
+try {
     auto may_args = parse_args(argc, argv);
     if (may_args.index() == 0) {
         return std::get<0>(may_args).ret;
@@ -429,4 +445,8 @@ int main(int argc, char** argv)
     }
     default: return 1;
     }
+} catch (const std::exception& e) {
+    fmt::println(stderr, "error: exception occurred: {}", e.what());
+} catch (...) {
+    fmt::println(stderr, "error: exception occurred (unknown exception)");
 }

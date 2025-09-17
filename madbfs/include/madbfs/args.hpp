@@ -102,10 +102,10 @@ namespace madbfs::args
             "                             (if omitted will search the file automatically)\n"
             "                             (must have the same arch as your phone)\n"
             "    --log-level=<enum>     log level to use\n"
-            "                             (default: warn)\n"
-            "                             (values: trace, debug, info, warn, error, critical, off)\n"
+            "                             (default: \"warning\")\n"
+            "                             (enum: {0:n})\n"
             "    --log-file=<path>      log file to write to\n"
-            "                             (default: '-' for stdout)\n"
+            "                             (default: \"-\" for stdout)\n"
             "    --cache-size=<int>     maximum size of the cache in MiB\n"
             "                             (default: 256)\n"
             "                             (minimum: 128)\n"
@@ -116,36 +116,23 @@ namespace madbfs::args
             "                             (value will be rounded up to the next power of 2)\n"
             "    --ttl=<int>            set the TTL of the stat cache of the filesystem in seconds\n"
             "                             (default: 30)\n"
-            "                             (set to negative value to disable it)\n"
+            "                             (set to 0 to disable it)\n"
             "    --timeout=<int>        set the timeout of every remote operation\n"
             "                             (default: 10)\n"
-            "                             (set to non-positive value to disable it)\n"
+            "                             (set to 0 to disable it)\n"
             "    --port=<int>           set the port number the server will listen on\n"
             "                             (default: 12345)\n"
             "    --no-server            don't launch server\n"
             "                             (will still attempt to connect to specified port)\n"
             "                             (fall back to adb shell calls if connection failed)\n"
-            "                             (useful for debugging the server)\n"
+            "                             (useful for debugging the server)\n",
+            log::level_names
         );
 
         fmt::println(stdout, "\nOptions for libfuse:");
         ::fuse_cmdline_help();
         ::fuse_lowlevel_help();
     };
-
-    inline Opt<log::Level> parse_level_str(Str level)
-    {
-        // clang-format off
-        if      (level == "trace")      return log::Level::trace;
-        else if (level == "debug")      return log::Level::debug;
-        else if (level == "info")       return log::Level::info;
-        else if (level == "warn")       return log::Level::warn;
-        else if (level == "error")      return log::Level::err;
-        else if (level == "critical")   return log::Level::critical;
-        else if (level == "off")        return log::Level::off;
-        else                            return std::nullopt;
-        // clang-format on
-    }
 
     inline Await<connection::DeviceStatus> check_serial(Str serial)
     {
@@ -310,7 +297,7 @@ namespace madbfs::args
 
         // NOTE: these strings must be malloc-ed since fuse_opt_parse will free them
         auto madbfs_opt = MadbfsOpt{
-            .log_level = ::strdup("warn"),
+            .log_level = ::strdup("warning"),
             .log_file  = ::strdup("-"),
         };
 
@@ -347,10 +334,10 @@ namespace madbfs::args
             co_return ParseResult{ 1 };
         }
 
-        auto log_level = parse_level_str(madbfs_opt.log_level);
+        auto log_level = log::level_from_str(madbfs_opt.log_level);
         if (not log_level.has_value()) {
             fmt::println(stderr, "error: invalid log level '{}'", madbfs_opt.log_level);
-            fmt::println(stderr, "valid log levels: trace, debug, info, warn, error, critical, off");
+            fmt::println(stderr, "       valid log levels: {}", log::level_names);
             ::fuse_opt_free_args(&args);
             co_return ParseResult{ 1 };
         }

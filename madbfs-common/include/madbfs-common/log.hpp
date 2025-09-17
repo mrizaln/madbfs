@@ -18,6 +18,16 @@ namespace madbfs::log
     static constexpr auto logger_pattern = "[%Y-%m-%d|%H:%M:%S] [%^-%L-%$] [%s:%#] %v";
     static constexpr auto logger_name    = "madbfs-log";
 
+    // I have to do this conversion gymnastics because somehow spdlog's string_view is not compaitble with
+    // std's string_view.
+    static constexpr auto level_names = []() {
+        auto names = Array<Str, Level::n_levels>{};
+        for (auto level = 0uz; auto name : std::to_array(SPDLOG_LEVEL_NAMES)) {
+            names[level++] = { name.begin(), name.end() };
+        }
+        return names;
+    }();
+
     constexpr static spdlog::source_loc to_spdlog_source_loc(const std::source_location& loc) noexcept
     {
         return { loc.file_name(), static_cast<int>(loc.line()), loc.function_name() };
@@ -49,7 +59,7 @@ namespace madbfs::log
     };
 
     /**
-     * @brief Initialize a logger at a specific log level with predefined pattern.
+     * @brief Initialize logger at a specific log level with predefined pattern.
      *
      * @param level The log level to use.
      * @param log_file The log file to write to.
@@ -57,7 +67,7 @@ namespace madbfs::log
      * If the `log_file` is set to "-", the logger will write to stdout. If the `log_file` is set to "" (empty
      * string) logger will be created with empty sinks.
      */
-    inline bool init(spdlog::level::level_enum level, Str log_file) noexcept
+    inline bool init(spdlog::level::level_enum level, Str log_file) noexcept(false)
     {
         constexpr auto max_size  = 10 * 1000 * 1000_usize;    // 10 MB
         constexpr auto max_files = 5_usize;
@@ -96,9 +106,35 @@ namespace madbfs::log
         spdlog::shutdown();
     }
 
+    inline Shared<spdlog::logger> get_logger() noexcept
+    {
+        return spdlog::get(logger_name);
+    }
+
     inline Level get_level() noexcept
     {
         return spdlog::get_level();
+    }
+
+    inline void set_level(Level level) noexcept
+    {
+        spdlog::set_level(level);
+    }
+
+    inline Opt<Level> level_from_str(Str level) noexcept
+    {
+        for (auto i = 0uz; i < level_names.size(); ++i) {
+            if (level == level_names[i]) {
+                return static_cast<Level>(i);
+            }
+        }
+        return std::nullopt;
+    }
+
+    inline Str level_to_str(Level level) noexcept
+    {
+        auto str = spdlog::level::to_string_view(level);
+        return { str.begin(), str.end() };
     }
 
     /**

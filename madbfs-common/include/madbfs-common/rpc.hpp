@@ -158,55 +158,17 @@ namespace madbfs::rpc
         Procedure proc() { return static_cast<Procedure>(index()); }
     };
 
-    namespace meta
-    {
-        template <typename>
-        struct VarTraits
-        {
-        };
+    template <typename T>
+    concept IsRequest = util::VarTraits<Request::Var>::has_type<T>();
 
-        template <template <typename...> typename VT, typename... Ts>
-        struct VarTraits<VT<Ts...>>
-        {
-            static constexpr usize size = sizeof...(Ts);
+    template <typename T>
+    concept IsResponse = util::VarTraits<Response::Var>::has_type<T>();
 
-            template <typename T>
-            static constexpr bool has_type = (std::same_as<T, Ts> || ...);
+    template <IsRequest Req>
+    using ToResp = util::VarTraits<Request::Var>::Swap<Req, Response::Var>;
 
-            template <usize I>
-            using TypeAt = std::tuple_element_t<I, Tup<Ts...>>;    // A hack :D
-
-            template <typename T>
-                requires has_type<T>
-            static consteval usize type_index()
-            {
-                auto handler = []<usize... Is>(std::index_sequence<Is...>) {
-                    return ((std::same_as<T, Ts> ? Is : 0) + ...);
-                };
-                return handler(std::make_index_sequence<size>{});
-            }
-
-            template <typename T, typename Var>
-            using Swap = VarTraits<Var>::template TypeAt<type_index<T>()>;
-        };
-
-        template <typename T>
-        concept IsRequest = meta::VarTraits<Request::Var>::has_type<T>;
-
-        template <typename T>
-        concept IsResponse = meta::VarTraits<Response::Var>::has_type<T>;
-
-        template <IsRequest Req>
-        using ToResp = VarTraits<Request::Var>::Swap<Req, Response::Var>;
-
-        template <IsResponse Resp>
-        using ToReq = VarTraits<Response::Var>::Swap<Resp, rpc::Request::Var>;
-    }
-
-    using meta::IsRequest;
-    using meta::IsResponse;
-    using meta::ToReq;
-    using meta::ToResp;
+    template <IsResponse Resp>
+    using ToReq = util::VarTraits<Response::Var>::Swap<Resp, rpc::Request::Var>;
 
     class Client
     {

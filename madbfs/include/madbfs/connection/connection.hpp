@@ -21,7 +21,9 @@ namespace madbfs::connection
     class Connection
     {
     public:
-        virtual Str name() const = 0;
+        virtual Str          name() const              = 0;
+        virtual Opt<Seconds> timeout() const           = 0;
+        virtual Opt<Seconds> set_timeout(Opt<Seconds>) = 0;
 
         // directory operations
         // --------------------

@@ -58,7 +58,7 @@ void unexpected_program_end(const char* msg, bool is_sigsegv)
 }
 
 int main(int argc, char** argv)
-{
+try {
     std::set_terminate([] { unexpected_program_end("std::terminate", false); });
     std::signal(SIGSEGV, [](int) { unexpected_program_end("SIGSEGV", true); });
     std::signal(SIGTERM, [](int) { madbfs::log::shutdown(); });
@@ -73,10 +73,13 @@ int main(int argc, char** argv)
     }
     auto&& [opt, args] = std::move(maybe_opt).opt();
 
+    if (not madbfs::log::init(opt.log_level, opt.log_file)) {
+        return 1;
+    }
+
     fmt::println("[madbfs] mount '{}' [cache={} MiB, page={} KiB]", opt.serial, opt.cachesize, opt.pagesize);
     fmt::println("[madbfs] unmount with 'fusermount -u {:?}'", opt.mount);
 
-    madbfs::log::init(opt.log_level, opt.log_file);
     if (opt.log_file != "-") {
         madbfs::log_i(
             "[madbfs] mount '{}' at '{}' with cache size {} MiB and page size {} KiB",
@@ -101,4 +104,8 @@ int main(int argc, char** argv)
     }
 
     return ret;
+} catch (const std::exception& e) {
+    fmt::println(stderr, "error: exception occurred: {}", e.what());
+} catch (...) {
+    fmt::println(stderr, "error: exception occurred (unknown exception)");
 }
