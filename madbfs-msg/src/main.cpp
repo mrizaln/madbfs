@@ -22,6 +22,13 @@ enum Mode
     Message,
 };
 
+enum Color
+{
+    Never,
+    Always,
+    Auto,
+};
+
 struct Exit
 {
     int ret;
@@ -33,6 +40,7 @@ struct Args
     std::string              serial;
     std::string              search_path;
     std::vector<std::string> message;
+    bool                     color;
 };
 
 struct Socket
@@ -40,6 +48,21 @@ struct Socket
     std::string serial;
     fs::path    path;
 };
+
+std::istream& operator>>(std::istream& in, Color& c)
+{
+    auto string = std::string{};
+    in >> string;
+
+    // clang-format off
+    if      (string == "never" ) { c = Color::Never;               }
+    else if (string == "always") { c = Color::Always;              }
+    else if (string == "auto"  ) { c = Color::Auto;                }
+    else                         { in.setstate(std::ios::failbit); }
+    // clang-format on
+
+    return in;
+}
 
 std::variant<Exit, Args> parse_args(int argc, char** argv)
 {
@@ -51,19 +74,23 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
 
     auto search_path = std::string{};
     auto serial      = std::string{};
+    auto color       = Color{};
 
     auto desc = po::options_description{ "options" };
     desc.add_options()                    //
         ("help,h", "print help")          //
         ("version,v", "print version")    //
+        ("color,c",
+         po::value<Color>(&color)->default_value(Color::Auto, "auto")->value_name("when"),
+         "color the output (only for logcat) when=[never, always, auto] ")    //
         ("list,l",
          "list mounted devices with active IPC")    //
         ("search-dir,d",
-         po::value<std::string>(&search_path)->default_value(default_search_path),
+         po::value<std::string>(&search_path)->default_value(default_search_path)->value_name("dir"),
          "specify the search directory for socket files")    //
         ("serial,s",
-         default_serial ? po::value<std::string>(&serial)->default_value(default_serial)
-                        : po::value<std::string>(&serial),
+         default_serial ? po::value<std::string>(&serial)->default_value(default_serial)->value_name("serial")
+                        : po::value<std::string>(&serial)->value_name("serial"),
          "the serial number of the mounted device (can be omitted if 'ANDROID_SERIAL' env is defined)")    //
         ("message",
          po::value<std::vector<std::string>>(),
@@ -103,7 +130,13 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
     }
 
     if (vm.count("list")) {
-        return Args{ .mode = Mode::List, .serial = {}, .search_path = search_path, .message = {} };
+        return Args{
+            .mode        = Mode::List,
+            .serial      = {},
+            .search_path = search_path,
+            .message     = {},
+            .color       = false,
+        };
     }
 
     if (not vm.count("serial")) {
@@ -120,11 +153,19 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
         return Exit{ 1 };
     }
 
+    auto should_color = false;
+    switch (color) {
+    case Always: should_color = true; break;
+    case Auto: should_color = ::isatty(::fileno(stdout)) != 0; break;
+    case Never: should_color = false; break;
+    }
+
     return Args{
         .mode        = Mode::Message,
         .serial      = serial,
         .search_path = search_path,
         .message     = vm["message"].as<std::vector<std::string>>(),
+        .color       = should_color,
     };
 }
 
@@ -270,7 +311,7 @@ std::optional<ipc::Op> parse_message(std::span<const std::string> message)
         if (value_str) {
             too_much(op_str, 0);
         } else {
-            op = ipc::op::Logcat{ .color = ::isatty(::fileno(stdout)) != 0 };
+            op = ipc::op::Logcat{ .color = false };
         }
     } else if (op_str == ipc::op::name::info) {
         if (value_str) {
@@ -333,7 +374,7 @@ std::optional<ipc::Op> parse_message(std::span<const std::string> message)
     return op;
 }
 
-int send_message(std::span<const std::string> message, fs::path socket_path)
+int send_message(std::span<const std::string> message, fs::path socket_path, bool color)
 {
     assert(not message.empty());
 
@@ -380,8 +421,8 @@ int send_message(std::span<const std::string> message, fs::path socket_path)
             sig_set.cancel();
             co_return 0;
         },
-        [&](this auto, ipc::op::Logcat op) -> madbfs::Await<int> {
-            auto response = co_await client->logcat(op);
+        [&](this auto, ipc::op::Logcat) -> madbfs::Await<int> {
+            auto response = co_await client->logcat({ .color = color });
             if (not response) {
                 auto msg = std::make_error_code(response.error()).message();
                 fmt::println(stderr, "error: failed to send message: {}", msg);
@@ -441,7 +482,7 @@ try {
             fmt::println(stderr, "error: no socket for '{}' in '{}'", args.serial, search_path.c_str());
             return 1;
         }
-        return send_message(args.message, socket->path);
+        return send_message(args.message, socket->path, args.color);
     }
     default: return 1;
     }
