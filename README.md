@@ -319,17 +319,19 @@ $ ./madbfs --log-file=- --log-level=debug -d <mountpoint>                     # 
 $ ./madbfs --log-file=- --log-level=debug -d <mountpoint> 2> /dev/null        # this will print only madbfs log messages since libfuse debug messages are printed to stderr
 ```
 
-### IPC
-
-> see [this python script](./madbfs/test/ipc.py) for an example of an IPC client.
+### IPC (and `madbfs-msg`)
 
 Filesystem parameters can be reconfigured and queried during runtime though IPC using unix socket. The supported operations are:
 
 - help,
 - info,
 - invalidate cache,
-- set page size, and
-- set cache size.
+- set page size,
+- set cache size,
+- set ttl,
+- set timeout,
+- set log level, and
+- logcat (read `madbfs` log in real-time, similar to `adb logcat`).
 
 The address of the socket in which you can connect to as client is composed of the name of the filesystem and the serial of the device. The socket itself is created in directory defined by `XDG_RUNTIME_DIR` environment variable (it's usually set to `/run/user/<uid>`). If the `XDG_RUNTIME_DIR` is not defined, as fallback, the directory is set to `/tmp`. The socket will be created when the filesystem initializes.
 
@@ -341,132 +343,7 @@ For example, the socket path for a device with serial `192.168.240.112:5555`:
 
 If at initialization this socket file exists, the IPC won't start. This may happen if the filesystem is terminated unexpectedly (crash or kill signal). You need to remove this file manually if that happens.
 
-The communication though the IPC is done using a simple Length-Value message protocol. The first 4 bytes of the message is the length of it (excluding itself) in network byte order, and the rest is the payload.
-
-The payload must be a JSON object in the form that depends on the operation requested. The general form of the JSON is in the form of:
-
-```json
-{
-  "op": <name>,
-  "value": <value>
-}
-```
-
-Some operations only requires `"op"` field, while some requires `"value"` field. Below is the break down:
-
-- Help:
-
-  ```json
-  { "op": "help" }
-  ```
-
-- Info:
-
-  ```json
-  { "op": "info" }
-  ```
-
-- Set cache size:
-
-  ```json
-  { "op": "set_cache_size", "value": <uint> }
-  ```
-
-  > - unit is in MiB
-  > - `uint` must be greater than or equal to 128
-  > - the value will be rouded up to the nearest multiple of 2
-
-- Set page size:
-
-  ```json
-  { "op": "set_page_size", "value": <uint> }
-  ```
-
-  > - unit is in KiB
-  > - `uint` must be between 64 and 4096
-  > - the value will be rouded up to the nearest multiple of 2
-
-The IPC will reply immediately after an operation is completed. The reply is in a JSON in the form of
-
-```json
-{
-  "status", <"success"|"error">,
-  "value": <value>
-}
-```
-
-The `"value"` field will be filled with the value of the response of the resulting operation. It will contain a string that explains the error if an error status happens.
-
-The `<value>` then will be different depending on the operation performed:
-
-- Invalidate cache:
-
-  ```json
-  { 
-    "status": "success", 
-    "value": {
-      "size": <uint>
-    }
-  }
-  ```
-
-  > unit is in MiB
-
-- Info:
-
-  ```json
-  {
-    "status": "success"
-    "value": {
-      "connection": <"server"|"adb">,
-      "page_size": <uint>,
-      "cache_size": {
-          "max": <uint>,
-          "current":  <uint>
-      }
-    }
-  }
-  ```
-
-  > - `page_size` unit is in KiB
-  > - `cache_size` unit is in MiB
-
-- Set cache size:
-
-  ```json
-  {
-    "status": "success",
-    "value": {
-      "cache_size": {
-        "old": <uint>,
-        "new": <uint> 
-      }
-    }
-  }
-  ```
-
-  > unit is in MiB
-
-- Set page size:
-
-  ```json
-  {
-    "status": "success",
-    "value": {
-      "page_size": {
-        "old": <uint>,
-        "new": <uint> 
-      },
-      "cache_size": {
-        "old": <uint>,
-        "new": <uint>
-      }
-    }
-  }
-  ```
-
-  > - cache size unit is in MiB
-  > - page size unit is in KiB
+For the specification of the message protocol used on the IPC and how to use it read [IPC.md](IPC.md) file. To make it easier for user to use the IPC without having to write their own socket code, I have created another executable: `madbfs-msg`. The possible operations are explained in [IPC.md](IPC.md) file as well.
 
 ## Benchmark
 
@@ -520,15 +397,15 @@ The read command is as follows:
 
 ## TODO
 
-- [x] Make the codebase async using C++20 coroutines.
-- [x] IPC to talk to the `madbfs` to control the filesystem parameters like invalidation, timeout, cache size, etc.
-- [x] Implement the filesystem as actual tree for caching the stat.
-- [x] Implement file read and write operation caching in memory.
-- [ ] Implement proper permission check.
-- [ ] Implement versioning on each node that expires every certain period of time. When a node expires it needs to query the files from the device again.
-- [ ] Periodic cache invalidation. Current implementation only look at the size of current cache and only invalidate oldest entry when newest entry is added and the size exceed the `cache-size` limit.
+- [ ] Cache the file handle for read/write instead of opening the file each read/write operation.
+- [ ] Implement proper permission check (this is difficult since I need to open the file to actually check access, `mode_t` value is not sufficient).
+- [ ] Improve reconnection logic.
+- [ ] Rework RPC framing to be able to recover from error cleanly.
 - [x] Eliminate copying data to and from memory when transferring/copying files within the filesystem.
-- [ ] Use multiple threads backing the async runtime.
+- [x] IPC to talk to the `madbfs` to control the filesystem parameters like invalidation, timeout, cache size, etc.
+- [x] Implement file read and write operation caching in memory.
+- [x] Implement the filesystem as actual tree for caching the stat.
+- [x] Implement versioning on each node that expires every certain period of time. When a node expires it needs to query the files from the device again.
+- [x] Make the codebase async using C++20 coroutines.
+- [x] Periodic cache invalidation. Current implementation only look at the size of current cache and only invalidate oldest entry when newest entry is added and the size exceed the `cache-size` limit.
 - [x] Use persistent TCP connection to the server instead of making connection per request.
-- [ ] Fix open/close semantics.
-- [ ] Add limit to open file descriptor (for adb query it using `ulimit -n`, for server query it using `getrlimit`).
