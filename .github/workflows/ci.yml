@@ -2,7 +2,8 @@ name: madbfs CI
 
 on:
   push:
-    branches: [ "main" ]
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'      # only for semantic versioning
   pull_request:
     branches: [ "main" ]
 
