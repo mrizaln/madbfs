@@ -53,6 +53,8 @@ namespace madbfs
          * @param port Port on which the server will be ran on.
          * @param timeout Remote operation timeout.
          *
+         * @return New connection.
+         *
          * If the server binary path is set, this function will attempt to create a `ServerConnection` and
          * then fall back to `AdbConnection` if the connection failed. If it is not set, it will immediately
          * cerate `AdbConnection` instead. The returned value will never be null.
@@ -65,9 +67,11 @@ namespace madbfs
         );
 
         /**
-         * @brief Create an IPC (Unix socket).
+         * @brief Create an IPC server.
          *
          * @param ctx Async context.
+         *
+         * @return IPC server if success else `std::nullopt`.
          */
         static Opt<ipc::Server> create_ipc(async::Context& ctx);
 

@@ -1,7 +1,6 @@
 #include "madbfs-common/rpc.hpp"
 #include "madbfs-common/async/async.hpp"
 #include "madbfs-common/log.hpp"
-#include "madbfs-common/util/overload.hpp"
 
 // error handling that adapts error_code into errc
 #define HANDLE_ERROR(Res, Want, Msg)                                                                         \
@@ -32,6 +31,14 @@
 
 namespace madbfs::rpc
 {
+    /**
+     * @brief Simple wrapper to convert `time_t` + nsec into `timespec`.
+     *
+     * @param sec Seconds in `time_t.
+     * @param nsec Nanoseconds.
+     *
+     * @return Resulting `timespec`.
+     */
     template <std::signed_integral I>
     timespec to_timespec(time_t sec, I nsec)
     {
@@ -39,6 +46,13 @@ namespace madbfs::rpc
         return { .tv_sec = static_cast<time_t>(sec), .tv_nsec = static_cast<slong>(nsec) };
     }
 
+    /**
+     * @brief Convert an integral into bytes in network order.
+     *
+     * @param value Integer.
+     *
+     * @return Resulting bytes in network order.
+     */
     template <std::integral I>
     Array<u8, sizeof(I)> to_net_bytes(I value)
     {
@@ -49,6 +63,15 @@ namespace madbfs::rpc
         }
     }
 
+    /**
+     * @brief Convert a span of bytes into an integral using betwork order.
+     *
+     * @tparam I The desired integral type.
+     *
+     * @param bytes Input bytes with the size of `I` in bytes.
+     *
+     * @return Resulting integral.
+     */
     template <std::integral I>
     I from_net_bytes(Array<u8, sizeof(I)> bytes)
     {
@@ -59,6 +82,10 @@ namespace madbfs::rpc
         }
     }
 
+    /**
+     * @class PayloadBuilder
+     * @brief Simple payload builder.
+     */
     class PayloadBuilder
     {
     public:
@@ -115,6 +142,10 @@ namespace madbfs::rpc
         Vec<u8>& m_buffer;
     };
 
+    /**
+     * @class PayloadReader
+     * @brief Simple payload reader.
+     */
     class PayloadReader
     {
     public:
@@ -199,6 +230,10 @@ namespace madbfs::rpc
         Span<const u8> m_buffer;
     };
 
+    /**
+     * @class RequestBuilder
+     * @brief Simple payload builder for request.
+     */
     class RequestBuilder : public PayloadBuilder
     {
     public:
@@ -229,6 +264,10 @@ namespace madbfs::rpc
         }
     };
 
+    /**
+     * @class ResponseBuilder
+     * @brief Simple payload builder for response.
+     */
     class ResponseBuilder : public PayloadBuilder
     {
     public:
@@ -262,6 +301,15 @@ namespace madbfs::rpc
 
 namespace madbfs::rpc
 {
+    /**
+     * @brief Parse raw buffer info response of desired procedure.
+     *
+     * @param buffer Input buffer.
+     * @param proc Desired procedure.
+     *
+     * @return The response on success or `std::nullopt` if the buffer is not a payload for desired procedure,
+     * the payload is incomplete, or the payload not containing the correct values for the procedure.
+     */
     Opt<Response> parse_response(Span<const u8> buffer, Procedure proc)
     {
         auto reader = PayloadReader{ buffer };
@@ -493,7 +541,7 @@ namespace madbfs::rpc
         auto proc    = req.proc();
         auto builder = RequestBuilder{ buffer, id, proc };
 
-        auto payload = std::move(req).visit(util::Overload{
+        auto payload = std::move(req).visit(Overload{
             [&](req::Mknod&& req) {
                 auto [path, mode, dev] = req;
                 return builder    //
@@ -593,6 +641,15 @@ namespace madbfs::rpc
 
 namespace madbfs::rpc
 {
+    /**
+     * @brief Parse raw buffer info request of desired procedure.
+     *
+     * @param buffer Input buffer.
+     * @param proc Desired buffer.
+     *
+     * @return The request on success or `std::nullopt` if the buffer is not a payload for desired procedure,
+     * the payload is incomplete, or the payload not containing the correct values for the procedure.
+     */
     Opt<Request> parse_request(Span<const u8> buffer, Procedure proc)
     {
         auto reader = PayloadReader{ buffer };
@@ -789,7 +846,7 @@ namespace madbfs::rpc
             co_return Unexpect{ Errc::bad_message };
         }
 
-        auto payload = std::move(resp).visit(util::Overload{
+        auto payload = std::move(resp).visit(Overload{
             [&](resp::Listdir&& resp) {
                 builder.write_int<u64>(resp.entries.size());
                 for (const auto& [name, stat] : resp.entries) {

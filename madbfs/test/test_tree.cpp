@@ -2,7 +2,6 @@
 #include "madbfs/tree/file_tree.hpp"
 #include "madbfs/tree/node.hpp"
 
-#include <madbfs-common/util/overload.hpp>
 #include <madbfs-common/util/split.hpp>
 
 #include <boost/ut.hpp>
@@ -87,7 +86,7 @@ struct fmt::formatter<madbfs::tree::Node> : fmt::formatter<Str>
                 fmt::format_to(ctx.out(), "    ");
             }
 
-            auto visitor = madbfs::util::Overload{
+            auto visitor = madbfs::Overload{
                 [&](const node::Link& link) { return fmt::format("    ->    {}", link.target); },
                 [&](const node::Directory&) { return String{ "/" }; },
                 [&](const auto&) { return String{ "" }; },

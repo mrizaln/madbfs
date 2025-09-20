@@ -1,7 +1,5 @@
 #include "madbfs/tree/node.hpp"
 
-#include <madbfs-common/util/overload.hpp>
-
 namespace madbfs::tree
 {
     u64 node::Directory::NodeHash::operator()(const Uniq<Node>& node) const
@@ -145,7 +143,7 @@ namespace madbfs::tree
 
     bool Node::has_synced() const
     {
-        auto visit = util::Overload{
+        auto visit = Overload{
             [](const node::Directory& dir) { return dir.has_readdir(); },
             [](const auto&) { return true; },
         };

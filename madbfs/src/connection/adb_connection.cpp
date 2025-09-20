@@ -13,9 +13,18 @@
 
 namespace
 {
-    template <typename T>
-        requires std::is_fundamental_v<T>
-    constexpr madbfs::Opt<T> parse_fundamental(madbfs::Str str, int base)
+    /**
+     * @brief Parse integral types from string.
+     *
+     * @tparam T The type to be parsed.
+     *
+     * @param str Input string.
+     * @param base Integer base to use.
+     *
+     * @return Parsed integer on success else `std::nullopt`.
+     */
+    template <std::integral T>
+    constexpr madbfs::Opt<T> parse_integral(madbfs::Str str, int base)
     {
         auto t         = T{};
         auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), t, base);
@@ -25,6 +34,13 @@ namespace
         return t;
     }
 
+    /**
+     * @brief Strip directory and suffix from path.
+     *
+     * @param path Path string.
+     *
+     * @return Stripped path (aka filename only).
+     */
     madbfs::Str get_basename(madbfs::Str path)
     {
         if (path != "/") {
@@ -40,6 +56,8 @@ namespace
      * @brief Parse date in the form "2025-06-04 12:09:05.450071907 +0700"
      *
      * @param date Date string.
+     *
+     * @return Time represented in `timespec`.
      */
     timespec parse_date(madbfs::Str date)
     {
@@ -60,6 +78,10 @@ namespace
 
     /**
      * @brief Parse the output of `stat -c '%f|%h|%s|%u|%g|%x|%y|%z|%n' <path>`
+     *
+     * @paran str Input string.
+     *
+     * @return Parsed stat if success else `std::nullopt`.
      */
     madbfs::Opt<madbfs::connection::ParsedStat> parse_file_stat(madbfs::Str str)
     {
@@ -67,21 +89,29 @@ namespace
             auto [mode_hex, hardlinks, size, uid, gid, atime, mtime, ctime] = res.result;
             return madbfs::connection::ParsedStat{
                 .stat = madbfs::data::Stat{
-                    .links = parse_fundamental<nlink_t>(hardlinks, 10).value_or(0),
-                    .size  = parse_fundamental<off_t>(size, 10).value_or(0),
+                    .links = parse_integral<nlink_t>(hardlinks, 10).value_or(0),
+                    .size  = parse_integral<off_t>(size, 10).value_or(0),
                     .mtime = parse_date(mtime),
                     .atime = parse_date(atime),
                     .ctime = parse_date(ctime),
-                    .mode  = parse_fundamental<mode_t>(mode_hex, 16).value_or(0),
-                    .uid   = parse_fundamental<uid_t>(uid, 10).value_or(0),
-                    .gid   = parse_fundamental<uid_t>(gid, 10).value_or(0),
+                    .mode  = parse_integral<mode_t>(mode_hex, 16).value_or(0),
+                    .uid   = parse_integral<uid_t>(uid, 10).value_or(0),
+                    .gid   = parse_integral<uid_t>(gid, 10).value_or(0),
                 },
-                .path = get_basename(res.remainder),
+                .name = get_basename(res.remainder),
             };
         });
     }
 
-    // NOTE: somehow adb shell needs double escaping
+    /**
+     * @brief Create a new quoted path.
+     *
+     * @param path Path to be quoted
+     *
+     * @return Quoted path.
+     *
+     *  NOTE: adb shell apparently needs double escaping
+     */
     madbfs::String quote(madbfs::path::Path path)
     {
         return fmt::format("\"{}\"", path);
@@ -305,7 +335,7 @@ namespace madbfs::connection
             log_d("copy_file_range: {:?}", str);
             return util::split_n<4>(str, '\n')
                 .and_then([](util::SplitResult<4> r) { return util::split_n<1>(r.result[3], ' '); })
-                .and_then([](util::SplitResult<1> r) { return parse_fundamental<usize>(r.result[0], 10); })
+                .and_then([](util::SplitResult<1> r) { return parse_integral<usize>(r.result[0], 10); })
                 .value_or(0);
         });
     }

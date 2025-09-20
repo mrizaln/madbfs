@@ -55,8 +55,8 @@ namespace madbfs
         template <typename... T>
         using Var = std::variant<T...>;
 
-        template <typename T>
-        using Span = std::span<T>;
+        template <typename T, usize Extent = std::dynamic_extent>
+        using Span = std::span<T, Extent>;
 
         template <typename T, std::size_t N>
         using Array = std::array<T, N>;
@@ -144,7 +144,7 @@ namespace madbfs
         /**
          * @brief Simple project member function to a type and return as lambda.
          *
-         * @param args Member function to be called on.
+         * @param fn Member function to be called on.
          * @param args The args to be passed on to the member function.
          *
          * @return The Resulting lambda.
@@ -168,7 +168,7 @@ namespace madbfs
         /**
          * @brief Simple project member function to a type and return as lambda.
          *
-         * @param args Member function to be called on.
+         * @param fn Member function to be called on.
          * @param args The args to be passed on to the member function.
          *
          * @return The Resulting lambda.
@@ -189,6 +189,13 @@ namespace madbfs
             }
         }
 
+        /**
+         * @brief Simple project member object to a type and return as lambda.
+         *
+         * @param mem The member object.
+         *
+         * @return The resulting lambda.
+         */
         template <typename T, typename C>
         constexpr auto proj(T C::* mem) noexcept
         {
@@ -234,6 +241,19 @@ namespace madbfs
         template <typename T>
         using ToUnit = ToUnitTrait<T>::Type;
     }
+
+    /**
+     * @class Overload
+     *
+     * @brief Create an overload of functions/lambdas.
+     *
+     * Useful for visiting variant.
+     */
+    template <typename... Fs>
+    struct Overload : Fs...
+    {
+        using Fs::operator()...;
+    };
 }
 
 #ifndef MADBFS_RAPIDHASH_ENABLED

@@ -8,6 +8,11 @@
 
 namespace madbfs::connection
 {
+    /**
+     * @class ServerConnection
+     *
+     * @brief Connection implementation using `server` proxy.
+     */
     class ServerConnection final : public Connection
     {
     public:

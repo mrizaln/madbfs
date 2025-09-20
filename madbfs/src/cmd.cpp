@@ -8,6 +8,7 @@
 
 namespace
 {
+    // adb error patterns.
     namespace error
     {
         static constexpr madbfs::Str no_device           = "adb: no devices/emulators found";
@@ -19,6 +20,11 @@ namespace
         static constexpr madbfs::Str read_only           = " Read-only file system";
     }
 
+    /**
+     * @enum AdbError
+     *
+     * @brief Possible adb command errors.
+     */
     enum class AdbError
     {
         Unknown,
@@ -31,6 +37,11 @@ namespace
         TryAgain,
     };
 
+    /**
+     * @brief Get no device not found error string if `ANDROID_SERIAL` env variable is not defined.
+     *
+     * The string will be empty if `ANDROID_SERIAL` is defined.
+     */
     inline madbfs::Str get_no_dev_serial()
     {
         if (auto* serial = std::getenv("ANDROID_SERIAL"); serial != nullptr) {
@@ -40,6 +51,11 @@ namespace
         return {};
     }
 
+    /**
+     * @brief Convert adb errors to generic error conditions.
+     *
+     * @param err adb error.
+     */
     inline madbfs::Errc to_errc(AdbError err)
     {
         using Err = AdbError;
@@ -56,6 +72,15 @@ namespace
         }
     }
 
+    /**
+     * @brief Parse output from stderr into `AdbError` enumeration.
+     *
+     * @param str Stderr output.
+     *
+     * @return AdbError.
+     *
+     * Will return `AdbError::Unknown` if the stderr output does not match any enumeration.
+     */
     inline AdbError parse_stderr(madbfs::Str str)
     {
         using Err = AdbError;
@@ -90,6 +115,14 @@ namespace
         return Err::Unknown;
     }
 
+    /**
+     * @brief Drain pipe into buffer.
+     *
+     * @param rpipe Readable pipe.
+     * @param out Output buffer.
+     *
+     * @return An error code. If the returned error is `EOF`, then draining is successful.
+     */
     madbfs::Await<boost::system::error_code> drain_pipe(madbfs::async::pipe::Read& rpipe, madbfs::String& out)
     {
         out.clear();

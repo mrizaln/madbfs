@@ -82,6 +82,7 @@ namespace madbfs::util
 
     /**
      * @class VarWrapper
+     *
      * @brief CRTP struct for types that inherits `std::variant`
      *
      * This struct is useful for hiding template parameters of `std::variant` (make them opaque).
@@ -106,6 +107,13 @@ namespace madbfs::util
         {
         }
 
+        /**
+         * @brief Get index of type `T` in the variant at compile-time
+         *
+         * @tparam T The type in question.
+         *
+         * @return The index.
+         */
         template <typename T>
         static consteval std::size_t index_of()
         {

@@ -34,6 +34,11 @@ namespace madbfs::rpc
         CopyFileRange,
     };
 
+    /**
+     * @class Id
+     *
+     * @brief Identifies RPC request/response.
+     */
     class Id
     {
     public:
@@ -170,6 +175,11 @@ namespace madbfs::rpc
     template <IsResponse Resp>
     using ToReq = util::VarTraits<Response::Var>::Swap<Resp, rpc::Request::Var>;
 
+    /**
+     * @class Client
+     *
+     * @brief RPC Client.
+     */
     class Client
     {
     public:
@@ -179,12 +189,36 @@ namespace madbfs::rpc
         {
         }
 
-        Socket& sock() noexcept { return m_socket; }
-        bool    running() const { return m_running; }
+        /**
+         * @brief Check whether the client sender/receiver channel is open.
+         */
+        bool running() const { return m_running; }
 
-        Await<void>       start();
+        /**
+         * @brief Start the client sender/receiver channel with the server.
+         *
+         * The function will return immediately when awaited, spawning a new coroutine detached from caller.
+         * The client manages the lifetime.
+         */
+        Await<void> start();
+
+        /**
+         * @brief Send request through the channel.
+         *
+         * @param buffer Buffer used by `req`.
+         * @param req The requested procedure.
+         * @param timeout Operation timeout.
+         *
+         * @return The returned response or error.
+         *
+         * THe Buffer will be reused for the response returned by this function.
+         */
         AExpect<Response> send_req(Vec<u8>& buffer, Request req, Opt<Milliseconds> timeout);
-        void              stop();
+
+        /**
+         * @brief Stop and close the client sender/receiver channel and the socket.
+         */
+        void stop();
 
     private:
         struct Promise
@@ -218,10 +252,17 @@ namespace madbfs::rpc
         {
         }
 
-        Socket& sock() noexcept { return m_socket; }
-
+        /**
+         * @brief Start listening for RPC requests.
+         *
+         * @param handler The procedure handler.
+         */
         AExpect<void> listen(Handler handler);
-        void          stop();
+
+        /**
+         * @brief Stop listening for requests.
+         */
+        void stop();
 
     private:
         AExpect<void> send_resp(Id id, Procedure proc, Var<Status, Response> response);

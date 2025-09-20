@@ -21,8 +21,6 @@ namespace madbfs::ipc
     namespace op
     {
         // clang-format off
-
-        // regular op
         struct Help            { };
         struct Info            { };
         struct InvalidateCache { };
@@ -32,7 +30,6 @@ namespace madbfs::ipc
         struct SetTimeout      { usize sec; };
         struct SetLogLevel     { String lvl; };
         struct Logcat          { bool color; };
-
         // clang-format on
 
         namespace name
@@ -63,6 +60,7 @@ namespace madbfs::ipc
 
     /**
      * @class FsOp
+     *
      * @brief Operations that involves the FS.
      */
     struct FsOp    //
@@ -80,6 +78,7 @@ namespace madbfs::ipc
 
     /**
      * @class Op
+     *
      * @brief All possible operations through the IPC.
      */
     struct Op : util::VarWrapper<FsOp, op::Help, op::Logcat>
@@ -94,6 +93,7 @@ namespace madbfs::ipc
 
     /**
      * @class LogcatSink
+     *
      * @brief Logger sink for logcat operation.
      */
     class LogcatSink final : public spdlog::sinks::base_sink<std::mutex>
@@ -109,11 +109,21 @@ namespace madbfs::ipc
 
         LogcatSink() = default;
 
+        /**
+         * @brief Construct a LogcatSink.
+         *
+         * @param max_queue The maximum number of messages being queued.
+         */
         LogcatSink(usize max_queue)
             : m_max_queue{ max_queue }
         {
         }
 
+        /**
+         * @brief Swap the underlying queue and return the front one.
+         *
+         * You should `clear()` the queue after use else the buffer will remain.
+         */
         std::deque<Msg>& swap();
 
     protected:
@@ -134,17 +144,42 @@ namespace madbfs::ipc
 
     /**
      * @class Client
+     *
      * @brief IPC Client, can send operations to Server.
      */
     class Client
     {
     public:
+        /**
+         * @brief Connect to socket at `socket_path`.
+         *
+         * @param context Async context.
+         * @param socket_path The socket path.
+         */
         static Expect<Client> create(async::Context& context, Str socket_path);
 
+        /**
+         * @brief Stop the IPC client.
+         */
         void stop();
 
-        AExpect<boost::json::value>   send(FsOp op);
-        AExpect<boost::json::value>   help();
+        /**
+         * @brief Send filesystem operation to server.
+         *
+         * @param op Filesystem operation.
+         */
+        AExpect<boost::json::value> send(FsOp op);
+
+        /**
+         * @brief Get help from server.
+         */
+        AExpect<boost::json::value> help();
+
+        /**
+         * @brief Start logcat operation.
+         *
+         * @param opt Logcat option.
+         */
         AExpect<Gen<AExpect<String>>> logcat(op::Logcat opt);
 
     private:
@@ -160,6 +195,7 @@ namespace madbfs::ipc
 
     /**
      * @class Server
+     *
      * @brief IPC Server, provides information regarding the FS.
      */
     class Server
@@ -172,6 +208,7 @@ namespace madbfs::ipc
          * @brief Create IPC server.
          *
          * @param context Async context.
+         * @param socket_path Location of the to-be-created socket.
          */
         static Expect<Server> create(async::Context& context, Str socket_path);
 
@@ -193,7 +230,7 @@ namespace madbfs::ipc
         Await<void> launch(OnFsOp on_op);
 
         /**
-         * @brief Stop the IPC.
+         * @brief Stop the IPC listener.
          */
         void stop();
 

@@ -16,7 +16,14 @@
 
 namespace madbfs::args
 {
-    // NOTE: don't set default value here for string, set them in the parse() function
+    /**
+     * @class MadbfsOpt
+     *
+     * @brief Madbfs options.
+     *
+     * Don't set default value here for string, set them in the `parse()` function. This structure is used
+     * with `fuse_opt`, parsed opt with correct values is stored in `ParsedOpt` instead.
+     */
     struct MadbfsOpt
     {
         const char* serial     = nullptr;
@@ -39,6 +46,11 @@ namespace madbfs::args
         }
     };
 
+    /**
+     * @class ParsedOpt
+     *
+     * @brief Parsed madbfs options.
+     */
     struct ParsedOpt
     {
         String                     mount;
@@ -53,6 +65,13 @@ namespace madbfs::args
         u16                        port;
     };
 
+    /**
+     * @class ParseResult
+     *
+     * @brief Argument parsing result.
+     *
+     * A variant between the parsed opt and exit code.
+     */
     struct ParseResult
     {
         // clang-format off
@@ -89,6 +108,11 @@ namespace madbfs::args
         FUSE_OPT_END,
     });
 
+    /**
+     * @brief Print help into stdout.
+     *
+     * @param prog Program name.
+     */
     inline void show_help(const char* prog)
     {
         fmt::print(stdout, "usage: {} [options] <mountpoint>\n\n", prog);
@@ -134,6 +158,13 @@ namespace madbfs::args
         ::fuse_lowlevel_help();
     };
 
+    /**
+     * @brief Check device status specified by its serial is exists.
+     *
+     * @param serial Serial number of the device.
+     *
+     * @return Device status.
+     */
     inline Await<connection::DeviceStatus> check_serial(Str serial)
     {
         if (auto maybe_devices = co_await connection::list_devices(); maybe_devices.has_value()) {
@@ -145,6 +176,13 @@ namespace madbfs::args
         co_return connection::DeviceStatus::Unknown;
     }
 
+    /**
+     * @brief Query for serial number of adb device.
+     *
+     * @return Serial number.
+     *
+     * This function may prompt the user (stdin) if there are multiple device connected to the computer.
+     */
     inline Await<String> get_serial()
     {
         auto maybe_devices = co_await connection::list_devices();
@@ -186,6 +224,14 @@ namespace madbfs::args
         co_return devices[choice - 1].serial;
     }
 
+    /**
+     * @brief Search for server binary file.
+     *
+     * @param exec_path Current executable path.
+     * @param server_name Name of the server file.
+     *
+     * @return Path to server binary if found otherwise `std::nullopt`.
+     */
     inline Opt<std::filesystem::path> get_server_path(std::filesystem::path exec_path, Str server_name)
     {
         namespace fs = std::filesystem;
@@ -244,8 +290,10 @@ namespace madbfs::args
      * @param argc Number of arguments.
      * @param argv Array of arguments.
      *
-     * If the return value is `ParseResult::Opt`, the `fuse_args` member must be freed using
-     * `fuse_opt_free_args` after use.
+     * @return Result of the parsing operation.
+     *
+     * If the return value is `ParseResult::Opt`, the `args` member must be freed using `fuse_opt_free_args`
+     * after use.
      */
     inline Await<ParseResult> parse(int argc, char** argv)
     {

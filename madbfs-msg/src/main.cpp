@@ -1,7 +1,6 @@
 #include <madbfs-common/async/async.hpp>
 #include <madbfs-common/ipc.hpp>
 #include <madbfs-common/log.hpp>
-#include <madbfs-common/util/overload.hpp>
 
 #include <boost/json.hpp>
 #include <boost/program_options.hpp>
@@ -394,7 +393,7 @@ int send_message(std::span<const std::string> message, fs::path socket_path, boo
     auto sig_set = madbfs::net::signal_set{ context, SIGINT, SIGTERM };
     sig_set.async_wait([&](auto, auto) { client->stop(); });
 
-    auto coro = op->visit(madbfs::util::Overload{
+    auto coro = op->visit(madbfs::Overload{
         [&](this auto, ipc::FsOp op) -> madbfs::Await<int> {
             auto response = co_await client->send(op);
             if (not response) {

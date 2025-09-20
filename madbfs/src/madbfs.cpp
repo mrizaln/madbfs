@@ -4,7 +4,6 @@
 #include "madbfs/connection/server_connection.hpp"
 
 #include <madbfs-common/log.hpp>
-#include <madbfs-common/util/overload.hpp>
 
 #include <boost/json.hpp>
 
@@ -120,7 +119,7 @@ namespace madbfs
         constexpr usize highest_page_size = 4 * 1024 * 1024;
         constexpr usize lowest_max_pages  = 128;
 
-        auto overload = util::Overload{
+        auto coro = std::move(op).visit(Overload{
             [&](ipc::op::Info) -> Await<json::value> {
                 const auto page_size     = m_cache.page_size();
                 const auto max_pages     = m_cache.max_pages();
@@ -215,9 +214,9 @@ namespace madbfs
                       { { "old", log::level_to_str(prev_level) },    //
                         { "new", log::level_to_str(new_level) } } },
                 };
-            }
-        };
+            },
+        });
 
-        co_return co_await std::move(op).visit(overload);
+        co_return co_await std::move(coro);
     }
 }

@@ -12,12 +12,25 @@ namespace madbfs::path
 
 namespace madbfs::connection
 {
+    /**
+     * @class ParsedStat
+     *
+     * @brief Parsed `Stat` value and the filename in question.
+     *
+     * This struct is used for `statdir` operation. It represent a file entry (name only, not full path) and
+     * its stat.
+     */
     struct ParsedStat
     {
         data::Stat stat;
-        Str        path;
+        Str        name;
     };
 
+    /**
+     * @class Connection
+     *
+     * @brief Abstract struct for connection to adb devices and its fs operations.
+     */
     class Connection
     {
     public:
@@ -155,6 +168,11 @@ namespace madbfs::connection
         virtual ~Connection() = default;
     };
 
+    /**
+     * @enum DeviceStatus
+     *
+     * @brief Represent the status of device connected through adb.
+     */
     enum class DeviceStatus
     {
         Device,
@@ -163,6 +181,11 @@ namespace madbfs::connection
         Unknown,
     };
 
+    /**
+     * @class Device
+     *
+     * @brief Device information connected through adb.
+     */
     struct Device
     {
         String       serial;
@@ -171,11 +194,15 @@ namespace madbfs::connection
 
     /**
      * @brief Get human readable description of DeviceStatus.
+     *
+     * The string lifetime is static.
      */
     Str to_string(DeviceStatus status);
 
     /**
      * @brief Start connection with the devices.
+     *
+     * Starts adb server.
      */
     AExpect<void> start_connection();
 

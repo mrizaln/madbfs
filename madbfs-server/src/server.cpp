@@ -3,7 +3,6 @@
 #include <madbfs-common/log.hpp>
 #include <madbfs-common/rpc.hpp>
 #include <madbfs-common/util/defer.hpp>
-#include <madbfs-common/util/overload.hpp>
 #include <madbfs-common/util/slice.hpp>
 
 #include <dirent.h>

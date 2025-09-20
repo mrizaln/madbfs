@@ -76,12 +76,36 @@ namespace madbfs::async
     template <typename T>
     using Channel = Token::as_default_on_t<net::experimental::channel<void(net::error_code, T)>>;
 
+    /**
+     * @brief Spawn a new coroutine.
+     *
+     * @param exec Executor of the coroutine.
+     * @param awaitable The coroutine.
+     * @param completion Completion handler.
+     *
+     * @return Completion handler result.
+     *
+     * It is not advisable to use `async::detached` completion handler. Use other completion handler instead
+     * like `async::use_future` or `async::use_awaitable`. If you want to detach the coroutine still, use
+     * callback as the completion handler instead and handle the possible exception that may occur.
+     */
     template <typename Exec, typename T, typename Compl>
     auto spawn(Exec& exec, Await<T>&& awaitable, Compl&& completion) noexcept
     {
         return net::co_spawn(exec, std::move(awaitable), std::forward<Compl>(completion));
     }
 
+    /**
+     * @brief Spawn then wait for coroutine to complete synchronously.
+     *
+     * @param exec Executor of the coroutine.
+     * @param coro The coroutine in question.
+     *
+     * @return The result of the coroutine.
+     *
+     * This function will put the caller thread to sleep/wait state. Make sure the coroutine is run on an
+     * already running async context or else this function will wait forever.
+     */
     template <typename Exec, typename T>
     T block(Exec& exec, Await<T> coro) noexcept(false)
     {
@@ -123,6 +147,13 @@ namespace madbfs::async
         }
     }
 
+    /**
+     * @brief Wait multiple coroutines asynchronously.
+     *
+     * @param awaitables Coroutines to be awaited.
+     *
+     * @return Combined result of the awaitables.
+     */
     template <Range R>
         requires IsAwaitable<RangeValue<R>>
     Await<Vec<typename RangeValue<R>::value_type>> wait_all(R&& awaitables) noexcept(false)
@@ -143,6 +174,13 @@ namespace madbfs::async
         co_return res;
     }
 
+    /**
+     * @brief Wait multiple coroutines asynchronously.
+     *
+     * @param awaitables Coroutines to be awaited.
+     *
+     * @return Combined result of the awaitables.
+     */
     template <typename... Ts>
     Await<Tup<ToUnit<Ts>...>> wait_all(Await<Ts>&&... awaitables) noexcept(false)
     {
@@ -155,6 +193,13 @@ namespace madbfs::async
         }
     }
 
+    /**
+     * @brief Spawn coroutine with timeout.
+     *
+     * @param awaitable Coroutine to be awaited.
+     *
+     * @return The result of the coroutine if completed within timeout, else `std::nullopt`;
+     */
     template <typename T>
     Await<Opt<ToUnit<T>>> timeout(
         Await<T>&&            awaitable,
@@ -181,6 +226,14 @@ namespace madbfs::async
         co_return std::nullopt;
     }
 
+    /**
+     * @brief Convert `std::error_code` to `Errc` (`std::errc`).
+     *
+     * @param ec The error code.
+     * @param fallback Fallback error condition.
+     *
+     * @return Generic error condition if `std::error_code` is generic else `fallback`.
+     */
     inline Errc to_generic_err(net::error_code ec, Errc fallback = Errc::io_error) noexcept
     {
         // conversion from boost error code to std error code
@@ -194,13 +247,14 @@ namespace madbfs::async
         return static_cast<bool>(fallback) ? fallback : Errc::invalid_argument;
     }
 
-    template <typename Char, typename AStream>
-    AExpect<usize, net::error_code> write_exact(AStream& stream, Span<const Char> in) noexcept
-    {
-        auto buf = net::buffer(in);
-        return net::async_write(stream, buf, as_expected(net::use_awaitable));
-    }
-
+    /**
+     * @brief Read exactly all data from stream fully into buffer.
+     *
+     * @param stream Asynchronous stream.
+     * @param out Output buffer.
+     *
+     * @return The number of read buffer or error code.
+     */
     template <typename Char, typename AStream>
     AExpect<usize, net::error_code> read_exact(AStream& stream, Span<Char> out) noexcept
     {
@@ -208,6 +262,29 @@ namespace madbfs::async
         return net::async_read(stream, buf, as_expected(net::use_awaitable));
     }
 
+    /**
+     * @brief Write exactly all data within buffer into stream.
+     *
+     * @param stream Asynchronous stream.
+     * @param in Input buffer.
+     *
+     * @return The number of written buffer or error code.
+     */
+    template <typename Char, typename AStream>
+    AExpect<usize, net::error_code> write_exact(AStream& stream, Span<const Char> in) noexcept
+    {
+        auto buf = net::buffer(in);
+        return net::async_write(stream, buf, as_expected(net::use_awaitable));
+    }
+
+    /**
+     * @brief Discard data from stream.
+     *
+     * @param stream Asynchronous stream.
+     * @param size Number of data to be discarded.
+     *
+     * @return None or error code.
+     */
     template <typename AStream>
     AExpect<void, net::error_code> discard(AStream& stream, usize size) noexcept
     {
@@ -224,6 +301,17 @@ namespace madbfs::async
         co_return Expect<void, net::error_code>{};
     }
 
+    /**
+     * @brief Read data from stream using LV encoding into buffer.
+     *
+     * @param stream Asynchronous stream.
+     * @param out Output buffer.
+     *
+     * @return The number of data written into `buffer`
+     *
+     * This function will check the buffer size and if the remote sends an LV encoded data with the size
+     * exceeding this buffer, error condition `EMSGSIZE` will be returned and the data will be discarded.
+     */
     template <typename Char, typename AStream>
     AExpect<usize, net::error_code> read_lv(AStream& stream, Span<Char> out) noexcept
     {
@@ -243,6 +331,20 @@ namespace madbfs::async
         co_return co_await read_exact<Char>(stream, { out.data(), len });
     }
 
+    /**
+     * @brief Read data from stream using LV encoding into buffer
+     *
+     * @param stream Asynchronous stream.
+     * @param out Output buffer.
+     * @param max Max number of data to be written to buffer.
+     *
+     * @return The number of data written to buffer.
+     *
+     * This function is an overload that takes a resizable buffer (`std::basic_string` and `std::vector`) as
+     * its buffer to allow for more flexible read. The `max` parameter limits the number data written to
+     * the buffer. You may set this to the maximum number possible that can be represented by `std::size_t` to
+     * effectively disable the limitation.
+     */
     template <typename Char, typename AStream, template <typename... Ts> typename Tmpl>
         requires std::same_as<Tmpl<Char>, std::vector<Char>>
               or std::same_as<Tmpl<Char>, std::basic_string<Char>>
@@ -266,6 +368,14 @@ namespace madbfs::async
         co_return co_await read_exact<Char>(stream, { out.data(), len });
     }
 
+    /**
+     * @brief Write data to stream using LV encoding from buffer.
+     *
+     * @param stream Asynchronous stream.
+     * @param out Output buffer.
+     *
+     * @return The number of data written into `buffer`.
+     */
     template <typename Char, typename AStream>
     AExpect<usize, net::error_code> write_lv(AStream& stream, Span<const Char> in) noexcept
     {
@@ -279,6 +389,9 @@ namespace madbfs::async
         co_return co_await write_exact<char>(stream, in);
     }
 
+    /**
+     * @brief Get current executor.
+     */
     inline net::this_coro::executor_t current_executor() noexcept
     {
         return net::this_coro::executor;

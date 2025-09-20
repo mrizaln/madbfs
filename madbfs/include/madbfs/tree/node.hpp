@@ -204,6 +204,11 @@ namespace madbfs::tree
     constexpr auto timespec_now  = timespec{ .tv_sec = 0, .tv_nsec = UTIME_NOW };
     constexpr auto timespec_omit = timespec{ .tv_sec = 0, .tv_nsec = UTIME_OMIT };
 
+    /**
+     * @class Node
+     *
+     * @brief Represent a node in a file tree.
+     */
     class Node
     {
     public:

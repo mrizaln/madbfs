@@ -19,6 +19,7 @@ namespace madbfs::path
 
     /**
      * @class Path
+     *
      * @brief Represent a file path in Linux system.
      *
      * This class is a simple wrapper over the underlying path string. It is like `Str` where it doesn't
@@ -126,6 +127,7 @@ namespace madbfs::path
 
     /**
      * @class PathBuf
+     *
      * @brief Represent a file path in Linux system that owns its path buffer.
      *
      * Default constructed `PathBuf` points to the root path.
@@ -289,8 +291,6 @@ namespace madbfs::path
     /**
      * @brief Create a PathBuf from a string and owns the buffer.
      *
-     * @param path Path string.
-     *
      * @param path_str The path to create from.
      */
     Opt<PathBuf> create_buf(String&& path_str);
@@ -301,7 +301,7 @@ namespace madbfs::path
      * @param parent Reference path.
      * @param path Path to be resolved.
      */
-    PathBuf resolve(madbfs::path::Path parent, madbfs::Str path);
+    PathBuf resolve(Path parent, Str path);
 }
 
 namespace madbfs::path::inline literals

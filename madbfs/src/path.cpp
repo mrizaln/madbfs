@@ -2,7 +2,60 @@
 
 #include <madbfs-common/util/split.hpp>
 
-#include <cassert>
+namespace madbfs::path
+{
+    /**
+     * @brief Split path string into its components.
+     *
+     * @param path Input path string.
+     *
+     * @return A pair of the components and a cleaned version of the path (extra '/' are stripped from the
+     * beginning and the end of the path).
+     *
+     * The components and the cleaned path are in index-based slice instead of string view.
+     */
+    Opt<Pair<Vec<Slice>, Slice>> split_components(Str path)
+    {
+        if (path.empty() or path.front() != '/') {
+            return std::nullopt;
+        }
+
+        while (path.size() > 1 and path.back() == '/') {
+            path.remove_suffix(1);
+        }
+
+        auto offset_prefix = 0uz;
+        while (path.size() > 2 and path[0] == '/' and path[1] == '/') {
+            path.remove_prefix(1);
+            ++offset_prefix;
+        }
+
+        if (path == "/") {
+            return Pair{ Vec<Slice>{}, Slice{} };
+        }
+
+        auto components = Vec<Slice>{};
+        auto index      = 1uz;
+
+        while (index < path.size()) {
+            auto current = index;
+            while (current < path.size() and path[current] == '/') {
+                ++current;
+            }
+
+            auto next = path.find('/', current);
+            if (next == Str::npos) {
+                components.emplace_back(current, path.size() - current);
+                break;
+            }
+
+            components.emplace_back(current, next - current);
+            index = next;
+        }
+
+        return Pair{ std::move(components), Slice{ offset_prefix, path.size() } };
+    }
+}
 
 namespace madbfs::path
 {
@@ -77,49 +130,6 @@ namespace madbfs::path
 
 namespace madbfs::path
 {
-    // returns components and the cleaned path as slice
-    Opt<Pair<Vec<Slice>, Slice>> split_components(Str path)
-    {
-        if (path.empty() or path.front() != '/') {
-            return std::nullopt;
-        }
-
-        while (path.size() > 1 and path.back() == '/') {
-            path.remove_suffix(1);
-        }
-
-        auto offset_prefix = 0uz;
-        while (path.size() > 2 and path[0] == '/' and path[1] == '/') {
-            path.remove_prefix(1);
-            ++offset_prefix;
-        }
-
-        if (path == "/") {
-            return Pair{ Vec<Slice>{}, Slice{} };
-        }
-
-        auto components = Vec<Slice>{};
-        auto index      = 1uz;
-
-        while (index < path.size()) {
-            auto current = index;
-            while (current < path.size() and path[current] == '/') {
-                ++current;
-            }
-
-            auto next = path.find('/', current);
-            if (next == Str::npos) {
-                components.emplace_back(current, path.size() - current);
-                break;
-            }
-
-            components.emplace_back(current, next - current);
-            index = next;
-        }
-
-        return Pair{ std::move(components), Slice{ offset_prefix, path.size() } };
-    }
-
     Opt<SemiPath> create(Str path)
     {
         auto split = split_components(path);

@@ -4,6 +4,11 @@
 
 namespace madbfs::connection
 {
+    /**
+     * @class AdbConnection
+     *
+     * @brief Connection implementation using `adb` proxy.
+     */
     class AdbConnection final : public Connection
     {
     public:

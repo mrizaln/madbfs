@@ -5,9 +5,14 @@
 
 namespace madbfs::util
 {
+    /**
+     * @class DeferGuard
+     *
+     * @brief RAII-based defer functionality.
+     */
     template <typename Fn>
         requires std::move_constructible<Fn> and std::invocable<Fn>
-    class DeferGuard
+    class [[nodiscard]] DeferGuard
     {
     public:
         DeferGuard()                              = delete;
@@ -44,6 +49,16 @@ namespace madbfs::util
     template <typename Fn>
     concept Deferred = DeferredTraits<Fn>::value;
 
+    /**
+     * @brief Create a deferred action.
+     *
+     * @param fn Deferred action.
+     *
+     * @return A defer guard.
+     *
+     * The returned guard must not be ignored else the action will run immediately instead of done at the end
+     * of scope.
+     */
     template <typename Fn>
         requires std::move_constructible<Fn> and std::invocable<Fn>
     util::Deferred auto defer(Fn fn)

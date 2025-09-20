@@ -10,6 +10,7 @@ namespace madbfs::tree
 {
     /**
      * @class FileTree
+     *
      * @brief A class representing a file tree structure.
      *
      * This data structure is a Trie

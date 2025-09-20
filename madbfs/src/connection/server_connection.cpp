@@ -206,7 +206,7 @@ namespace madbfs::connection
                         .uid   = stat.uid,
                         .gid   = stat.gid,
                     },
-                    .path = name,       // names are stored in buf
+                    .name = name,       // names are stored in buf
                 };
             }
         };

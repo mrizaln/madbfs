@@ -1,6 +1,5 @@
 #include "madbfs-common/ipc.hpp"
 #include "madbfs-common/log.hpp"
-#include "madbfs-common/util/overload.hpp"
 
 #include <boost/json.hpp>
 
@@ -12,6 +11,13 @@ namespace madbfs::ipc
 
     constexpr auto max_msg_len = 4 * 1024uz;    // 4 KiB
 
+    /**
+     * @brief Get message from socket.
+     *
+     * @param sock Socket.
+     *
+     * @return Awaitable that returns message or error.
+     */
     AExpect<String> receive_message(Socket& sock)
     {
         auto buffer = String{};
@@ -21,6 +27,14 @@ namespace madbfs::ipc
         co_return buffer;
     }
 
+    /**
+     * @brief Send message through socket.
+     *
+     * @param sock Socket.
+     * @param msg Message to send.
+     *
+     * @return Awaitable that returns nothing or error.
+     */
     AExpect<void> send_message(Socket& sock, Str msg)
     {
         if (auto n = co_await async::write_lv<char>(sock, msg); not n) {
@@ -29,6 +43,13 @@ namespace madbfs::ipc
         co_return Expect<void>{};
     }
 
+    /**
+     * @brief Parse message to `Op`.
+     *
+     * @param msg Message to parse.
+     *
+     * @return Parsed `Op` or error string.
+     */
     Expect<Op, String> parse_op(Str msg)
     {
         try {
@@ -129,7 +150,7 @@ namespace madbfs::ipc
         namespace n = op::name;
 
         // clang-format off
-        auto op_json = std::move(op).visit(util::Overload{
+        auto op_json = std::move(op).visit(Overload{
             [&](op::Info           ) { return json::value{ { "op", n::info             }                      }; },
             [&](op::InvalidateCache) { return json::value{ { "op", n::invalidate_cache }                      }; },
             [&](op::SetPageSize  op) { return json::value{ { "op", n::set_page_size    }, { "value", op.kib } }; },

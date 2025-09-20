@@ -14,7 +14,7 @@ namespace madbfs::log
 {
     using Level = spdlog::level::level_enum;
 
-    // I need to use const char* here because spdlog's doesn't support string_view... :(
+    // I need to use const char* here because spdlog's doesn't support std::string_view... :(
     static constexpr auto logger_pattern = "[%Y-%m-%d|%H:%M:%S] [%^-%L-%$] [%s:%#] %v";
     static constexpr auto logger_name    = "madbfs-log";
 
@@ -28,12 +28,21 @@ namespace madbfs::log
         return names;
     }();
 
+    /**
+     * @brief Convert std::source_location to spdlog compatible one.
+     */
     constexpr static spdlog::source_loc to_spdlog_source_loc(const std::source_location& loc) noexcept
     {
         return { loc.file_name(), static_cast<int>(loc.line()), loc.function_name() };
     }
 
-    // inspired by this issue on spdlog: https://github.com/gabime/spdlog/issues/1959
+    /**
+     * @class FmtWithLoc
+     *
+     * @brief Format string with location.
+     *
+     * Inspired by this issue on spdlog: https://github.com/gabime/spdlog/issues/1959
+     */
     template <typename... Args>
     struct FmtWithLoc
     {
@@ -106,21 +115,41 @@ namespace madbfs::log
         spdlog::shutdown();
     }
 
+    /**
+     * @brief Get default logger used by madbfs.
+     *
+     * @return Logger.
+     */
     inline Shared<spdlog::logger> get_logger() noexcept
     {
         return spdlog::get(logger_name);
     }
 
+    /**
+     * @brief Get log level.
+     */
     inline Level get_level() noexcept
     {
         return spdlog::get_level();
     }
 
+    /**
+     * @brief Set log level.
+     *
+     * @param level New log level.
+     */
     inline void set_level(Level level) noexcept
     {
         spdlog::set_level(level);
     }
 
+    /**
+     * @brief Convert log level string into its enum.
+     *
+     * @param level Level string.
+     *
+     * @return Level enum.
+     */
     inline Opt<Level> level_from_str(Str level) noexcept
     {
         for (auto i = 0uz; i < level_names.size(); ++i) {
@@ -131,6 +160,13 @@ namespace madbfs::log
         return std::nullopt;
     }
 
+    /**
+     * @brief Convert log level enum into its string representation.
+     *
+     * @param level Level enum.
+     *
+     * @return Level string.
+     */
     inline Str level_to_str(Level level) noexcept
     {
         auto str = spdlog::level::to_string_view(level);
@@ -139,6 +175,8 @@ namespace madbfs::log
 
     /**
      * @brief Log a message with a specific log level.
+     *
+     * @param level Severity.
      *
      * NOTE: The type identity is needed to allow CTAD for FmtWithLoc:
      * https://stackoverflow.com/a/79155521/16506263
@@ -153,6 +191,12 @@ namespace madbfs::log
         spdlog::log(fmt.loc, level, fmt.fmt, std::forward<Args>(args)...);
     }
 
+    /**
+     * @brief Log a message with specific log level and location.
+     *
+     * @param loc Location.
+     * @param level Severity.
+     */
     template <typename... Args>
     inline void log_loc(
         std::source_location        loc,
@@ -164,6 +208,16 @@ namespace madbfs::log
         spdlog::log(to_spdlog_source_loc(loc), level, fmt, std::forward<Args>(args)...);
     }
 
+    /**
+     * @brief Log an exception pointer.
+     *
+     * @param e Exception pointer.
+     * @param prefix Prefix to be added before exception message.
+     * @param loc Location.
+     *
+     * This function will rethrow the exception and them immediately catch it before logging it to be able to
+     * get the message contained within the exception. The exception will be logged at critical severity.
+     */
     template <typename... Args>
     inline void log_exception(
         std::exception_ptr   e,
@@ -190,6 +244,7 @@ namespace madbfs
         log::log(spdlog::level::Level, std::move(fmt), std::forward<Args>(args)...);                         \
     }
 
+    // Handy aliases with dedicated severity suffix to `log::log` function.
     MADBFS_LOG_LOG_ENTRY(log_t, trace)
     MADBFS_LOG_LOG_ENTRY(log_d, debug)
     MADBFS_LOG_LOG_ENTRY(log_i, info)

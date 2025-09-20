@@ -24,6 +24,17 @@
 
 namespace madbfs::async
 {
+    /**
+     * @class AsExpected
+     *
+     * @brief Custom completion token for `std::expected` for asio.
+     *
+     * @tparam CompletionToken Inner completion token.
+     *
+     * This completion token wraps the inner completion token (like `asio::use_awaitable_t`). The completion
+     * token and transform the returned value into `std::expected<T, error_code>` instead of bare `T`
+     * effectively turning off exceptions the function that accepts the completion token.
+     */
     template <typename CompletionToken>
     struct AsExpected
     {

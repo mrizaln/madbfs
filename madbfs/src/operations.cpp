@@ -46,6 +46,15 @@ namespace
         return madbfs::Unexpect{ madbfs::Errc::io_error };
     }
 
+    /**
+     * @brief Factory function for lambda that convert `std::errc` into its integer value and logs it.
+     *
+     * @param name Log name/prefix.
+     * @param path Path being operated on.
+     * @param loc Location of the function call.
+     *
+     * @return Lambda that transforms error into integer and logs them.
+     */
     auto fuse_err(
         madbfs::Str          name,
         const char*          path,
