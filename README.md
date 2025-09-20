@@ -198,26 +198,32 @@ The help message can help you start using this program
 usage: madbfs [options] <mountpoint>
 
 Options for madbfs:
-    --serial=<s>           serial number of the device to mount
+    --serial=<str>         serial number of the device to mount
                              (you can omit this [detection is similar to adb])
                              (will prompt if more than one device exists)
-    --server               path to server file
+    --server=<path>        path to server file
                              (if omitted will search the file automatically)
                              (must have the same arch as your phone)
-    --log-level=<l>        log level to use
-                             (default: warn)
-                             (values: trace, debug, info, warn, error, critical, off)
-    --log-file=<f>         log file to write to
-                             (default: '-' for stdout)
-    --cache-size=<n>       maximum size of the cache in MiB
+    --log-level=<enum>     log level to use
+                             (default: "warning")
+                             (enum: "trace", "debug", "info", "warning", "error", "critical", "off")
+    --log-file=<path>      log file to write to
+                             (default: "-" for stdout)
+    --cache-size=<int>     maximum size of the cache in MiB
                              (default: 256)
                              (minimum: 128)
-                             (value will be rounded to the next power of 2)
-    --page-size=<n>        page size for cache & transfer in KiB
+                             (value will be rounded up to the next power of 2)
+    --page-size=<int>      page size for cache & transfer in KiB
                              (default: 128)
                              (minimum: 64)
-                             (value will be rounded to the next power of 2)
-    --port=<n>             set port the server listens on
+                             (value will be rounded up to the next power of 2)
+    --ttl=<int>            set the TTL of the stat cache of the filesystem in seconds
+                             (default: 30)
+                             (set to 0 to disable it)
+    --timeout=<int>        set the timeout of every remote operation
+                             (default: 10)
+                             (set to 0 to disable it)
+    --port=<int>           set the port number the server will listen on
                              (default: 12345)
     --no-server            don't launch server
                              (will still attempt to connect to specified port)
