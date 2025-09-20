@@ -7,11 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Stat cache expiration (TTL).
+- Program option for TTL (`--ttl`).
+- Program option timeout (`--timeout`).
+- IPC operation for setting TTL (`set_ttl`).
+- IPC operation for setting timeout (`set_timeout`).
+- IPC operation for setting log level (`log_level`).
+- Logcat operation through IPC (`logcat`) which can be used to read `madbfs` log in real-time.
+- New `madbfs-msg` binary/subproject as default IPC client.
+
+### Fixed
+
+- Server responds with out of order overlapping response.
+- Faulty single file cache invalidation.
+- Partial write on `copy_file_range` operation not handled.
+
+### Changed
+
+- Symlink now handled correctly (previously symlink works by taking the `realpath` of the link repeatedly until it points to a non-symlink file and can only points to valid target).
+- Arguments options `--cache-size`, `--page-size`, and `--port` won't accept non-positive value. 
+- Improve `Path` and `PathBuf` API and implementation.
+- Add new `ttl`, `timeout`, and `log_level` fields on `info` IPC operation response.
+
+### Removed
+
+- Defer macro.
+
 ## [0.8.1] - 2025-08-31
 
 ### Fixed
 
 - Flushing may fail on file with certain size and/or slow write speed.
+
+### Changed
+
+- Revert parallel `flush` operation.
 
 ## [0.8.0] - 2025-08-27
 
@@ -26,7 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Crash when symlink target doesn't have access permission.
 - ABI query at startup fail when there is more than one device.
 - `utimens` operation on `adb` connection.
-- Fuse header includes points to system header instead (which may not exist) instead of Conan.
+- Fuse header includes points to system header (which may not exist) instead of Conan.
 - `stat::st_blocks` calculation.
 
 ### Changed
