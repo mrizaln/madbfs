@@ -48,6 +48,9 @@ struct Socket
     fs::path    path;
 };
 
+// forward decl
+std::vector<Socket> get_socket_list(fs::path search_path);
+
 std::istream& operator>>(std::istream& in, Color& c)
 {
     auto string = std::string{};
@@ -90,7 +93,8 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
         ("serial,s",
          default_serial ? po::value<std::string>(&serial)->default_value(default_serial)->value_name("serial")
                         : po::value<std::string>(&serial)->value_name("serial"),
-         "the serial number of the mounted device (can be omitted if 'ANDROID_SERIAL' env is defined)")    //
+         "the serial number of the mounted device (can be omitted if 'ANDROID_SERIAL' env is defined or only"
+         " one device exists)")    //
         ("message",
          po::value<std::vector<std::string>>(),
          "message to be passed to madbfs (positional arguments will be considered as part of this option)");
@@ -128,6 +132,14 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
         return Exit{ 0 };
     }
 
+    if (not fs::exists(search_path)) {
+        fmt::println(stderr, "error: path '{}' does not exist", search_path.c_str());
+        return Exit{ 1 };
+    } else if (not fs::is_directory(search_path)) {
+        fmt::println(stderr, "error: path '{}' is not a directory", search_path.c_str());
+        return Exit{ 1 };
+    }
+
     if (vm.count("list")) {
         return Args{
             .mode        = Mode::List,
@@ -139,12 +151,24 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
     }
 
     if (not vm.count("serial")) {
-        fmt::println(
-            stderr,
-            "error: android device must be specified using '--serial' option or using 'ANDROID_SERIAL' env "
-            "variable"
-        );
-        return Exit{ 2 };
+        auto sockets = get_socket_list(search_path);
+        switch (sockets.size()) {
+        case 0: {
+            fmt::println(stderr, "error: no device found");
+            return Exit{ 1 };
+        } break;
+        case 1: {
+            serial = sockets.front().serial;
+        } break;
+        default: {
+            fmt::println(stderr, "error: multiple device exists");
+            for (auto&& [serial, _] : sockets) {
+                fmt::println(stderr, "error:     - {}", serial);
+            }
+            fmt::println(stderr, "error: specify one in the command using '--serial' or 'ANDROID_SERIAL'");
+            return Exit{ 1 };
+        }
+        }
     }
 
     if (not vm.count("message")) {
@@ -262,7 +286,7 @@ int perform_list(fs::path search_path)
 
     fmt::println("active sockets:");
     for (const auto& [serial, path] : sockets) {
-        fmt::println("\t- {:<{}} -> {}", serial, max_serial_len, path.c_str());
+        fmt::println("    - {:<{}} -> {}", serial, max_serial_len, path.c_str());
     }
 
     return 0;
@@ -362,7 +386,7 @@ std::optional<ipc::Op> parse_message(std::span<const std::string> message)
         } else if (message.size() > 2) {
             too_much(op_str, 1);
         } else if (not madbfs::log::level_from_str(*value_str)) {
-            fmt::println(stderr, "'{} is not a valid log level {}", *value_str, madbfs::log::level_names);
+            fmt::println(stderr, "error: '{} is not valid {}", *value_str, madbfs::log::level_names);
         } else {
             op = ipc::op::SetLogLevel{ .lvl = std::string{ *value_str } };
         }
@@ -463,14 +487,6 @@ try {
 
     auto args        = std::get<1>(may_args);
     auto search_path = fs::path{ args.search_path };
-
-    if (not fs::exists(search_path)) {
-        fmt::println(stderr, "error: path '{}' does not exist", search_path.c_str());
-        return 1;
-    } else if (not fs::is_directory(search_path)) {
-        fmt::println(stderr, "error: path '{}' is not a directory", search_path.c_str());
-        return 1;
-    }
 
     switch (args.mode) {
     case List: return perform_list(search_path);

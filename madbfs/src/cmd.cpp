@@ -123,7 +123,7 @@ namespace
      *
      * @return An error code. If the returned error is `EOF`, then draining is successful.
      */
-    madbfs::Await<boost::system::error_code> drain_pipe(madbfs::async::pipe::Read& rpipe, madbfs::String& out)
+    madbfs::Await<madbfs::net::error_code> drain_pipe(madbfs::async::pipe::Read& rpipe, madbfs::String& out)
     {
         out.clear();
 
@@ -149,7 +149,7 @@ namespace
             out.insert(out.end(), rest.begin(), rest.end());
         }
 
-        co_return boost::system::error_code{};
+        co_return madbfs::net::error_code{};
     }
 }
 
@@ -175,7 +175,7 @@ namespace madbfs::cmd
         auto args = cmd | sv::drop(1) | sv::transform(to_boost_str);
 
         auto proc = bp::process{ exec, exe, args, bp::process_stdio{ pipe_in, pipe_out, pipe_err } };
-        auto ec   = boost::system::error_code{};
+        auto ec   = net::error_code{};
 
         // NOTE: synchronous write to prevent interleaving
         if (auto n = net::write(pipe_in, net::buffer(in), ec); ec) {

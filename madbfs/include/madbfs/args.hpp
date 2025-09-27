@@ -211,7 +211,7 @@ namespace madbfs::args
             if (input and input.value() > 0 and input.value() <= devices.size()) {
                 choice = *input;
                 break;
-            } else if (not input and is_stream_error(input.error())) {
+            } else if (not input and linr::is_stream_error(input.error())) {
                 fmt::println("\n[madbfs] stdin closed, aborting.");
                 std::exit(1);    // I don't think there is an easy way out of this but exit
             } else {

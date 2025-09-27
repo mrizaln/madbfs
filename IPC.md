@@ -243,14 +243,12 @@ options:
   -d [ --search-dir ] dir (=/run/user/1000)
                                         specify the search directory for socket
                                         files
-  -s [ --serial ] serial (=192.168.240.112:5555)
-                                        the serial number of the mounted device
+  -s [ --serial ] serial                the serial number of the mounted device
                                         (can be omitted if 'ANDROID_SERIAL' env
-                                        is defined)
+                                        is defined or only one device exists)
   --message arg                         message to be passed to madbfs
                                         (positional arguments will be
                                         considered as part of this option)
-
 ```
 
 The `message` argument is the desired operation you want to perform through the IPC for the selected `madbfs` instance. The general rule is to transform the operation request JSON into a command. 
