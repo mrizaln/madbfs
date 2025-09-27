@@ -14,15 +14,19 @@ if __name__ == "__main__":
 
 import errno
 import filecmp
+import json
 import logging
 import os
+import re
 import shutil
 import stat
+import struct
 import sys
 import time
 from contextlib import contextmanager
 from dataclasses import astuple, dataclass
 from pathlib import Path
+from socket import AF_UNIX, SOCK_STREAM, socket
 from subprocess import (
     DEVNULL,
     PIPE,
@@ -36,14 +40,18 @@ from tempfile import NamedTemporaryFile
 
 import pytest
 
-TEST_FILE = __file__
 CURRENT_DIR = Path(os.path.dirname(__file__))
+TEST_FILE = CURRENT_DIR / "test_file.txt"
+TEST_DATA = bytearray()
 PROJECT_ROOT = CURRENT_DIR / "../.."
 BINARY_PATH = PROJECT_ROOT / "build/Release/madbfs/madbfs"
 SERVER_PATH = PROJECT_ROOT / "madbfs-server/build/android-all-release/madbfs-server"
 
-with open(TEST_FILE, "rb") as fh:
-    TEST_DATA = fh.read()
+DEFAULT_PAGE_SIZE = 128  # in KiB
+DEFAULT_CACHE_SIZE = 256  # in MiB
+DEFAULT_TTL = 30  # in seconds
+DEFAULT_TIMEOUT = 10  # in seconds
+DEFAULT_LOG_LEVEL = "debug"  # on this test only
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +65,45 @@ class Environ:
     log_path: Path
     mount_cmd: list[str]
     server: bool
+
+
+class Protocol:
+    @staticmethod
+    def receive(sock: socket) -> str | None:
+        (raw_msglen, _) = Protocol.__recvall(sock, 4)
+        if len(raw_msglen) <= 0:
+            return None
+
+        msglen = struct.unpack(">I", raw_msglen)[0]
+        (data, _) = Protocol.__recvall(sock, msglen)
+        if data is None or len(data) != msglen:
+            return None
+
+        return data.decode()
+
+    @staticmethod
+    def send(sock: socket, string: str) -> bool:
+        msglen = struct.pack(">I", len(string))
+        try:
+            sock.sendall(msglen)
+            sock.sendall(string.encode())
+        except Exception as e:
+            logger.warning(e)
+            return False
+        return True
+
+    @staticmethod
+    def __recvall(sock: socket, n: int) -> tuple[bytearray, int]:
+        # Helper function to recv n bytes or return None if EOF is hit
+        data = bytearray()
+        packet_count = 0
+        while len(data) < n:
+            packet = sock.recv(n - len(data))
+            if not packet:
+                break
+            data.extend(packet)
+            packet_count += 1
+        return data, packet_count
 
 
 @pytest.fixture(params=[True, False])
@@ -87,7 +134,7 @@ def environ(request):
         pytest.fail(f"mount point {mount_point} is not empty")
 
     test_dir = mount_point / "data/local/tmp"  # testing on /sdcard is risky...
-    log_path = CURRENT_DIR / "test_log"
+    log_path = CURRENT_DIR / "test.log"
 
     mount_cmd = [
         BINARY_PATH,
@@ -106,6 +153,25 @@ def environ(request):
         mount_cmd=mount_cmd,
         server=request.param,
     )
+
+
+def ipc_connect(serial: str) -> socket:
+    sock = socket(AF_UNIX, SOCK_STREAM)
+
+    max = 5
+    tries = 1
+
+    while tries <= max:
+        try:
+            path = os.environ["XDG_RUNTIME_DIR"]
+            sock.connect(f"{path}/madbfs@{serial}.sock")
+            return sock
+        except ConnectionRefusedError:
+            logger.warning(f"Failed to connect. Retry in 1 seconds ({tries} / {max})")
+            time.sleep(1)
+            tries += 1
+
+    pytest.fail("failed to connect to socket")
 
 
 def wait_for_mount(mount_process: Popen[str], mnt_dir: Path):
@@ -161,10 +227,11 @@ def cleanup(mount_process: Popen[str], mnt_dir: Path):
 
     mount_process.terminate()
     try:
-        mount_process.wait(1)
+        mount_process.wait(5)
     except TimeoutExpired:
         mount_process.kill()
 
+    # TODO: adb child process cleanup as well
     # TODO: ipc cleanup
 
 
@@ -253,6 +320,30 @@ def tst_open_write(work_dir: Path):
         shutil.copyfileobj(fh_in, fh_out)
 
     assert filecmp.cmp(file, TEST_FILE, False)
+
+    file.unlink()
+
+
+def tst_open_write_big(work_dir: Path):
+    file = work_dir / name_generator()
+
+    os_create(file)
+    test_data_big = bytearray()
+
+    target_size = DEFAULT_PAGE_SIZE * 1024 * 512
+
+    with open(__file__, "rb") as fh:
+        buf = fh.read()
+        while len(test_data_big) < target_size:
+            test_data_big.extend(buf)
+
+    logger.info(f"write {len(test_data_big)} bytes into {file}")
+
+    with open(file, "wb") as fh:
+        fh.write(test_data_big)
+
+    with open(file, "rb") as fh:
+        assert fh.read() == test_data_big
 
     file.unlink()
 
@@ -520,6 +611,129 @@ def tst_open_rename(work_dir: Path):
     file2.unlink()
 
 
+# first args is there just for symmetry, it's unused
+def tst_ipc(work_dir: str, serial: str, server_used: bool):
+    version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+    connection = "server" if server_used else "adb"
+    timeout = DEFAULT_TIMEOUT if server_used else 0
+
+    with ipc_connect(serial) as sock:
+        Protocol.send(sock, json.dumps({"op": "help"}))
+        resp = Protocol.receive(sock)
+        assert resp is not None
+        logger.info(resp)
+        resp = json.loads(resp)
+        assert resp["status"] == "success"
+        assert resp["value"]
+
+    with ipc_connect(serial) as sock:
+        Protocol.send(sock, json.dumps({"op": "version"}))
+        resp = Protocol.receive(sock)
+        assert resp is not None
+        logger.info(resp)
+        resp = json.loads(resp)
+        assert resp["status"] == "success"
+        assert resp["value"]
+        assert isinstance(resp["value"]["version"], str)
+        assert version_re.match(resp["value"]["version"])
+
+    with ipc_connect(serial) as sock:
+        Protocol.send(sock, json.dumps({"op": "info"}))
+        resp = Protocol.receive(sock)
+        assert resp is not None
+        logger.info(resp)
+        resp = json.loads(resp)
+        assert resp["status"] == "success"
+        assert resp["value"]
+        assert resp["value"]["connection"] == connection
+        assert resp["value"]["log_level"] == DEFAULT_LOG_LEVEL
+        assert resp["value"]["ttl"] == DEFAULT_TTL
+        assert resp["value"]["timeout"] == timeout
+        assert resp["value"]["page_size"] == DEFAULT_PAGE_SIZE
+        assert resp["value"]["cache_size"]
+        assert resp["value"]["cache_size"]["max"] == DEFAULT_CACHE_SIZE
+        assert isinstance(resp["value"]["cache_size"]["current"], int)
+
+    with ipc_connect(serial) as sock:
+        Protocol.send(sock, json.dumps({"op": "invalidate_cache"}))
+        resp = Protocol.receive(sock)
+        assert resp is not None
+        logger.info(resp)
+        resp = json.loads(resp)
+        assert resp["status"] == "success"
+        assert resp["value"]
+        assert isinstance(resp["value"]["size"], int)
+
+    with ipc_connect(serial) as sock:
+        Protocol.send(sock, json.dumps({"op": "set_page_size", "value": 256}))
+        resp = Protocol.receive(sock)
+        assert resp is not None
+        logger.info(resp)
+        resp = json.loads(resp)
+        assert resp["status"] == "success"
+        assert resp["value"]
+        assert resp["value"]["page_size"]
+        assert resp["value"]["page_size"]["old"] == DEFAULT_PAGE_SIZE
+        assert resp["value"]["page_size"]["new"] == 256
+        assert resp["value"]["cache_size"]
+        assert isinstance(resp["value"]["cache_size"]["old"], int)
+        assert isinstance(resp["value"]["cache_size"]["new"], int)
+
+    with ipc_connect(serial) as sock:
+        Protocol.send(sock, json.dumps({"op": "set_cache_size", "value": 128}))
+        resp = Protocol.receive(sock)
+        assert resp is not None
+        logger.info(resp)
+        resp = json.loads(resp)
+        assert resp["status"] == "success"
+        assert resp["value"]
+        assert resp["value"]["cache_size"]
+        assert resp["value"]["cache_size"]["old"] == DEFAULT_CACHE_SIZE
+        assert resp["value"]["cache_size"]["new"] == 128
+
+    with ipc_connect(serial) as sock:
+        Protocol.send(sock, json.dumps({"op": "set_ttl", "value": 20}))
+        resp = Protocol.receive(sock)
+        assert resp is not None
+        logger.info(resp)
+        resp = json.loads(resp)
+        assert resp["status"] == "success"
+        assert resp["value"]
+        assert resp["value"]["ttl"]
+        assert resp["value"]["ttl"]["old"] == DEFAULT_TTL
+        assert resp["value"]["ttl"]["new"] == 20
+
+    with ipc_connect(serial) as sock:
+        Protocol.send(sock, json.dumps({"op": "set_timeout", "value": 5}))
+        resp = Protocol.receive(sock)
+        assert resp is not None
+        logger.info(resp)
+        resp = json.loads(resp)
+        assert resp["status"] == "success"
+        assert resp["value"]
+        assert resp["value"]["timeout"]
+        assert resp["value"]["timeout"]["old"] == timeout
+        assert resp["value"]["timeout"]["new"] == 5
+
+    with ipc_connect(serial) as sock:
+        Protocol.send(sock, json.dumps({"op": "set_log_level", "value": "info"}))
+        resp = Protocol.receive(sock)
+        assert resp is not None
+        logger.info(resp)
+        resp = json.loads(resp)
+        assert resp["status"] == "success"
+        assert resp["value"]
+        assert resp["value"]["log_level"]
+        assert resp["value"]["log_level"]["old"] == DEFAULT_LOG_LEVEL
+        assert resp["value"]["log_level"]["new"] == "info"
+
+    # restore immediately since I need the logs to still be in debug :P
+    with ipc_connect(serial) as sock:
+        Protocol.send(sock, json.dumps({"op": "set_log_level", "value": "debug"}))
+        resp = Protocol.receive(sock)
+        assert resp is not None
+
+
 def test_filesystem(environ):
     serial: str
     abi: str
@@ -535,6 +749,16 @@ def test_filesystem(environ):
 
     cmd = cmd_base + [f"--serial={serial}", str(mount_point)]
     proc = Popen(cmd, stdout=PIPE, universal_newlines=True)
+
+    global TEST_DATA
+    global TEST_FILE
+
+    # generate at least 3 pages worth of data
+    with open(__file__, "rb") as fh:
+        test_file_data = fh.read()
+        while len(TEST_DATA) < 3 * DEFAULT_PAGE_SIZE * 1024:
+            TEST_DATA.extend(test_file_data)
+        TEST_FILE.write_bytes(TEST_DATA)
 
     try:
         wait_for_mount(proc, mount_point)
@@ -553,6 +777,7 @@ def test_filesystem(environ):
         call(tst_readdir_big)
         call(tst_open_read)
         call(tst_open_write)
+        call(tst_open_write_big)
         call(tst_create)
         call(tst_append)
         call(tst_seek)
@@ -567,6 +792,7 @@ def test_filesystem(environ):
         call(tst_truncate_fd)
         call(tst_open_unlink)
         call(tst_open_rename)
+        call(tst_ipc, serial, server)
     except:
         # NOTE: if tests are failing, the work_dir might not be cleaned up correctly. I
         # won't clean them up here since I might want to inspect the file in the work_dir
@@ -576,3 +802,6 @@ def test_filesystem(environ):
         raise
     else:
         unmount(proc, mount_point)
+    finally:
+        TEST_DATA.clear()
+        TEST_FILE.unlink()
