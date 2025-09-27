@@ -30,3 +30,4 @@ enable_testing()
 
 create_test_exe(test_tree)
 create_test_exe(test_path)
+create_test_exe(test_rpc)
