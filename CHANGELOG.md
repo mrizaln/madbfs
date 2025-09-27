@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - IPC operation for setting TTL (`set_ttl`).
 - IPC operation for setting timeout (`set_timeout`).
 - IPC operation for setting log level (`log_level`).
+- IPC operation for getting `madbfs` version (`version`).
 - Logcat operation through IPC (`logcat`) which can be used to read `madbfs` log in real-time.
 - New `madbfs-msg` binary/subproject as default IPC client.
 

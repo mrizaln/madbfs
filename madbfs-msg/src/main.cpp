@@ -330,6 +330,12 @@ std::optional<ipc::Op> parse_message(std::span<const std::string> message)
         } else {
             op = ipc::op::Help{};
         }
+    } else if (op_str == ipc::op::name::version) {
+        if (value_str) {
+            too_much(op_str, 0);
+        } else {
+            op = ipc::op::Version{};
+        }
     } else if (op_str == ipc::op::name::logcat) {
         if (value_str) {
             too_much(op_str, 0);
@@ -433,6 +439,19 @@ int send_message(std::span<const std::string> message, fs::path socket_path, boo
         },
         [&](this auto, ipc::op::Help) -> madbfs::Await<int> {
             auto response = co_await client->help();
+            if (not response) {
+                auto msg = std::make_error_code(response.error()).message();
+                fmt::println(stderr, "error: failed to send message: {}", msg);
+                co_return 1;
+            }
+
+            pretty_print(*response);
+
+            sig_set.cancel();
+            co_return 0;
+        },
+        [&](this auto, ipc::op::Version) -> madbfs::Await<int> {
+            auto response = co_await client->version();
             if (not response) {
                 auto msg = std::make_error_code(response.error()).message();
                 fmt::println(stderr, "error: failed to send message: {}", msg);

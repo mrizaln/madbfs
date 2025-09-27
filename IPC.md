@@ -21,6 +21,12 @@ Some operations only requires `"op"` field, while some requires `"value"` field.
   { "op": "help" }
   ```
 
+- `version`
+
+  ```json
+  { "op": "version" }
+  ```
+
 - `info`
 
   ```json
@@ -101,6 +107,17 @@ The IPC (beside `logcat`) will reply immediately after an operation is completed
 The `"value"` field will be filled with the value of the response of the resulting operation. It will contain a string that explains the error if an error status happens.
 
 The `<value>` then will be different depending on the operation performed:
+
+- `version`
+
+  ```json
+  {
+    "status": "success",
+    "value": {
+      "version": <version_str>
+    }
+  }
+  ```
 
 - `info`
 
@@ -251,7 +268,7 @@ options:
                                         considered as part of this option)
 ```
 
-The `message` argument is the desired operation you want to perform through the IPC for the selected `madbfs` instance. The general rule is to transform the operation request JSON into a command. 
+The `message` argument is the desired operation you want to perform through the IPC for the selected `madbfs` instance. The general rule is to transform the operation request JSON into a command.
 
 For example, to do `set_cache_size` operation, normally you need to send this JSON through IPC with LV encoding:
 

@@ -330,6 +330,7 @@ $ ./madbfs --log-file=- --log-level=debug -d <mountpoint> 2> /dev/null        # 
 Filesystem parameters can be reconfigured and queried during runtime though IPC using unix socket. The supported operations are:
 
 - help,
+- version,
 - info,
 - invalidate cache,
 - set page size,

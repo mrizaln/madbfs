@@ -58,6 +58,8 @@ namespace madbfs::ipc
 
             if (op == op::name::help) {
                 return Op{ op::Help{} };
+            } else if (op == op::name::version) {
+                return Op{ op::Version{} };
             } else if (op == op::name::info) {
                 return Op{ op::Info{} };
             } else if (op == op::name::invalidate_cache) {
@@ -198,6 +200,26 @@ namespace madbfs::ipc
         }
     }
 
+    AExpect<json::value> Client::version()
+    {
+        auto op_json = json::value{ { "op", op::name::version } };
+        if (auto res = co_await send_message(m_socket, json::serialize(op_json)); not res) {
+            co_return Unexpect{ res.error() };
+        }
+
+        auto response_str = co_await receive_message(m_socket);
+        if (not response_str) {
+            co_return Unexpect{ response_str.error() };
+        }
+
+        try {
+            co_return json::parse(*response_str);
+        } catch (const std::exception& e) {
+            log_e("{}: failed to deserialize response: {}", __func__, e.what());
+            co_return Unexpect{ Errc::bad_message };
+        }
+    }
+
     AExpect<Gen<AExpect<String>>> Client::logcat(op::Logcat opt)
     {
         auto op_json = json::value{ { "op", op::name::logcat }, { "value", opt.color } };
@@ -316,6 +338,9 @@ namespace madbfs::ipc
                 break;
             case Op::index_of<op::Help>():
                 value = json::value{ { "operations", json::value_from(op::names) } };
+                break;
+            case Op::index_of<op::Version>():
+                value = json::value{ { "version", MADBFS_VERSION_STRING } };
                 break;
             case Op::index_of<op::Logcat>():
                 m_logcat_subscribers.emplace_back(std::move(sock), op->as<op::Logcat>()->color);

@@ -22,6 +22,7 @@ namespace madbfs::ipc
     {
         // clang-format off
         struct Help            { };
+        struct Version         { };
         struct Info            { };
         struct InvalidateCache { };
         struct SetPageSize     { usize kib; };
@@ -35,6 +36,7 @@ namespace madbfs::ipc
         namespace name
         {
             constexpr auto help             = "help";
+            constexpr auto version          = "version";
             constexpr auto info             = "info";
             constexpr auto invalidate_cache = "invalidate_cache";
             constexpr auto set_page_size    = "set_page_size";
@@ -47,6 +49,7 @@ namespace madbfs::ipc
 
         constexpr auto names = std::to_array({
             name::help,
+            name::version,
             name::info,
             name::invalidate_cache,
             name::set_page_size,
@@ -81,7 +84,7 @@ namespace madbfs::ipc
      *
      * @brief All possible operations through the IPC.
      */
-    struct Op : util::VarWrapper<FsOp, op::Help, op::Logcat>
+    struct Op : util::VarWrapper<FsOp, op::Help, op::Version, op::Logcat>
     {
         using VarWrapper::VarWrapper;
     };
@@ -174,6 +177,11 @@ namespace madbfs::ipc
          * @brief Get help from server.
          */
         AExpect<boost::json::value> help();
+
+        /**
+         * @brief Get version from server.
+         */
+        AExpect<boost::json::value> version();
 
         /**
          * @brief Start logcat operation.
