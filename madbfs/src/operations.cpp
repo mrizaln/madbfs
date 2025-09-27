@@ -3,7 +3,7 @@
 #include "madbfs/args.hpp"
 #include "madbfs/madbfs.hpp"
 
-#include "madbfs-common/log.hpp"
+#include <madbfs-common/log.hpp>
 
 namespace
 {
@@ -145,9 +145,9 @@ namespace madbfs::operations
 
         auto serial = ::getenv("ANDROID_SERIAL");
         if (serial != nullptr) {
-            log_i("madbfs for device {} succesfully terminated", serial);
+            log_i("madbfs for device {} successfully terminated", serial);
         } else [[unlikely]] {
-            log_i("madbfs succesfully terminated");
+            log_i("madbfs successfully terminated");
         }
 
         // to force flushing remaining logs in queue

@@ -8,6 +8,7 @@
 
 namespace madbfs::connection
 {
+    // TODO: don't use heap for rpc::Client
     AExpect<Uniq<rpc::Client>> ServerConnection::make_client(u16 port)
     {
         auto exec   = co_await async::current_executor();

@@ -3,7 +3,7 @@
 #include "madbfs/connection/connection.hpp"
 #include "madbfs/tree/file_tree.hpp"
 
-#include "madbfs-common/ipc.hpp"
+#include <madbfs-common/ipc.hpp>
 
 #include <thread>
 

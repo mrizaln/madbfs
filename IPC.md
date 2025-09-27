@@ -233,14 +233,12 @@ The `<value>` then will be different depending on the operation performed:
     "status": "success",
     "value": {
       "log_level": {
-        "old": <uint>,
-        "new": <uint>
+        "old": <str>,
+        "new": <str>
       }
     }
   }
   ```
-
-  > - unit is in seconds
 
 - `logcat`
 
