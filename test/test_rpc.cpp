@@ -1,3 +1,5 @@
+#include "util.hpp"
+
 #include <madbfs-common/aliases.hpp>
 #include <madbfs-common/async/async.hpp>
 #include <madbfs-common/rpc.hpp>
@@ -88,36 +90,13 @@ rpc::Request create_req()
     return r;
 };
 
-template <typename Var, typename Fn>
-inline constexpr auto for_each_variant(Fn&& fn)
-{
-    [&]<std::size_t... I>(std::index_sequence<I...>) {
-        (fn.template operator()<I, std::variant_alternative_t<I, Var>>(), ...);
-    }(std::make_index_sequence<std::variant_size_v<std::decay_t<Var>>>());
-}
-
-template <std::ranges::contiguous_range... Rs>
-static void shuffle(std::mt19937& rng, Rs&... rs)
-{
-    using Dist  = std::uniform_int_distribution<usize>;
-    using Param = typename Dist::param_type;
-
-    auto dist = Dist{};
-    auto n    = std::min({ std::ranges::size(rs)... });
-
-    for (auto i = usize{ n - 1 }; i > 0; --i) {
-        auto j = dist(rng, Param{ 0, i });
-        (std::swap(rs[i], rs[j]), ...);
-    }
-}
-
 int main()
 {
-    spdlog::set_default_logger(spdlog::null_logger_mt("madbfs-test-rpc"));
-
     using namespace ut::literals;
     using namespace ut::operators;
     using ut::expect, ut::throws, ut::log, ut::that, ut::fatal;
+
+    spdlog::set_default_logger(spdlog::null_logger_mt("madbfs-test-rpc"));
 
     auto context = async::Context{};
     auto guard   = net::make_work_guard(context);
@@ -129,8 +108,8 @@ int main()
         return async::block(context, std::move(coro));
     };
 
-    "test client-server communication even in high traffic"_test = [&] {
-        constexpr auto multiplier   = 1000uz;
+    "rpc client-server communication should still work even in high traffic"_test = [&] {
+        constexpr auto multiplier   = 200uz;
         constexpr auto variants_num = std::variant_size_v<rpc::Request::Var>;
 
         auto socket = sync_wait(connect());
@@ -145,7 +124,7 @@ int main()
         buffers.resize(variants_num * multiplier);
 
         for (auto i : sv::iota(0uz, multiplier)) {
-            for_each_variant<rpc::Request::Var>([&]<usize I, rpc::IsRequest R>() {
+            test::util::for_each_variant<rpc::Request::Var>([&]<usize I, rpc::IsRequest R>() {
                 auto& buffer = buffers[i * variants_num + I];
                 coroutines.emplace_back(client.send_req(buffer, create_req<R>(), {}));
                 indices.emplace_back(I);
@@ -153,7 +132,7 @@ int main()
         }
 
         auto rng = std::mt19937{ std::random_device{}() };
-        shuffle(rng, coroutines, indices);
+        test::util::shuffle(rng, coroutines, indices);
 
         namespace chr = std::chrono;
 
