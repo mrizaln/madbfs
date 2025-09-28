@@ -43,7 +43,7 @@ import pytest
 CURRENT_DIR = Path(os.path.dirname(__file__))
 TEST_FILE = CURRENT_DIR / "test_file.txt"
 TEST_DATA = bytearray()
-PROJECT_ROOT = CURRENT_DIR / "../.."
+PROJECT_ROOT = CURRENT_DIR / ".."
 BINARY_PATH = PROJECT_ROOT / "build/Release/madbfs/madbfs"
 SERVER_PATH = PROJECT_ROOT / "madbfs-server/build/android-all-release/madbfs-server"
 

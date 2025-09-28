@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2025-09-28
+
 ### Added
 
 - Stat cache expiration (TTL).
@@ -28,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Symlink now handled correctly (previously symlink works by taking the `realpath` of the link repeatedly until it points to a non-symlink file and can only points to valid target).
-- Arguments options `--cache-size`, `--page-size`, and `--port` won't accept non-positive value. 
+- Arguments options `--cache-size`, `--page-size`, and `--port` won't accept non-positive value.
 - Improve `Path` and `PathBuf` API and implementation.
 - Add new `ttl`, `timeout`, and `log_level` fields on `info` IPC operation response.
 
@@ -202,7 +204,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-file LRU page caching for file read/write.
 - `Path` and `PathBuf` class to separate `madbfs`'s virtual paths from real paths (`std::filesystem`).
 
-[unreleased]: https://github.com/mrizaln/madbfs/compare/v0.8.1...HEAD
+[unreleased]: https://github.com/mrizaln/madbfs/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/mrizaln/madbfs/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/mrizaln/madbfs/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/mrizaln/madbfs/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/mrizaln/madbfs/compare/v0.6.0...v0.7.0
