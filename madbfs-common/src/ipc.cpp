@@ -277,21 +277,23 @@ namespace madbfs::ipc
         m_running = true;
         m_on_op   = std::move(on_op);
 
+        auto logger = log::get_logger();
+        if (not logger) {
+            log_e("{}: can't find logger with name '{}', logcat won't function", __func__, log::logger_name);
+            co_await run();
+            co_return;
+        }
+
         if (not m_logcat_sink) {
             m_logcat_sink = std::make_shared<LogcatSink>();
             m_logcat_sink->set_level(log::Level::off);
             m_logcat_sink->set_pattern(log::logger_pattern);
 
-            if (auto logger = log::get_logger(); not logger) {
-                log_e("{}: can't find logger with name '{}'", __func__, log::logger_name);
-                co_return;
-            } else {
-                auto& sinks = logger->sinks();
-                sinks.push_back(m_logcat_sink);
-            }
+            auto& sinks = logger->sinks();
+            sinks.push_back(m_logcat_sink);
         }
 
-        std::ignore = co_await async::wait_all(run(), logcat_handler());
+        co_await async::wait_all(run(), logcat_handler());
     }
 
     void Server::stop()
