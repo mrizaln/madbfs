@@ -2,6 +2,14 @@
 
 `madbfs` (Modern `adb` Filesystem, formerly `adbfsm`) is a userspace filesystem for Android via `adb` built using `libfuse`. It focuses on being fast, reliable, and safe, with straightforward, well-structured code that follows modern C++ practices.
 
+## Preview
+
+https://github.com/user-attachments/assets/dad81c5a-993e-480d-a329-d8fc560a69de
+
+> What's happening above:
+> - viewing a video on Waydroid from host and copying it to host, and
+> - copying a picture from host to Waydroid.
+
 ## Motivation
 
 I want to manage my Android phone storage from my computer without using MTP (it's awful).
