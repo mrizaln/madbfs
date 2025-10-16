@@ -68,7 +68,7 @@ namespace
         case Err::Inaccessible: return madbfs::Errc::operation_not_supported;
         case Err::ReadOnly: return madbfs::Errc::read_only_file_system;
         case Err::TryAgain: return madbfs::Errc::resource_unavailable_try_again;
-        default: std::terminate();
+        default: return madbfs::Errc::io_error;
         }
     }
 
@@ -108,7 +108,7 @@ namespace
             else if (eq(error::not_a_directory))     return Err::NotADir;
             else if (eq(error::inaccessible))        return Err::Inaccessible;
             else if (eq(error::read_only))           return Err::ReadOnly;
-            else                              return Err::Unknown;
+            else                                     return Err::Unknown;
             // clang-format on
         }
 

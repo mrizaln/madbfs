@@ -9,9 +9,10 @@ namespace madbfs::connection
     Str to_string(DeviceStatus status)
     {
         switch (status) {
-        case DeviceStatus::Device: return "device ok";
-        case DeviceStatus::Offline: return "device offline";
-        case DeviceStatus::Unauthorized: return "device unauthorized";
+        case DeviceStatus::Device: return "device";
+        case DeviceStatus::Emulator: return "emulator";
+        case DeviceStatus::Offline: return "offline";
+        case DeviceStatus::Unauthorized: return "unauthorized";
         case DeviceStatus::Unknown: return "unknown";
         }
         return "Unknown";
@@ -51,6 +52,7 @@ namespace madbfs::connection
             // clang-format off
             if      (*status_str == "offline")      status = DeviceStatus::Offline;
             else if (*status_str == "unauthorized") status = DeviceStatus::Unauthorized;
+            else if (*status_str == "emulator")     status = DeviceStatus::Emulator;
             else if (*status_str == "device")       status = DeviceStatus::Device;
             // clang-format on
 

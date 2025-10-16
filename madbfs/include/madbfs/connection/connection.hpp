@@ -176,6 +176,7 @@ namespace madbfs::connection
     enum class DeviceStatus
     {
         Device,
+        Emulator,
         Offline,
         Unauthorized,
         Unknown,
