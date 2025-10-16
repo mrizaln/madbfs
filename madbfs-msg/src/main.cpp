@@ -479,8 +479,7 @@ int send_message(std::span<const std::string> message, fs::path socket_path, boo
                     break;
                 }
 
-                // the newline is already in the message :P
-                fmt::print("{}", *message);
+                fmt::println("{}", *message);
             }
 
             fmt::println("{:-^80}", "[ LOGCAT END ]");

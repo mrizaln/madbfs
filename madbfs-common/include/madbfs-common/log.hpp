@@ -4,6 +4,7 @@
 
 #include <spdlog/fmt/ranges.h>    // to enable ranges formatting
 #include <spdlog/fmt/std.h>
+#include <spdlog/pattern_formatter.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
@@ -141,6 +142,24 @@ namespace madbfs::log
     inline void set_level(Level level) noexcept
     {
         spdlog::set_level(level);
+    }
+
+    /**
+     * @brief Helper function for creating formatter for logger.
+     *
+     * @param eol Whether to add eol at each message or not.
+     *
+     * https://github.com/gabime/spdlog/issues/579
+     */
+    inline Uniq<spdlog::pattern_formatter> create_formatter(std::string_view pattern, bool eol)
+    {
+        if (eol) {
+            return std::make_unique<spdlog::pattern_formatter>(String{ pattern });
+        } else {
+            return std::make_unique<spdlog::pattern_formatter>(
+                String{ pattern }, spdlog::pattern_time_type::local, std::string("")
+            );
+        }
     }
 
     /**

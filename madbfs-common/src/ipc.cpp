@@ -103,19 +103,19 @@ namespace madbfs::ipc
 
     void LogcatSink::sink_it_(const spdlog::details::log_msg& msg)
     {
-        auto buf = spdlog::memory_buf_t{};
+        m_buf.clear();
 
         msg.color_range_start = 0;
         msg.color_range_end   = 0;
 
-        this->formatter_->format(msg, buf);
+        this->formatter_->format(msg, m_buf);
 
         auto& queue = m_queue[m_index];
-        if (queue.size() == m_max_queue) {
+        while (queue.size() >= m_max_queue) {
             queue.pop_front();
         }
         queue.emplace_back(
-            fmt::to_string(buf), msg.color_range_start, msg.color_range_end, static_cast<usize>(msg.level)
+            fmt::to_string(m_buf), msg.color_range_start, msg.color_range_end, static_cast<usize>(msg.level)
         );
     }
 }
@@ -287,7 +287,7 @@ namespace madbfs::ipc
         if (not m_logcat_sink) {
             m_logcat_sink = std::make_shared<LogcatSink>();
             m_logcat_sink->set_level(log::Level::off);
-            m_logcat_sink->set_pattern(log::logger_pattern);
+            m_logcat_sink->set_formatter(log::create_formatter(log::logger_pattern, false));
 
             auto& sinks = logger->sinks();
             sinks.push_back(m_logcat_sink);

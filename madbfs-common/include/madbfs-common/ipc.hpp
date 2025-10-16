@@ -134,6 +134,7 @@ namespace madbfs::ipc
         void flush_() override { /* do nothing */ };
 
     private:
+        spdlog::memory_buf_t      m_buf;
         Array<std::deque<Msg>, 2> m_queue     = {};
         usize                     m_index     = 0;
         usize                     m_max_queue = 1024;
