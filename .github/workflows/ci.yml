@@ -9,6 +9,8 @@ on:
 
 env:
   NDK_VERSION: 29.0.13599879
+  SDK_MANAGER: /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager
+  ANDROID_NDK_HOME_BASE: /usr/local/lib/android/sdk/ndk
 
 jobs:
   build:
@@ -32,12 +34,12 @@ jobs:
 
     - name: Configure Android NDK
       run: |
-        yes | /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null
-        /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager --install "ndk;$NDK_VERSION"
-        echo ANDROID_NDK_HOME="/usr/local/lib/android/sdk/ndk/$NDK_VERSION" >> $GITHUB_ENV
+        yes | $SDK_MANAGER --licenses > /dev/null
+        $SDK_MANAGER --install "ndk;$NDK_VERSION"
+        echo ANDROID_NDK_HOME="$ANDROID_NDK_HOME_BASE/$NDK_VERSION" >> $GITHUB_ENV
 
     - name: Build, Test, and Package
-      run: ./package.sh $PWD/.github/ci/conan-profile.ini
+      run: ./package.sh "$PWD/.github/ci/conan-profile.ini"
 
     - name: Save Artifacts
       uses: actions/upload-artifact@v4
