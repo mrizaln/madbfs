@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
-if [[ -z $ANDROID_NDK_HOME ]]; then
+if [[ -z ${ANDROID_NDK_HOME-} ]]; then
     echo "error: ANDROID_NDK_HOME variable is required to build this project"
     exit 1
 fi
 
-CONAN_PROFILE="$1"
-if [[ -z "$1" ]]; then
-    CONAN_PROFILE=default
-fi
+CONAN_PROFILE="${1-default}"
 
 # change these to your Android NDK configuration
 # ----------------------------------------------

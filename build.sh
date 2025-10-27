@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
-CONAN_PROFILE="$1"
-if [[ -z "$1" ]]; then
-    CONAN_PROFILE=default
-fi
+CONAN_PROFILE="${1-default}"
 
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 
