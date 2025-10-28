@@ -13,11 +13,6 @@
 
 namespace
 {
-    madbfs::String err_msg(madbfs::Errc errc)
-    {
-        return std::make_error_code(errc).message();
-    }
-
     madbfs::rpc::Status status_from_errno(
         madbfs::Str          name,
         madbfs::Str          path,

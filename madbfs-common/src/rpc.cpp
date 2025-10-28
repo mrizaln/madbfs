@@ -422,8 +422,7 @@ namespace madbfs::rpc
 
             log::log_exception(e, "receive");
             if (not res) {
-                auto msg = std::make_error_code(res.error()).message();
-                log_e("receive: finished with error: {}", msg);
+                log_e("receive: finished with error: {}", err_msg(res.error()));
             }
 
             log_e("receive: there are {} promises unhandled", m_requests.size());
@@ -437,8 +436,7 @@ namespace madbfs::rpc
         async::spawn(exec, send(), [&](std::exception_ptr e, Expect<void> res) {
             log::log_exception(e, "send");
             if (not res) {
-                auto msg = std::make_error_code(res.error()).message();
-                log_e("send: finished with error: {}", msg);
+                log_e("send: finished with error: {}", err_msg(res.error()));
             }
 
             m_channel.cancel();

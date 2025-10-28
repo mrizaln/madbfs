@@ -372,9 +372,8 @@ namespace madbfs::args
         }
 
         fmt::println("[madbfs] checking adb availability...");
-        if (auto status = co_await connection::start_connection(); not status.has_value()) {
-            const auto msg = std::make_error_code(status.error()).message();
-            fmt::println(stderr, "\nerror: failed to start adb server [{}].", msg);
+        if (auto status = co_await connection::start_connection(); not status) {
+            fmt::println(stderr, "\nerror: failed to start adb server [{}].", err_msg(status.error()));
             fmt::println(stderr, "\nnote: make sure adb is installed and in PATH.");
             fmt::println(stderr, "note: make sure phone debugging permission is enabled.");
             fmt::println(stderr, "      phone with its screen locked might denies adb connection.");

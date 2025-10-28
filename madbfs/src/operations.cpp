@@ -85,12 +85,12 @@ namespace
             case std::errc::filename_too_long:
             case std::errc::invalid_argument: {
                 if (madbfs::log::get_level() == madbfs::log::Level::debug) {
-                    const auto msg = std::make_error_code(err).message();
+                    const auto& msg = madbfs::err_msg(err);
                     log(Level::warn, "{}: {:?} returned with error code [{}]: {}", name, path, errint, msg);
                 }
             } break;
             default: {
-                const auto msg = std::make_error_code(err).message();
+                const auto& msg = madbfs::err_msg(err);
                 log(Level::err, "{}: {:?} returned with error code [{}]: {}", name, path, errint, msg);
             }
             }

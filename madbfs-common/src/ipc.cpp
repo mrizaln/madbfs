@@ -362,8 +362,7 @@ namespace madbfs::ipc
         });
 
         if (auto res = co_await send_message(sock, response); not res) {
-            const auto msg = std::make_error_code(res.error()).message();
-            log_w("{}: failed to send message: {}", __func__, msg);
+            log_w("{}: failed to send message: {}", __func__, err_msg(res.error()));
         }
     }
 
@@ -428,7 +427,6 @@ namespace madbfs::ipc
                     }
 
                     if (not res) {
-                        auto err_msg = std::make_error_code(res.error()).message();
                         inactive_subscribers.emplace_back(i);
                         break;
                     }

@@ -116,13 +116,9 @@ class ExpectError : public std::runtime_error
 {
 public:
     ExpectError(Errc errc, std::source_location loc = std::source_location::current())
-        : runtime_error{ fmt::format(
-              "{}:{}:{} [{}]",
-              loc.file_name(),
-              loc.line(),
-              loc.column(),
-              std::make_error_code(errc).message()
-          ) }
+        : runtime_error{
+            fmt::format("{}:{}:{} [{}]", loc.file_name(), loc.line(), loc.column(), madbfs::err_msg(errc))
+        }
     {
     }
 };

@@ -124,6 +124,16 @@ namespace madbfs
         inline constexpr auto sink_unit = [](auto&&) { return Unit{}; };
 
         /**
+         * @brief Get error message from error_code.
+         *
+         * @param errc error code.
+         */
+        inline madbfs::String err_msg(madbfs::Errc errc)
+        {
+            return std::make_error_code(errc).message();
+        }
+
+        /**
          * @brief Convert `std::optional` to `std::expected`.
          *
          * @param opt Opt to be converted.

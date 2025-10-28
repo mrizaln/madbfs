@@ -17,15 +17,14 @@ namespace madbfs
     )
     {
         auto coro = [=] noexcept -> Await<Uniq<connection::Connection>> {
-            auto result = co_await connection::ServerConnection::prepare_and_create(server, port, timeout);
-            if (not result) {
-                auto msg = std::make_error_code(result.error()).message();
-                log_c("prepare_connection: failed to construct ServerConnection: {}", msg);
+            auto res = co_await connection::ServerConnection::prepare_and_create(server, port, timeout);
+            if (not res) {
+                log_c("prepare_connection: failed to construct ServerConnection: {}", err_msg(res.error()));
                 log_c("prepare_connection: falling back to AdbConnection");
                 co_return std::make_unique<connection::AdbConnection>();
             }
             log_d("prepare_connection: successfully created ServerConnection");
-            co_return std::move(*result);
+            co_return std::move(*res);
         };
 
         return async::block(ctx, coro());
@@ -50,8 +49,7 @@ namespace madbfs
 
         auto ipc = ipc::Server::create(ctx, socket_path);
         if (not ipc.has_value()) {
-            const auto msg = std::make_error_code(ipc.error()).message();
-            log_e("Madbfs: failed to initialize ipc: {}", msg);
+            log_e("Madbfs: failed to initialize ipc: {}", err_msg(ipc.error()));
             return {};
         }
 

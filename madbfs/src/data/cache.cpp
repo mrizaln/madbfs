@@ -87,8 +87,7 @@ namespace madbfs::data
         auto read = 0uz;
         for (auto&& res : res) {
             if (not res) {
-                auto msg = std::make_error_code(res.error()).message();
-                log_e("{}: failed to read [{}] {:?}: {}", __func__, id.inner(), path, msg);
+                log_e("{}: failed to read [{}] {:?}: {}", __func__, id.inner(), path, err_msg(res.error()));
                 co_return Unexpect{ res.error() };
             }
             read += res.value();
@@ -114,8 +113,7 @@ namespace madbfs::data
         auto written = 0uz;
         for (auto&& res : res) {
             if (not res) {
-                auto msg = std::make_error_code(res.error()).message();
-                log_e("{}: failed to write [{}] {:?}: {}", __func__, id.inner(), path, msg);
+                log_e("{}: failed to write [{}] {:?}: {}", __func__, id.inner(), path, err_msg(res.error()));
                 co_return Unexpect{ res.error() };
             }
             written += res.value();
@@ -142,8 +140,7 @@ namespace madbfs::data
         for (auto page : pages | sv::values) {
             auto res = co_await flush_at(*page, id);
             if (not res) {
-                auto msg = std::make_error_code(res.error()).message();
-                log_e("{}: failed to flush [{}] {:?}: {}", __func__, id.inner(), path, msg);
+                log_e("{}: failed to flush [{}] {:?}: {}", __func__, id.inner(), path, err_msg(res.error()));
                 co_return Unexpect{ res.error() };
             }
         }
@@ -231,8 +228,7 @@ namespace madbfs::data
     {
         for (auto id : m_table | sv::keys) {
             if (auto res = co_await flush(id); not res) {
-                auto msg = std::make_error_code(res.error()).message();
-                log_e("{}: failed to flush {}: {}", __func__, id.inner(), msg);
+                log_e("{}: failed to flush {}: {}", __func__, id.inner(), err_msg(res.error()));
             }
         }
 
@@ -245,8 +241,7 @@ namespace madbfs::data
     {
         if (should_flush) {
             if (auto res = co_await flush(id); not res) {
-                auto msg = std::make_error_code(res.error()).message();
-                log_e("{}: failed to flush {}: {}", __func__, id.inner(), msg);
+                log_e("{}: failed to flush {}: {}", __func__, id.inner(), err_msg(res.error()));
             }
         }
 

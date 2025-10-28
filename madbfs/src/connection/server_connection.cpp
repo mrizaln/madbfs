@@ -73,8 +73,7 @@ namespace madbfs::connection
         // enable port forwarding
         auto forward = fmt::format("tcp:{}", port);
         if (auto res = co_await cmd::exec({ "adb", "forward", forward, forward }); not res) {
-            auto msg = std::make_error_code(res.error()).message();
-            log_e("{}: failed to enable port forwarding at port {}: {}", __func__, port, msg);
+            log_e("{}: failed to enable forwarding at port {}: {}", __func__, port, err_msg(res.error()));
             co_return Unexpect{ res.error() };
         }
 
@@ -93,15 +92,13 @@ namespace madbfs::connection
 
         // push server executable to device
         if (auto res = co_await cmd::exec({ "adb", "push", *server, serv_file }); not res) {
-            auto msg = std::make_error_code(res.error()).message();
-            log_e("{}: failed to push 'madbfs-server' to device: {}", __func__, msg);
+            log_e("{}: failed to push 'madbfs-server' to device: {}", __func__, err_msg(res.error()));
             co_return Unexpect{ res.error() };
         }
 
         // update execute permission
         if (auto res = co_await cmd::exec({ "adb", "shell", "chmod", "+x", serv_file }); not res) {
-            auto msg = std::make_error_code(res.error()).message();
-            log_e("{}: failed to update 'madbfs-server' permission: {}", __func__, msg);
+            log_e("{}: failed to update 'madbfs-server' permission: {}", __func__, err_msg(res.error()));
             co_return Unexpect{ res.error() };
         }
 

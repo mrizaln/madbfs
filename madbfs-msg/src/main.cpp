@@ -415,8 +415,7 @@ int send_message(std::span<const std::string> message, fs::path socket_path, boo
     auto context = async::Context{};
     auto client  = ipc::Client::create(context, socket_path.c_str());
     if (not client) {
-        auto msg = std::make_error_code(client.error()).message();
-        fmt::println(stderr, "error: failed to create client: {}", msg);
+        fmt::println(stderr, "error: failed to create client: {}", madbfs::err_msg(client.error()));
         return 1;
     }
 
@@ -427,8 +426,7 @@ int send_message(std::span<const std::string> message, fs::path socket_path, boo
         [&](this auto, ipc::FsOp op) -> madbfs::Await<int> {
             auto response = co_await client->send(op);
             if (not response) {
-                auto msg = std::make_error_code(response.error()).message();
-                fmt::println(stderr, "error: failed to send message: {}", msg);
+                fmt::println(stderr, "error: failed to send message: {}", madbfs::err_msg(response.error()));
                 co_return 1;
             }
 
@@ -440,8 +438,7 @@ int send_message(std::span<const std::string> message, fs::path socket_path, boo
         [&](this auto, ipc::op::Help) -> madbfs::Await<int> {
             auto response = co_await client->help();
             if (not response) {
-                auto msg = std::make_error_code(response.error()).message();
-                fmt::println(stderr, "error: failed to send message: {}", msg);
+                fmt::println(stderr, "error: failed to send message: {}", madbfs::err_msg(response.error()));
                 co_return 1;
             }
 
@@ -453,8 +450,7 @@ int send_message(std::span<const std::string> message, fs::path socket_path, boo
         [&](this auto, ipc::op::Version) -> madbfs::Await<int> {
             auto response = co_await client->version();
             if (not response) {
-                auto msg = std::make_error_code(response.error()).message();
-                fmt::println(stderr, "error: failed to send message: {}", msg);
+                fmt::println(stderr, "error: failed to send message: {}", madbfs::err_msg(response.error()));
                 co_return 1;
             }
 
@@ -466,8 +462,7 @@ int send_message(std::span<const std::string> message, fs::path socket_path, boo
         [&](this auto, ipc::op::Logcat) -> madbfs::Await<int> {
             auto response = co_await client->logcat({ .color = color });
             if (not response) {
-                auto msg = std::make_error_code(response.error()).message();
-                fmt::println(stderr, "error: failed to send message: {}", msg);
+                fmt::println(stderr, "error: failed to send message: {}", madbfs::err_msg(response.error()));
                 co_return 1;
             }
 
