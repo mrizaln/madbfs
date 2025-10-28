@@ -11,6 +11,8 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+// android API changes: https://android.googlesource.com/platform/bionic/+/HEAD/docs/status.md
+
 namespace
 {
     madbfs::rpc::Status status_from_errno(
@@ -189,16 +191,28 @@ namespace madbfs::server
         const auto& [from, to, flags] = req;
         log_d("rename: from={:?} -> to={:?} [flags={}]", from, to, flags);
 
-        // NOTE: renameat2 is not exposed directly by Android's linux kernel apparently (or not supported).
-        // workaround: https://stackoverflow.com/a/41655792/16506263 (https://lwn.net/Articles/655028/).
+        // paths are guaranteed to be absolute for both from and to, so the fds are not required since they
+        // will be ignored. see man rename(2).
 
-        // NOTE: paths are guaranteed to be absolute for both from and to, so the fds are not required since
-        // they will be ignored. see man rename(2).
+        // NOTE: renameat2 is only available from API level 30
+        if (m_renameat2_impl) {
+            auto res = syscall(SYS_renameat2, 0, from.data(), 0, to.data(), flags);
+            if (res < 0 and errno == ENOSYS) {
+                m_renameat2_impl = false;
+                log_w("renameat2 syscall is not implemented, proceeding into fallback");
+            } else if (res < 0) {
+                return status_from_errno(__func__, from, "failed to rename file");
+            } else {
+                return rpc::resp::Rename{};
+            }
+        }
 
-        // NOTE: This function will most likely return invalid argument anyway when given RENAME_EXCHANGE flag
-        // since this operation is not widely supported.
+        // renameat don't take flags
+        if (flags != 0) {
+            return rpc::Status::invalid_argument;
+        }
 
-        if (syscall(SYS_renameat2, 0, from.data(), 0, to.data(), flags) < 0) {
+        if (::renameat(0, from.data(), 0, to.data()) < 0) {
             return status_from_errno(__func__, from, "failed to rename file");
         }
 
@@ -325,8 +339,23 @@ namespace madbfs::server
             return status_from_errno(__func__, out, "failed to seek file");
         }
 
-        auto buffer = Array<char, 64 * 1024>{};
+        // NOTE: copy_file_range syscall only available from API level 34
+        if (m_copy_file_range_impl) {
+            auto in_off_  = in_off;     // must be mutable
+            auto out_off_ = out_off;    // must be mutable
 
+            auto res = syscall(SYS_copy_file_range, in_fd, &in_off_, out_fd, &out_off_, size, 0);
+            if (res < 0 and errno == ENOSYS) {
+                m_copy_file_range_impl = false;
+                log_w("copy_file_range syscall is not implemented, proceeding into fallback");
+            } else if (res < 0) {
+                return status_from_errno(__func__, out, "failed to seek file");
+            } else {
+                return rpc::resp::CopyFileRange{ .size = static_cast<usize>(res) };
+            }
+        }
+
+        auto buffer = Array<char, 64 * 1024>{};
         auto copied = 0_usize;
 
         auto read    = 0_i64;
@@ -338,13 +367,15 @@ namespace madbfs::server
             }
             while (read > 0) {
                 if (written = ::write(out_fd, buffer.data(), static_cast<usize>(read)); written < 0) {
-                    break;
+                    goto end_copy;
                 }
+                read   -= written;
                 copied += static_cast<usize>(written);
             }
         }
+    end_copy:
 
-        if (read < 0) {
+        if (read < 0 or written < 0) {
             return status_from_errno(__func__, out, "failed to copy file");
         }
 

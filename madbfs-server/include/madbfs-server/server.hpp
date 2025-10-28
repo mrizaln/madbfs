@@ -32,6 +32,9 @@ namespace madbfs::server
 
     private:
         Vec<u8>& m_buffer;
+
+        bool m_renameat2_impl       = true;
+        bool m_copy_file_range_impl = true;
     };
 
     class Server
