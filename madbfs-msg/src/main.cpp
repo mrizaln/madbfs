@@ -484,21 +484,17 @@ int send_message(std::span<const std::string> message, fs::path socket_path, boo
         },
     });
 
-    auto fut = async::spawn(context, std::move(coro), async::use_future);
-
-    context.run();
-
-    return fut.get();
+    return async::once(context, std::move(coro));
 }
 
 int main(int argc, char** argv)
 try {
-    auto may_args = parse_args(argc, argv);
-    if (may_args.index() == 0) {
-        return std::get<0>(may_args).ret;
+    auto parsed = parse_args(argc, argv);
+    if (parsed.index() == 0) {
+        return std::get<0>(parsed).ret;
     }
 
-    auto args        = std::get<1>(may_args);
+    auto args        = std::get<1>(parsed);
     auto search_path = fs::path{ args.search_path };
 
     switch (args.mode) {
@@ -516,6 +512,8 @@ try {
     }
 } catch (const std::exception& e) {
     fmt::println(stderr, "error: exception occurred: {}", e.what());
+    return 1;
 } catch (...) {
     fmt::println(stderr, "error: exception occurred (unknown exception)");
+    return 1;
 }

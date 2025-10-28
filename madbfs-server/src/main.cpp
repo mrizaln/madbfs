@@ -2,88 +2,90 @@
 #include <madbfs-common/rpc.hpp>
 #include <madbfs-server/server.hpp>
 
-#include <atomic>
 #include <charconv>
 #include <csignal>
-#include <thread>
 
-std::atomic<bool> g_interrupt = false;
-
-void sig_handler(int sig)
+struct Exit
 {
-    madbfs::log_i("signal {} raised!", sig);
+    int ret;
+};
 
-    g_interrupt = true;
-    g_interrupt.notify_all();
+struct Args
+{
+    madbfs::log::Level log_level = madbfs::log::Level::warn;
+    madbfs::u16        port      = 12345;
+};
 
-    // std::signal(sig, SIG_DFL);
-    // std::raise(sig);
-}
-
-int main(int argc, char** argv)
-try {
-    std::signal(SIGINT, sig_handler);
-    std::signal(SIGTERM, sig_handler);
-
-    using Level = madbfs::log::Level;
-
-    auto log_level = Level::warn;
-    auto port      = madbfs::u16{ 12345 };
+std::variant<Exit, Args> parse_args(int argc, char** argv)
+{
+    using madbfs::log::Level;
+    auto args = Args{};
 
     for (auto i = 1; i < argc; ++i) {
         auto arg = madbfs::Str{ argv[i] };
         if (arg == "--help" or arg == "-h") {
-            fmt::println("{} [--port PORT] [--debug]\n", argv[0]);
+            fmt::println("{} [--port PORT] [--debug] [--verbose]\n", argv[0]);
             fmt::println("  --port PORT       Port number the server listen on (default: 12345");
             fmt::println("  --debug           Enable debug logging.");
             fmt::println("  --verbose         Enable verbose logging.");
-            return 0;
+            return Exit{ 0 };
         } else if (arg == "--debug") {
-            log_level = Level::debug;
+            args.log_level = Level::debug;
         } else if (arg == "--verbose") {
-            log_level = Level::info;
+            args.log_level = Level::info;
         } else if (arg == "--port") {
             if (i + 1 >= argc) {
                 fmt::println(stderr, "expecting port number after '--port' argument");
-                return 1;
+                return Exit{ 1 };
             }
 
             arg = madbfs::Str{ argv[++i] };
 
-            auto [ptr, ec] = std::from_chars(arg.data(), arg.data() + arg.size(), port);
+            auto [ptr, ec] = std::from_chars(arg.data(), arg.data() + arg.size(), args.port);
             if (ec != std::errc{}) {
-                auto msg = std::make_error_code(ec).message();
-                fmt::println(stderr, "failed to parse port number '{}': {}", arg, msg);
-                return 1;
+                fmt::println(stderr, "failed to parse port number '{}': {}", arg, madbfs::err_msg(ec));
+                return Exit{ 1 };
             } else if (ptr != arg.data() + arg.size()) {
                 fmt::println(stderr, "failed to parse port number '{}': invalid trailing characters", arg);
-                return 1;
+                return Exit{ 1 };
             }
         } else {
             fmt::println(stderr, "unknown argument: {}", arg);
-            return 1;
+            return Exit{ 1 };
         }
     }
 
-    madbfs::log::init(log_level, "-");
+    return args;
+}
+
+int main(int argc, char** argv)
+try {
+    auto parsed = parse_args(argc, argv);
+    if (parsed.index() == 0) {
+        return std::get<0>(parsed).ret;
+    }
+
+    auto args = std::get<1>(parsed);
+    madbfs::log::init(args.log_level, "-");
 
     auto context = madbfs::async::Context{};
-    auto server  = madbfs::server::Server{ context, port };    // may throw
+    auto server  = madbfs::server::Server{ context, args.port };    // may throw
 
-    auto future = madbfs::async::spawn(context, server.run(), madbfs::async::use_future);
-    auto thread = std::thread{ [&] { context.run(); } };
+    auto sig_set = madbfs::net::signal_set{ context, SIGINT, SIGTERM };
+    sig_set.async_wait([&](auto, auto) { server.stop(); });
+
+    auto task = [&](this auto) -> madbfs::AExpect<void> {
+        auto res = co_await server.run();
+        sig_set.cancel();
+        co_return res;
+    };
 
     fmt::println(madbfs::rpc::server_ready_string);
     std::fflush(stdout);    // ensure the message is sent
 
-    g_interrupt.wait(false);
+    auto res = madbfs::async::once(context, task());
 
-    server.stop();
-    thread.join();
-
-    auto msg = std::make_error_code(future.get().error_or({})).message();
-    madbfs::log_i("server exited normally: {}", msg);
-
+    madbfs::log_i("server exited normally: {}", madbfs::err_msg(res.error_or({})));
     return 0;
 } catch (const std::exception& e) {
     madbfs::log_c("exception: {}", e.what());

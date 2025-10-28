@@ -77,6 +77,41 @@ namespace madbfs::async
     using Channel = Token::as_default_on_t<net::experimental::channel<void(net::error_code, T)>>;
 
     /**
+     * @brief Run a coroutine once then return the result (blocking).
+     *
+     * @param awaitable The coroutine.
+     *
+     * This function will create the async context for this particular coroutine. Useful if you want to run
+     * a coroutine in synchronous code without creating any async context by yourself.
+     */
+    template <typename T>
+    auto once(Await<T>&& awaitable) noexcept
+    {
+        auto ctx = async::Context{};
+        auto fut = net::co_spawn(ctx, std::move(awaitable), net::use_future);
+        ctx.run();
+        return fut.get();
+    }
+
+    /**
+     * @brief Run a coroutine once then return the result (blocking).
+     *
+     * @param awaitable The coroutine.
+     *
+     * This overload is similar to the previous one but the context is provided by the caller.
+     *
+     * Use this function if the context is not run yet, if the context is already running in other thread use
+     * `async::block()` instead or `async::spawn()` with `async::use_future` for its completion handler.
+     */
+    template <typename T>
+    auto once(async::Context& ctx, Await<T>&& awaitable) noexcept
+    {
+        auto fut = net::co_spawn(ctx, std::move(awaitable), net::use_future);
+        ctx.run();
+        return fut.get();
+    }
+
+    /**
      * @brief Spawn a new coroutine.
      *
      * @param exec Executor of the coroutine.
@@ -130,7 +165,7 @@ namespace madbfs::async
             auto ready   = std::atomic<bool>{ false };
             auto except  = std::exception_ptr{};
             auto result  = Opt<T>{};
-            auto wrapped = [&] -> Await<void> { result.emplace(co_await std::move(coro)); };
+            auto wrapped = [&](this auto) -> Await<void> { result.emplace(co_await std::move(coro)); };
 
             net::co_spawn(exec, std::move(wrapped), [&](std::exception_ptr e) {
                 except = e;

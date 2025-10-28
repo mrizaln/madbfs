@@ -63,16 +63,12 @@ try {
     std::signal(SIGSEGV, [](int) { unexpected_program_end("SIGSEGV", true); });
     std::signal(SIGTERM, [](int) { madbfs::log::shutdown(); });
 
-    auto ctx = madbfs::async::Context{};
-    auto fut = madbfs::async::spawn(ctx, madbfs::args::parse(argc, argv), madbfs::async::use_future);
-    ctx.run();
-
-    auto maybe_opt = fut.get();
-    if (maybe_opt.is_exit()) {
-        return std::move(maybe_opt).exit().status;
+    auto parsed = madbfs::async::once(madbfs::args::parse(argc, argv));
+    if (parsed.is_exit()) {
+        return std::move(parsed).exit().status;
     }
-    auto&& [opt, args] = std::move(maybe_opt).opt();
 
+    auto&& [opt, args] = std::move(parsed).opt();
     if (not madbfs::log::init(opt.log_level, opt.log_file)) {
         return 1;
     }
@@ -106,6 +102,8 @@ try {
     return ret;
 } catch (const std::exception& e) {
     fmt::println(stderr, "error: exception occurred: {}", e.what());
+    return 1;
 } catch (...) {
     fmt::println(stderr, "error: exception occurred (unknown exception)");
+    return 1;
 }
