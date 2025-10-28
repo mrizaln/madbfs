@@ -1,13 +1,10 @@
-cmake_minimum_required(VERSION 3.12)
-
+option(MADBFS_USE_NON_BOOST_ASIO "use non-boost version of asio" OFF)
+option(MADBFS_BUILD_IPC "build ipc (requires boost json)" OFF)
 option(
     MADBFS_ENABLE_RAPIDHASH_BLANKET_IMPL
     "enable blanket implementation of std::hash using rapidhash"
     OFF
 )
-
-option(MADBFS_USE_NON_BOOST_ASIO "use non-boost version of asio" OFF)
-option(MADBFS_BUILD_IPC "build ipc (requires boost json)" OFF)
 
 if(MADBFS_USE_NON_BOOST_ASIO)
     set(MADBFS_ASIO_TARGET asio::asio)

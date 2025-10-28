@@ -16,6 +16,7 @@ find_package(asio REQUIRED)
 
 set(MADBFS_USE_NON_BOOST_ASIO ON CACHE BOOL "use non-boost asio")
 set(MADBFS_ENABLE_RAPIDHASH_BLANKET_IMPL OFF CACHE BOOL "disable rapidhash")
+set(MADBFS_BUILD_IPC OFF CACHE BOOL "don't build ipc")
 
 # https://stackoverflow.com/a/8349410/16506263
 add_subdirectory(
