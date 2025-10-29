@@ -11,28 +11,23 @@ namespace madbfs::server
     public:
         using Response = Var<rpc::Status, rpc::Response>;
 
-        RequestHandler(Vec<u8>& buffer)
-            : m_buffer{ buffer }
-        {
-        }
+        RequestHandler() = default;
 
-        Response handle_req(rpc::req::Listdir req);
-        Response handle_req(rpc::req::Stat req);
-        Response handle_req(rpc::req::Readlink req);
-        Response handle_req(rpc::req::Mknod req);
-        Response handle_req(rpc::req::Mkdir req);
-        Response handle_req(rpc::req::Unlink req);
-        Response handle_req(rpc::req::Rmdir req);
-        Response handle_req(rpc::req::Rename req);
-        Response handle_req(rpc::req::Truncate req);
-        Response handle_req(rpc::req::Read req);
-        Response handle_req(rpc::req::Write req);
-        Response handle_req(rpc::req::Utimens req);
-        Response handle_req(rpc::req::CopyFileRange req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Listdir req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Stat req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Readlink req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Mknod req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Mkdir req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Unlink req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Rmdir req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Rename req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Truncate req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Read req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Write req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Utimens req);
+        Response handle_req(Vec<u8>& buf, rpc::req::CopyFileRange req);
 
     private:
-        Vec<u8>& m_buffer;
-
         bool m_renameat2_impl       = true;
         bool m_copy_file_range_impl = true;
     };
