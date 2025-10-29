@@ -4,7 +4,7 @@
 #include <madbfs/tree/node.hpp>
 
 #include <boost/ut.hpp>
-#include <dtl_modern/dtl_modern.hpp>
+#include <dtlx/dtlx.hpp>
 #include <fmt/base.h>
 #include <fmt/color.h>
 #include <fmt/format.h>
@@ -140,15 +140,15 @@ String diff_str(Str str1, Str str2)
     const auto red   = fmt::fg(fmt::color::red);
     const auto green = fmt::fg(fmt::color::green);
 
-    auto res = dtl_modern::diff(lines1, lines2);
+    auto res = dtlx::diff(lines1, lines2);
     auto buf = String{};
     auto out = std::back_inserter(buf);
 
-    for (auto [elem, info] : res.m_ses.get()) {
-        switch (info.m_type) {
-        case dtl_modern::SesEdit::Delete: fmt::format_to(out, red, "{}\n", elem); break;
-        case dtl_modern::SesEdit::Common: fmt::format_to(out, "{}\n", elem); break;
-        case dtl_modern::SesEdit::Add: fmt::format_to(out, green, "{}\n", elem); break;
+    for (auto [elem, info] : res.ses.get()) {
+        switch (info.type) {
+        case dtlx::SesEdit::Delete: fmt::format_to(out, red, "{}\n", elem); break;
+        case dtlx::SesEdit::Common: fmt::format_to(out, "{}\n", elem); break;
+        case dtlx::SesEdit::Add: fmt::format_to(out, green, "{}\n", elem); break;
         }
     }
 

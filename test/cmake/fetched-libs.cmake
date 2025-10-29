@@ -2,13 +2,13 @@ set(FETCHCONTENT_QUIET FALSE)
 
 include(FetchContent)
 
-# dtl-modern library
+# dtlx library
 # ------------------
 FetchContent_Declare(
-  dtl-modern
-  GIT_REPOSITORY https://github.com/mrizaln/dtl-modern
-  GIT_TAG v1.0.1)
-FetchContent_MakeAvailable(dtl-modern)
+  dtlx
+  GIT_REPOSITORY https://github.com/mrizaln/dtlx
+  GIT_TAG v2.0.0)
+FetchContent_MakeAvailable(dtlx)
 
-add_library(fetch::dtl-modern ALIAS dtl-modern)
+add_library(fetch::dtlx ALIAS dtlx)
 # ------------------
