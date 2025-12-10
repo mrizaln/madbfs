@@ -43,18 +43,26 @@ Await<Var<rpc::Status, rpc::Response>> server_handler(Vec<u8>&, rpc::Request req
 {
     static_assert(std::is_standard_layout_v<rpc::Request>);
 
+    using rpc::req::Read, rpc::req::Write, rpc::req::Close;
+
     co_return request.visit([]<rpc::IsRequest R>(R r) -> Var<rpc::Status, rpc::Response> {
         // to test whether the server received the correct type of the request  I put the stringized name of
-        // the type into the first member of the variants. the first member of the Request variants are always
-        // Str, so that should be feasible and retrieving the value is allowed:
+        // the type into the first member of variants that takes path as its parameter otherwise if the first
+        // parameter is file descriptor (u64) it will be set to its variant index.
+
         // https://stackoverflow.com/a/25377970.
 
-        auto name = reinterpret_cast<Str*>(&r);
-
-        if (*name != ut::reflection::type_name<R>()) {
-            return rpc::Status::invalid_argument;
+        if constexpr (std::same_as<Read, R> or std::same_as<Write, R> or std::same_as<Close, R>) {
+            auto index = reinterpret_cast<u64*>(&r);
+            if (*index != rpc::Request::index_of<R>()) {
+                return rpc::Status::invalid_argument;
+            }
+        } else {
+            auto name = reinterpret_cast<Str*>(&r);
+            if (*name != ut::reflection::type_name<R>()) {
+                return rpc::Status::invalid_argument;
+            }
         }
-
         return rpc::ToResp<R>{};
     });
 }
@@ -80,12 +88,22 @@ Await<void> acceptor_loop(async::Context& context)
 template <rpc::IsRequest R>
 rpc::Request create_req()
 {
+    using rpc::req::Read, rpc::req::Write, rpc::req::Close;
+
+    // for requests that take path as its parameter, the generated request will set the path to its type name
+    // otherwise if the first parameter is file descriptor (u64) it will be set to its variant index
+
     // mental gymnastics to bypass the missing initializer warning :P
+    // cast to first field: https://stackoverflow.com/a/25377970.
     auto r = R{};
 
-    // first field always Str, so this is allowed: https://stackoverflow.com/a/25377970.
-    auto name = reinterpret_cast<Str*>(&r);
-    *name     = ut::reflection::type_name<R>();
+    if constexpr (std::same_as<Read, R> or std::same_as<Write, R> or std::same_as<Close, R>) {
+        auto index = reinterpret_cast<u64*>(&r);
+        *index     = rpc::Request::index_of<R>();
+    } else {
+        auto name = reinterpret_cast<Str*>(&r);
+        *name     = ut::reflection::type_name<R>();
+    }
 
     return r;
 };

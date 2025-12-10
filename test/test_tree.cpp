@@ -159,6 +159,7 @@ namespace mock
 {
     using namespace madbfs;
     using namespace madbfs::connection;
+    using data::OpenMode;
     using data::Stat;
     using path::Path;
     using path::PathBuf;
@@ -181,10 +182,12 @@ namespace mock
         AExpect<void>   rmdir(Path) override { co_return Expect<void>{}; }
         AExpect<void>   rename(Path, path::Path, u32) override { co_return Expect<void>{}; }
         AExpect<void>   truncate(Path, off_t) override { co_return Expect<void>{}; }
-        AExpect<usize>  read(Path, Span<char>, off_t) override { co_return Expect<usize>{}; }
-        AExpect<usize>  write(Path, Span<const char>, off_t) override { co_return Expect<usize>{}; }
         AExpect<void>   utimens(Path, timespec, timespec) override { co_return Expect<void>{}; }
         AExpect<usize>  copy_file_range(Path, off_t, Path, off_t, usize size) override { co_return size; }
+        AExpect<u64>    open(Path, OpenMode) override { co_return Expect<u64>{}; }
+        AExpect<void>   close(u64) override { co_return Expect<void>{}; }
+        AExpect<usize>  read(u64, Span<char>, off_t) override { co_return Expect<usize>{}; }
+        AExpect<usize>  write(u64, Span<const char>, off_t) override { co_return Expect<usize>{}; }
     };
 }
 
