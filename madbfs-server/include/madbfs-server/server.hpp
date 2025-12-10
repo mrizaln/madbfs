@@ -22,10 +22,12 @@ namespace madbfs::server
         Response handle_req(Vec<u8>& buf, rpc::req::Rmdir req);
         Response handle_req(Vec<u8>& buf, rpc::req::Rename req);
         Response handle_req(Vec<u8>& buf, rpc::req::Truncate req);
-        Response handle_req(Vec<u8>& buf, rpc::req::Read req);
-        Response handle_req(Vec<u8>& buf, rpc::req::Write req);
         Response handle_req(Vec<u8>& buf, rpc::req::Utimens req);
         Response handle_req(Vec<u8>& buf, rpc::req::CopyFileRange req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Open req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Close req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Read req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Write req);
 
     private:
         bool m_renameat2_impl       = true;

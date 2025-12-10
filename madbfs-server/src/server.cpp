@@ -230,65 +230,6 @@ namespace madbfs::server
         return rpc::resp::Truncate{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& buf, rpc::req::Read req)
-    {
-        const auto& [path, offset, size] = req;
-        log_d("read: path={:?} offset={} size={}", path.data(), offset, size);
-
-        auto fd = ::open(path.data(), O_RDONLY);
-        if (fd < 0) {
-            return status_from_errno(__func__, path, "failed to open file");
-        }
-
-        auto deferred = util::defer([=] {
-            if (::close(fd) < 0) {
-                std::ignore = status_from_errno(__func__, path, "failed to close file");
-            }
-        });
-
-        if (::lseek(fd, offset, SEEK_SET) < 0) {
-            return status_from_errno(__func__, path, "failed to seek file");
-        }
-
-        // WARN: invalidates strings and spans from argument
-        buf.resize(size);
-
-        auto len = ::read(fd, buf.data(), buf.size());
-        if (len < 0) {
-            return status_from_errno(__func__, path, "failed to read file");
-        }
-
-        return rpc::resp::Read{ .read = Span{ buf.begin(), static_cast<usize>(len) } };
-    }
-
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Write req)
-    {
-        const auto& [path, offset, in] = req;
-        log_d("write: path={:?} offset={}, size={}", path.data(), offset, in.size());
-
-        auto fd = ::open(path.data(), O_WRONLY);
-        if (fd < 0) {
-            return status_from_errno(__func__, path, "failed to open file");
-        }
-
-        auto deferred = util::defer([=] {
-            if (::close(fd) < 0) {
-                std::ignore = status_from_errno(__func__, path, "failed to close file");
-            }
-        });
-
-        if (::lseek(fd, offset, SEEK_SET) < 0) {
-            return status_from_errno(__func__, path, "failed to seek file");
-        }
-
-        auto len = ::write(fd, in.data(), in.size());
-        if (len < 0) {
-            return status_from_errno(__func__, path, "failed to write file");
-        }
-
-        return rpc::resp::Write{ .size = static_cast<usize>(len) };
-    }
-
     RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Utimens req)
     {
         const auto& [path, atime, mtime] = req;
@@ -378,6 +319,72 @@ namespace madbfs::server
         }
 
         return rpc::resp::CopyFileRange{ .size = static_cast<usize>(copied) };
+    }
+
+    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Open req)
+    {
+        const auto& [path, mode] = req;
+        log_d("open: path={:?} mode={}", path.data(), static_cast<int>(mode));
+
+        auto fd = ::open(path.data(), static_cast<int>(req.mode));
+        if (fd < 0) {
+            return status_from_errno(__func__, path, "failed to open file");
+        }
+
+        return rpc::resp::Open{ .fd = static_cast<u64>(fd) };
+    }
+
+    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Close req)
+    {
+        const auto& [fd] = req;
+        log_d("close: fd={}", fd);
+
+        if (::close(static_cast<int>(fd)) < 0) {
+            return status_from_errno(__func__, std::format("[{}]", fd), "failed to close file");
+        }
+
+        return rpc::resp::Close{};
+    }
+
+    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& buf, rpc::req::Read req)
+    {
+        const auto& [fd, offset, size] = req;
+        log_d("read: fd={} offset={} size={}", fd, offset, size);
+
+        auto fd_int = static_cast<int>(fd);
+
+        if (::lseek(fd_int, offset, SEEK_SET) < 0) {
+            return status_from_errno(__func__, std::format("[{}]", fd), "failed to seek file");
+        }
+
+        // WARN: invalidates strings and spans from argument
+        buf.resize(size);
+
+        auto len = ::read(fd_int, buf.data(), buf.size());
+        if (len < 0) {
+            return status_from_errno(__func__, std::format("[{}]", fd), "failed to read file");
+        }
+
+        return rpc::resp::Read{ .read = Span{ buf.begin(), static_cast<usize>(len) } };
+    }
+
+    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Write req)
+    {
+        const auto& [fd, offset, in] = req;
+        log_d("write: fd={} offset={}, size={}", fd, offset, in.size());
+
+        auto fd_int = static_cast<int>(fd);
+
+        if (::lseek(fd_int, offset, SEEK_SET) < 0) {
+            return status_from_errno(__func__, std::format("[{}]", fd), "failed to seek file");
+        }
+
+        auto len = ::write(fd_int, in.data(), in.size());
+        if (len < 0) {
+            return status_from_errno(__func__, std::format("[{}]", fd), "failed to read file");
+        }
+
+        return rpc::resp::Write{ .size = static_cast<usize>(len) };
     }
 }
 
