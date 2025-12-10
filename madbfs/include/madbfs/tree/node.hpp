@@ -35,10 +35,12 @@ namespace madbfs::tree::node
     public:
         friend Node;
 
+        using Mode = data::OpenMode;
+
         struct Entry
         {
-            u64 fd;
-            i32 flags;
+            u64  fd;
+            Mode mode;
         };
 
         Regular() = default;
@@ -49,37 +51,30 @@ namespace madbfs::tree::node
          * @param fd File descriptor.
          * @param flags Open flags.
          *
-         * @return True if the fd has not been inserted before, false otherwise.
+         * @return What the file current access mode after opening.
          */
-        bool open(u64 fd, int flags)
-        {
-            if (is_open(fd)) {
-                return false;
-            }
-            m_open_fds.emplace_back(fd, flags);
-            return true;
-        }
+        Mode open(u64 fd, int flags);
 
         /**
          * @brief Remove `fd` from list of open files.
          *
          * @param fd File descriptor.
          *
-         * @return True if `fd` actually removed, false otherwise.
+         * @return True if `fd` actually removed, false if fd can't be found.
          */
-        bool close(u64 fd)
-        {
-            return std::erase_if(m_open_fds, [&](const Entry& e) { return e.fd == fd; }) > 0;
-        }
+        bool close(u64 fd);
 
-        bool is_open(u64 fd) { return sr::find(m_open_fds, fd, &Entry::fd) != m_open_fds.end(); }
+        bool is_open(u64 fd) const { return sr::find(m_open_fds, fd, &Entry::fd) != m_open_fds.end(); }
         bool has_open_fds() const { return not m_open_fds.empty(); }
         bool is_dirty() const { return m_dirty; }
         void set_dirty(bool val) { m_dirty = val; }
 
     private:
-        Vec<Entry> m_open_fds;    // used to track open files
-        bool       m_dirty = false;
+        Vec<Entry> m_open_fds     = {};
+        Opt<Mode>  m_current_mode = std::nullopt;
+        u64        m_writer       = 0;
+        u64        m_reader       = 0;
+        bool       m_dirty        = false;
     };
 
     /**
