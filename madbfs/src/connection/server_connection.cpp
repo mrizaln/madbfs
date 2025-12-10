@@ -289,27 +289,6 @@ namespace madbfs::connection
         co_return (co_await send_req(buf, req)).transform(sink_void);
     }
 
-    AExpect<usize> ServerConnection::read(path::Path path, Span<char> out, off_t offset)
-    {
-        auto buf = Vec<u8>{};
-        auto req = rpc::req::Read{ .path = path, .offset = offset, .size = out.size() };
-
-        co_return (co_await send_req(buf, req)).transform([&](rpc::resp::Read resp) {
-            auto size = std::min(resp.read.size(), out.size());
-            std::copy_n(resp.read.begin(), size, out.begin());
-            return size;
-        });
-    }
-
-    AExpect<usize> ServerConnection::write(path::Path path, Span<const char> in, off_t offset)
-    {
-        auto buf   = Vec<u8>{};
-        auto bytes = Span{ reinterpret_cast<const u8*>(in.data()), in.size() };
-        auto req   = rpc::req::Write{ .path = path, .offset = offset, .in = bytes };
-
-        co_return (co_await send_req(buf, req)).transform(proj(&rpc::resp::Write::size));
-    }
-
     AExpect<void> ServerConnection::utimens(path::Path path, timespec atime, timespec mtime)
     {
         auto buf = Vec<u8>{};
@@ -336,5 +315,41 @@ namespace madbfs::connection
         };
 
         co_return (co_await send_req(buf, req)).transform(proj(&rpc::resp::CopyFileRange::size));
+    }
+    AExpect<u64> ServerConnection::open(path::Path path, data::OpenMode mode)
+    {
+        auto buf = Vec<u8>{};
+        auto req = rpc::req::Open{ .path = path, .mode = static_cast<rpc::OpenMode>(mode) };
+
+        co_return (co_await send_req(buf, req)).transform(proj(&rpc::resp::Open::fd));
+    }
+
+    AExpect<void> ServerConnection::close(u64 fd)
+    {
+        auto buf = Vec<u8>{};
+        auto req = rpc::req::Close{ .fd = fd };
+
+        co_return (co_await send_req(buf, req)).transform(sink_void);
+    }
+
+    AExpect<usize> ServerConnection::read(u64 fd, Span<char> out, off_t offset)
+    {
+        auto buf = Vec<u8>{};
+        auto req = rpc::req::Read{ .fd = fd, .offset = offset, .size = out.size() };
+
+        co_return (co_await send_req(buf, req)).transform([&](rpc::resp::Read resp) {
+            auto size = std::min(resp.read.size(), out.size());
+            std::copy_n(resp.read.begin(), size, out.begin());
+            return size;
+        });
+    }
+
+    AExpect<usize> ServerConnection::write(u64 fd, Span<const char> in, off_t offset)
+    {
+        auto buf   = Vec<u8>{};
+        auto bytes = Span{ reinterpret_cast<const u8*>(in.data()), in.size() };
+        auto req   = rpc::req::Write{ .fd = fd, .offset = offset, .in = bytes };
+
+        co_return (co_await send_req(buf, req)).transform(proj(&rpc::resp::Write::size));
     }
 }

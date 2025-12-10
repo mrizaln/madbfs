@@ -227,40 +227,6 @@ namespace madbfs::connection
         co_return res.transform(sink_void);
     }
 
-    AExpect<usize> AdbConnection::read(path::Path path, Span<char> out, off_t offset)
-    {
-        const auto skip  = fmt::format("skip={}", offset);
-        const auto count = fmt::format("count={}", out.size());
-        const auto ifile = fmt::format("if=\"{}\"", path);
-
-        // `bs` is skipped, relies on `count_bytes`: https://stackoverflow.com/a/40792605/16506263
-        auto res = co_await cmd::exec(
-            { "adb", "shell", "dd", "iflag=skip_bytes,count_bytes", skip, count, ifile }
-        );
-
-        co_return res.transform([&](Str str) {
-            auto size = std::min(str.size(), out.size());
-            std::copy_n(str.data(), size, out.data());
-            return size;
-        });
-    }
-
-    AExpect<usize> AdbConnection::write(path::Path path, Span<const char> in, off_t offset)
-    {
-        const auto seek  = fmt::format("seek={}", offset);
-        const auto ofile = fmt::format("of=\"{}\"", path);
-
-        auto in_str = Str{ in.data(), in.size() };
-
-        // `notrunc` flag is necessary to prevent truncating file: https://unix.stackexchange.com/a/146923
-        auto res = co_await cmd::exec(
-            { "adb", "shell", "dd", "oflag=seek_bytes", "conv=notrunc", seek, ofile }, in_str
-        );
-
-        // assume all the data is written to device on success
-        co_return res.transform([&](auto&&) { return in_str.size(); });
-    }
-
     AExpect<void> AdbConnection::utimens(path::Path path, timespec atime, timespec mtime)
     {
         for (auto [time, flag] : { Pair{ atime, "-a" }, Pair{ mtime, "-m" } }) {
@@ -338,5 +304,71 @@ namespace madbfs::connection
                 .and_then([](util::SplitResult<1> r) { return parse_integral<usize>(r.result[0], 10); })
                 .value_or(0);
         });
+    }
+
+    AExpect<u64> AdbConnection::open(path::Path path, data::OpenMode /* mode */)
+    {
+        auto fd = ++m_fd_counter;
+        m_fd_map.emplace(fd, path.owned());    // this is expensive, try to find a way to deduplicate the path
+        co_return fd;
+    }
+
+    AExpect<void> AdbConnection::close(u64 fd)
+    {
+        auto entry = m_fd_map.find(fd);
+        if (entry == m_fd_map.end()) {
+            co_return Unexpect{ Errc::bad_file_descriptor };
+        }
+
+        m_fd_map.erase(entry);
+        co_return Expect<void>{};
+    }
+
+    AExpect<usize> AdbConnection::read(u64 fd, Span<char> out, off_t offset)
+    {
+        auto entry = m_fd_map.find(fd);
+        if (entry == m_fd_map.end()) {
+            co_return Unexpect{ Errc::bad_file_descriptor };
+        }
+
+        auto path = entry->second.view();
+
+        const auto skip  = fmt::format("skip={}", offset);
+        const auto count = fmt::format("count={}", out.size());
+        const auto ifile = fmt::format("if=\"{}\"", path);
+
+        // `bs` is skipped, relies on `count_bytes`: https://stackoverflow.com/a/40792605/16506263
+        auto res = co_await cmd::exec(
+            { "adb", "shell", "dd", "iflag=skip_bytes,count_bytes", skip, count, ifile }
+        );
+
+        co_return res.transform([&](Str str) {
+            auto size = std::min(str.size(), out.size());
+            std::copy_n(str.data(), size, out.data());
+            return size;
+        });
+    }
+
+    AExpect<usize> AdbConnection::write(u64 fd, Span<const char> in, off_t offset)
+    {
+        auto entry = m_fd_map.find(fd);
+        if (entry == m_fd_map.end()) {
+            co_return Unexpect{ Errc::bad_file_descriptor };
+        }
+
+        auto path = entry->second.view();
+
+        const auto seek  = fmt::format("seek={}", offset);
+        const auto ofile = fmt::format("of=\"{}\"", path);
+
+        auto in_str = Str{ in.data(), in.size() };
+
+        // `notrunc` flag is necessary to prevent truncating file: https://unix.stackexchange.com/a/146923
+        auto res = co_await cmd::exec(
+            { "adb", "shell", "dd", "oflag=seek_bytes", "conv=notrunc", seek, ofile }, in_str
+        );
+
+        // assume all the data is written to device on success
+        co_return res.transform([&](auto&&) { return in_str.size(); });
     }
 }
