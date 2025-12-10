@@ -72,14 +72,79 @@ namespace madbfs::data
     {
     }
 
-    AExpect<usize> Cache::read(Id id, path::Path path, Span<char> out, off_t offset)
+    // TODO: do some recovery if open or upgrade errors out. do some recovery as well on the caller side
+    // TODO: what if defer the open to when `lookup()` performed?
+    AExpect<void> Cache::hint_open(Id id, path::Path path, data::OpenMode mode)
+    {
+        log_d("{}: start {:?}", __func__, path);
+
+        if (auto found = m_fd_map.find(id); found != m_fd_map.end()) {
+            auto& [cached_fd, cached_mode] = found->second;
+            if (mode != data::OpenMode::ReadWrite) {
+                co_return Expect<void>{};
+            }
+
+            // safe to upgrade
+            if (auto res = co_await m_connection.close(cached_fd); not res) {
+                co_return Unexpect{ res.error() };
+            }
+
+            auto fd = co_await m_connection.open(path, mode);
+            if (not fd) {
+                co_return Unexpect{ fd.error() };
+            }
+
+            log_d(
+                "{}: upgrade [mode={},fd={}] -> [mode={},fd={}]",
+                __func__,
+                std::to_underlying(cached_mode),
+                std::to_underlying(mode),
+                cached_fd,
+                *fd
+            );
+
+            cached_fd   = *fd;
+            cached_mode = mode;
+        } else {
+            auto fd = co_await m_connection.open(path, mode);
+            if (not fd) {
+                co_return Unexpect{ fd.error() };
+            }
+
+            log_d("{}: new [mode={},fd={},id={}]", __func__, std::to_underlying(mode), *fd, id.inner());
+
+            m_fd_map.emplace(id, FdEntry{ *fd, mode });
+        }
+
+        co_return Expect<void>{};
+    }
+
+    AExpect<void> Cache::hint_close(Id id)
+    {
+        if (auto found = m_fd_map.find(id); found != m_fd_map.end()) {
+            auto fd = found->second.fd;
+            if (auto entry = lookup(id, false); entry and entry->get().dirty) {
+                co_await flush(id);
+            }
+
+            log_d("{}: [id={}|fd={}]", __func__, id.inner(), fd);
+            m_fd_map.erase(found);
+
+            // TODO: maybe add close queue just like page queue?
+            co_return co_await m_connection.close(found->second.fd);
+        }
+
+        co_return Expect<void>{};
+    }
+
+    AExpect<usize> Cache::read(Id id, Span<char> out, off_t offset)
     {
         auto first = static_cast<usize>(offset) / m_page_size;
         auto last  = (static_cast<usize>(offset) + out.size() - 1) / m_page_size;
 
         log_d("{}: start [id={}|idx={} - {}]", __func__, id.inner(), first, last);
 
-        auto& entry = lookup(id, path)->get();
+        auto& entry = lookup(id, true)->get();
 
         auto work = [&](usize idx) { return read_at(entry, out, id, idx, first, last, offset); };
         auto res  = co_await async::wait_all(sv::iota(first, last + 1) | sv::transform(work));
@@ -87,7 +152,7 @@ namespace madbfs::data
         auto read = 0uz;
         for (auto&& res : res) {
             if (not res) {
-                log_e("{}: failed to read [{}] {:?}: {}", __func__, id.inner(), path, err_msg(res.error()));
+                log_e("{}: failed to read [{}]: {}", __func__, id.inner(), err_msg(res.error()));
                 co_return Unexpect{ res.error() };
             }
             read += res.value();
@@ -96,16 +161,16 @@ namespace madbfs::data
         co_return read;
     }
 
-    AExpect<usize> Cache::write(Id id, path::Path path, Span<const char> in, off_t offset)
+    // TODO: write operation seems to be not working... :(
+    AExpect<usize> Cache::write(Id id, Span<const char> in, off_t offset)
     {
         auto first = static_cast<usize>(offset) / m_page_size;
         auto last  = (static_cast<usize>(offset) + in.size() - 1) / m_page_size;
 
         log_d("{}: start [id={}|idx={} - {}]", __func__, id.inner(), first, last);
 
-        auto& entry = lookup(id, path)->get();
-
-        m_table[id].dirty = true;
+        auto& entry = lookup(id, true)->get();
+        entry.dirty = true;
 
         auto work = [&](usize idx) { return write_at(entry, in, id, idx, first, last, offset); };
         auto res  = co_await async::wait_all(sv::iota(first, last + 1) | sv::transform(work));
@@ -113,7 +178,7 @@ namespace madbfs::data
         auto written = 0uz;
         for (auto&& res : res) {
             if (not res) {
-                log_e("{}: failed to write [{}] {:?}: {}", __func__, id.inner(), path, err_msg(res.error()));
+                log_e("{}: failed to write [{}]: {}", __func__, id.inner(), err_msg(res.error()));
                 co_return Unexpect{ res.error() };
             }
             written += res.value();
@@ -124,7 +189,7 @@ namespace madbfs::data
 
     AExpect<void> Cache::flush(Id id)
     {
-        auto entry = lookup(id, std::nullopt);
+        auto entry = lookup(id, false);
         if (not entry) {
             co_return Expect<void>{};
         }
@@ -133,14 +198,14 @@ namespace madbfs::data
             co_return Expect<void>{};
         }
 
-        const auto& [pages, path, _] = entry->get();
+        const auto& [pages, _] = entry->get();
         log_d("flush: start [id={}|idx={}]", id.inner(), pages | sv::keys);
 
         // TODO: redo parallel
         for (auto page : pages | sv::values) {
             auto res = co_await flush_at(*page, id);
             if (not res) {
-                log_e("{}: failed to flush [{}] {:?}: {}", __func__, id.inner(), path, err_msg(res.error()));
+                log_e("{}: failed to flush [{}]: {}", __func__, id.inner(), err_msg(res.error()));
                 co_return Unexpect{ res.error() };
             }
         }
@@ -150,7 +215,7 @@ namespace madbfs::data
 
     AExpect<void> Cache::truncate(Id id, usize old_size, usize new_size)
     {
-        auto may_entry = lookup(id, std::nullopt);
+        auto may_entry = lookup(id, false);
         if (not may_entry) {
             co_return Expect<void>{};
         }
@@ -215,15 +280,6 @@ namespace madbfs::data
         co_return Expect<void>{};
     }
 
-    Await<void> Cache::rename(Id id, path::Path new_name)
-    {
-        // TODO: wait queue if any
-        if (auto found = m_table.find(id); found != m_table.end()) {
-            found->second.path = new_name.owned();
-        }
-        co_return;
-    }
-
     Await<void> Cache::shutdown()
     {
         for (auto id : m_table | sv::keys) {
@@ -235,6 +291,8 @@ namespace madbfs::data
         m_table.clear();
         m_lru.clear();
         m_queue.clear();
+
+        // TODO: close all files
     }
 
     Await<void> Cache::invalidate_one(Id id, bool should_flush)
@@ -246,9 +304,9 @@ namespace madbfs::data
         }
 
         if (auto entry = m_table.extract(id); not entry.empty()) {
-            auto& [pages, pathbuf, dirty] = entry.mapped();
+            auto& [pages, dirty] = entry.mapped();
             if (dirty and not should_flush) {
-                log_w("{}: [{}] {:?} is dirty but invalidated without flush!", __func__, id.inner(), pathbuf);
+                log_w("{}: [{}] is dirty but invalidated without flush!", __func__, id.inner());
             }
             for (auto page : entry.mapped().pages | sv::values) {
                 m_lru.erase(page);
@@ -278,12 +336,12 @@ namespace madbfs::data
 
     // NOTE: std::unordered_map guarantees reference of its element valid even if new value inserted
     // (path parameter not nullopt)
-    Opt<Ref<Cache::LookupEntry>> Cache::lookup(Id id, Opt<path::Path> path)
+    Opt<Ref<Cache::LookupEntry>> Cache::lookup(Id id, bool add_entry)
     {
         auto entries = m_table.find(id);
         if (entries == m_table.end()) {
-            if (path) {
-                auto [p, _] = m_table.emplace(id, LookupEntry{ .pages = {}, .path = path->owned() });
+            if (add_entry) {
+                auto [p, _] = m_table.emplace(id, LookupEntry{ .pages = {}, .dirty = false });
                 entries     = p;
             } else {
                 return std::nullopt;
@@ -294,26 +352,26 @@ namespace madbfs::data
 
     AExpect<usize> Cache::on_miss(Id id, Span<char> out, off_t offset)
     {
-        auto found = m_table.find(id);
-        assert(found != m_table.end());
+        auto found = m_fd_map.find(id);
+        assert(found != m_fd_map.end());
 
-        auto path = found->second.path.view();
-        auto idx  = static_cast<usize>(offset) / m_page_size;
+        auto fd  = found->second.fd;
+        auto idx = static_cast<usize>(offset) / m_page_size;
 
         log_d("{}: [id={}|idx={}] cache miss, read from device...", __func__, id.inner(), idx, offset);
-        co_return co_await m_connection.read(path, out, offset);
+        co_return co_await m_connection.read(fd, out, offset);
     }
 
     AExpect<usize> Cache::on_flush(Id id, Span<const char> in, off_t offset)
     {
-        auto found = m_table.find(id);
-        assert(found != m_table.end());
+        auto found = m_fd_map.find(id);
+        assert(found != m_fd_map.end());
 
-        auto path = found->second.path.view();
-        auto idx  = static_cast<usize>(offset) / m_page_size;
+        auto fd  = found->second.fd;
+        auto idx = static_cast<usize>(offset) / m_page_size;
 
         log_d("{}: [id={}|idx={}] flush, write to device...", __func__, id.inner(), idx, offset);
-        co_return co_await m_connection.write(path, in, offset);
+        co_return co_await m_connection.write(fd, in, offset);
     }
 
     Await<void> Cache::evict(usize size)
@@ -334,7 +392,7 @@ namespace madbfs::data
             }
 
             // this is done last since on_flush requires entry to still exists
-            auto& entry = lookup(id, std::nullopt)->get();
+            auto& entry = lookup(id, false)->get();
             entry.pages.erase(idx);
             if (entry.pages.empty()) {
                 m_table.erase(id);
