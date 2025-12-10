@@ -19,8 +19,8 @@ namespace madbfs::rpc
     // NOTE: if you decided to add/remove one or more entries, do update domain check in read_procedure
     enum class Procedure : u8
     {
-        Listdir,
         Stat,
+        Listdir,
         Readlink,
         Mknod,
         Mkdir,
@@ -28,10 +28,19 @@ namespace madbfs::rpc
         Rmdir,
         Rename,
         Truncate,
-        Read,
-        Write,
         Utimens,
         CopyFileRange,
+        Open,
+        Close,
+        Read,
+        Write,
+    };
+
+    enum class OpenMode : u8
+    {
+        Read      = 0,
+        Write     = 1,
+        ReadWrite = 2,
     };
 
     /**
@@ -67,8 +76,8 @@ namespace madbfs::rpc
     namespace req
     {
         // clang-format off
-        struct Listdir       { Str path; };
         struct Stat          { Str path; };
+        struct Listdir       { Str path; };
         struct Readlink      { Str path; };
         struct Mknod         { Str path; mode_t mode; dev_t dev; };
         struct Mkdir         { Str path; mode_t mode; };
@@ -76,17 +85,19 @@ namespace madbfs::rpc
         struct Rmdir         { Str path; };
         struct Rename        { Str from; Str to; u32 flags; };
         struct Truncate      { Str path; off_t size; };
-        struct Read          { Str path; off_t offset; usize size; };
-        struct Write         { Str path; off_t offset; Span<const u8> in; };
         struct Utimens       { Str path; timespec atime; timespec mtime; };
         struct CopyFileRange { Str in_path; off_t in_offset; Str out_path; off_t out_offset; usize size; };
+        struct Open          { Str path; OpenMode mode; };
+        struct Close         { u64 fd; };
+        struct Read          { u64 fd; off_t offset; usize size; };
+        struct Write         { u64 fd; off_t offset; Span<const u8> in; };
         // clang-format on
     }
 
     struct Request    //
         : util::VarWrapper<
-              req::Listdir,
               req::Stat,
+              req::Listdir,
               req::Readlink,
               req::Mknod,
               req::Mkdir,
@@ -94,10 +105,12 @@ namespace madbfs::rpc
               req::Rmdir,
               req::Rename,
               req::Truncate,
-              req::Read,
-              req::Write,
               req::Utimens,
-              req::CopyFileRange>
+              req::CopyFileRange,
+              req::Open,
+              req::Close,
+              req::Read,
+              req::Write>
     {
         // make the base constructor visible
         using VarWrapper::VarWrapper;
@@ -107,12 +120,23 @@ namespace madbfs::rpc
 
     namespace resp
     {
+        // clang-format off
         struct Stat;
-
-        struct Listdir
-        {
-            Vec<Pair<Str, Stat>> entries;
-        };
+        struct Listdir       { Vec<Pair<Str, Stat>> entries; };
+        struct Readlink      { Str target; };
+        struct Mknod         { };
+        struct Mkdir         { };
+        struct Unlink        { };
+        struct Rmdir         { };
+        struct Rename        { };
+        struct Truncate      { };
+        struct Utimens       { };
+        struct CopyFileRange { usize size; };
+        struct Open          { u64 fd; };
+        struct Close         { };
+        struct Read          { Span<const u8> read; };
+        struct Write         { usize size; };
+        // clang-format on
 
         struct Stat
         {
@@ -125,26 +149,12 @@ namespace madbfs::rpc
             uid_t    uid;
             gid_t    gid;
         };
-
-        // clang-format off
-        struct Readlink         { Str target; };
-        struct Mkdir            { };
-        struct Mknod            { };
-        struct Unlink           { };
-        struct Rmdir            { };
-        struct Rename           { };
-        struct Truncate         { };
-        struct Read             { Span<const u8> read; };
-        struct Write            { usize size; };
-        struct Utimens          { };
-        struct CopyFileRange    { usize size; };
-        // clang-format on
     }
 
     struct Response    //
         : util::VarWrapper<
-              resp::Listdir,
               resp::Stat,
+              resp::Listdir,
               resp::Readlink,
               resp::Mknod,
               resp::Mkdir,
@@ -152,10 +162,12 @@ namespace madbfs::rpc
               resp::Rmdir,
               resp::Rename,
               resp::Truncate,
-              resp::Read,
-              resp::Write,
               resp::Utimens,
-              resp::CopyFileRange>
+              resp::CopyFileRange,
+              resp::Open,
+              resp::Close,
+              resp::Read,
+              resp::Write>
     {
         // make the base constructor visible
         using VarWrapper::VarWrapper;

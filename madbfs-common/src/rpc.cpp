@@ -121,6 +121,12 @@ namespace madbfs::rpc
         }
 
         template <typename Self>
+        Self&& write_open_mode(this Self&& self, OpenMode mode)
+        {
+            return std::forward<Self>(self).write_int(static_cast<u8>(mode));
+        }
+
+        template <typename Self>
         Self&& write_bytes(this Self&& self, Span<const u8> bytes)
         {
             self.template write_int<u64>(bytes.size());
@@ -173,8 +179,8 @@ namespace madbfs::rpc
             return read_int<u8>().and_then([](u8 v) -> Opt<Procedure> {
                 auto proc = Procedure{ v };
                 switch (proc) {
-                case Procedure::Listdir:
                 case Procedure::Stat:
+                case Procedure::Listdir:
                 case Procedure::Readlink:
                 case Procedure::Mknod:
                 case Procedure::Mkdir:
@@ -182,10 +188,12 @@ namespace madbfs::rpc
                 case Procedure::Rmdir:
                 case Procedure::Rename:
                 case Procedure::Truncate:
-                case Procedure::Read:
-                case Procedure::Write:
                 case Procedure::Utimens:
-                case Procedure::CopyFileRange: return proc;
+                case Procedure::CopyFileRange:
+                case Procedure::Open:
+                case Procedure::Close:
+                case Procedure::Read:
+                case Procedure::Write: return proc;
                 }
                 return std::nullopt;
             });
@@ -199,6 +207,11 @@ namespace madbfs::rpc
         Opt<Id> read_id()
         {
             return read_int<Id::Inner>().transform([](Id::Inner v) { return Id{ v }; });
+        }
+
+        Opt<OpenMode> read_open_mode()
+        {
+            return read_int<u8>().transform([](u8 v) { return static_cast<OpenMode>(v); });
         }
 
         Opt<Span<const u8>> read_bytes()
@@ -315,6 +328,31 @@ namespace madbfs::rpc
         auto reader = PayloadReader{ buffer };
 
         switch (proc) {
+        case Procedure::Stat: {
+            TRY(size, reader.read_int<i64>());
+            TRY(links, reader.read_int<u64>());
+            TRY(mtime_sec, reader.read_int<i64>());
+            TRY(mtime_nsec, reader.read_int<i64>());
+            TRY(atime_sec, reader.read_int<i64>());
+            TRY(atime_nsec, reader.read_int<i64>());
+            TRY(ctime_sec, reader.read_int<i64>());
+            TRY(ctime_nsec, reader.read_int<i64>());
+            TRY(mode, reader.read_int<u32>());
+            TRY(uid, reader.read_int<u32>());
+            TRY(gid, reader.read_int<u32>());
+
+            return resp::Stat{
+                .size  = static_cast<off_t>(*size),
+                .links = static_cast<nlink_t>(*links),
+                .mtime = to_timespec(*mtime_sec, *mtime_nsec),
+                .atime = to_timespec(*atime_sec, *atime_nsec),
+                .ctime = to_timespec(*ctime_sec, *ctime_nsec),
+                .mode  = static_cast<mode_t>(*mode),
+                .uid   = static_cast<uid_t>(*uid),
+                .gid   = static_cast<uid_t>(*gid),
+            };
+        }
+
         case Procedure::Listdir: {
             TRY(size, reader.read_int<u64>());
 
@@ -351,37 +389,12 @@ namespace madbfs::rpc
             }
 
             return resp::Listdir{ .entries = std::move(entries) };
-        } break;
-
-        case Procedure::Stat: {
-            TRY(size, reader.read_int<i64>());
-            TRY(links, reader.read_int<u64>());
-            TRY(mtime_sec, reader.read_int<i64>());
-            TRY(mtime_nsec, reader.read_int<i64>());
-            TRY(atime_sec, reader.read_int<i64>());
-            TRY(atime_nsec, reader.read_int<i64>());
-            TRY(ctime_sec, reader.read_int<i64>());
-            TRY(ctime_nsec, reader.read_int<i64>());
-            TRY(mode, reader.read_int<u32>());
-            TRY(uid, reader.read_int<u32>());
-            TRY(gid, reader.read_int<u32>());
-
-            return resp::Stat{
-                .size  = static_cast<off_t>(*size),
-                .links = static_cast<nlink_t>(*links),
-                .mtime = to_timespec(*mtime_sec, *mtime_nsec),
-                .atime = to_timespec(*atime_sec, *atime_nsec),
-                .ctime = to_timespec(*ctime_sec, *ctime_nsec),
-                .mode  = static_cast<mode_t>(*mode),
-                .uid   = static_cast<uid_t>(*uid),
-                .gid   = static_cast<uid_t>(*gid),
-            };
-        } break;
+        }
 
         case Procedure::Readlink: {
             TRY(path, reader.read_path());
             return resp::Readlink{ .target = *path };
-        } break;
+        }
 
         case Procedure::Mknod: return resp::Mknod{};
         case Procedure::Mkdir: return resp::Mkdir{};
@@ -389,23 +402,29 @@ namespace madbfs::rpc
         case Procedure::Rmdir: return resp::Rmdir{};
         case Procedure::Rename: return resp::Rename{};
         case Procedure::Truncate: return resp::Truncate{};
-
-        case Procedure::Read: {
-            TRY(bytes, reader.read_bytes());
-            return resp::Read{ .read = *bytes };
-        } break;
-
-        case Procedure::Write: {
-            TRY(size, reader.read_int<u64>());
-            return resp::Write{ .size = static_cast<usize>(*size) };
-        } break;
-
         case Procedure::Utimens: return resp::Utimens{};
 
         case Procedure::CopyFileRange: {
             TRY(size, reader.read_int<u64>());
             return resp::CopyFileRange{ .size = static_cast<usize>(*size) };
-        } break;
+        }
+
+        case Procedure::Open: {
+            TRY(fd, reader.read_int<u64>());
+            return resp::Open{ .fd = *fd };
+        }
+
+        case Procedure::Close: return resp::Close{};
+
+        case Procedure::Read: {
+            TRY(bytes, reader.read_bytes());
+            return resp::Read{ .read = *bytes };
+        }
+
+        case Procedure::Write: {
+            TRY(size, reader.read_int<u64>());
+            return resp::Write{ .size = static_cast<usize>(*size) };
+        }
         }
 
         return std::nullopt;
@@ -540,75 +559,79 @@ namespace madbfs::rpc
         auto builder = RequestBuilder{ buffer, id, proc };
 
         auto payload = std::move(req).visit(Overload{
+            [&](req::Stat&& req) { return builder.write_path(req.path).build(); },
+            [&](req::Listdir&& req) { return builder.write_path(req.path).build(); },
+            [&](req::Readlink&& req) { return builder.write_path(req.path).build(); },
             [&](req::Mknod&& req) {
-                auto [path, mode, dev] = req;
                 return builder    //
-                    .write_path(path)
-                    .write_int<u32>(mode)
-                    .write_int<u64>(dev)
+                    .write_path(req.path)
+                    .write_int<u32>(req.mode)
+                    .write_int<u64>(req.dev)
                     .build();
             },
             [&](req::Mkdir&& req) {
-                auto [path, mode] = req;
                 return builder    //
-                    .write_path(path)
-                    .write_int<u32>(mode)
+                    .write_path(req.path)
+                    .write_int<u32>(req.mode)
                     .build();
             },
+            [&](req::Unlink&& req) { return builder.write_path(req.path).build(); },
+            [&](req::Rmdir&& req) { return builder.write_path(req.path).build(); },
             [&](req::Rename&& req) {
-                auto [from, to, flags] = req;
                 return builder    //
-                    .write_path(from)
-                    .write_path(to)
-                    .write_int<u32>(flags)
+                    .write_path(req.from)
+                    .write_path(req.to)
+                    .write_int<u32>(req.flags)
                     .build();
             },
             [&](req::Truncate&& req) {
-                auto [path, size] = req;
                 return builder    //
-                    .write_path(path)
-                    .write_int<i64>(size)
-                    .build();
-            },
-            [&](req::Read&& req) {
-                auto [path, offset, size] = req;
-                return builder    //
-                    .write_path(path)
-                    .write_int<i64>(offset)
-                    .write_int<u64>(size)
-                    .build();
-            },
-            [&](req::Write&& req) {
-                auto [path, offset, in] = req;
-                return builder    //
-                    .write_path(path)
-                    .write_int<i64>(offset)
-                    .write_bytes(in)
+                    .write_path(req.path)
+                    .write_int<i64>(req.size)
                     .build();
             },
             [&](req::Utimens&& req) {
-                auto [path, atime, mtime] = req;
                 return builder    //
-                    .write_path(path)
-                    .write_int<i64>(atime.tv_sec)
-                    .write_int<i64>(atime.tv_nsec)
-                    .write_int<i64>(mtime.tv_sec)
-                    .write_int<i64>(mtime.tv_nsec)
+                    .write_path(req.path)
+                    .write_int<i64>(req.atime.tv_sec)
+                    .write_int<i64>(req.atime.tv_nsec)
+                    .write_int<i64>(req.mtime.tv_sec)
+                    .write_int<i64>(req.mtime.tv_nsec)
                     .build();
             },
             [&](req::CopyFileRange&& req) {
-                auto [in_path, in_off, out_path, out_off, size] = req;
                 return builder    //
-                    .write_path(in_path)
-                    .write_int<i64>(in_off)
-                    .write_path(out_path)
-                    .write_int<i64>(out_off)
-                    .write_int<u64>(size)
+                    .write_path(req.in_path)
+                    .write_int<i64>(req.in_offset)
+                    .write_path(req.out_path)
+                    .write_int<i64>(req.out_offset)
+                    .write_int<u64>(req.size)
                     .build();
             },
-            [&](auto&& req) {
-                auto [path] = req;
-                return builder.write_path(path).build();
+            [&](req::Open&& req) {
+                return builder    //
+                    .write_path(req.path)
+                    .write_open_mode(req.mode)
+                    .build();
+            },
+            [&](req::Close&& req) {
+                return builder    //
+                    .write_int<u64>(req.fd)
+                    .build();
+            },
+            [&](req::Read&& req) {
+                return builder    //
+                    .write_int<u64>(req.fd)
+                    .write_int<i64>(req.offset)
+                    .write_int<u64>(req.size)
+                    .build();
+            },
+            [&](req::Write&& req) {
+                return builder    //
+                    .write_int<u64>(req.fd)
+                    .write_int<i64>(req.offset)
+                    .write_bytes(req.in)
+                    .build();
             },
         });
 
@@ -653,14 +676,14 @@ namespace madbfs::rpc
         auto reader = PayloadReader{ buffer };
 
         switch (proc) {
-        case Procedure::Listdir: {
-            TRY(path, reader.read_path());
-            return req::Listdir{ .path = *path };
-        }
-
         case Procedure::Stat: {
             TRY(path, reader.read_path());
             return req::Stat{ .path = *path };
+        }
+
+        case Procedure::Listdir: {
+            TRY(path, reader.read_path());
+            return req::Listdir{ .path = *path };
         }
 
         case Procedure::Readlink: {
@@ -708,24 +731,6 @@ namespace madbfs::rpc
             return req::Truncate{ .path = *path, .size = static_cast<off_t>(*size) };
         }
 
-        case Procedure::Read: {
-            TRY(path, reader.read_path());
-            TRY(offset, reader.read_int<i64>());
-            TRY(size, reader.read_int<u64>());
-            return req::Read{
-                .path   = *path,
-                .offset = static_cast<off_t>(*offset),
-                .size   = static_cast<usize>(*size),
-            };
-        }
-
-        case Procedure::Write: {
-            TRY(path, reader.read_path());
-            TRY(offset, reader.read_int<i64>());
-            TRY(bytes, reader.read_bytes());
-            return req::Write{ .path = *path, .offset = static_cast<off_t>(*offset), .in = *bytes };
-        }
-
         case Procedure::Utimens: {
             TRY(path, reader.read_path());
             TRY(atime_sec, reader.read_int<i64>());
@@ -752,7 +757,36 @@ namespace madbfs::rpc
                 .out_offset = static_cast<off_t>(*out_offset),
                 .size       = static_cast<usize>(*size),
             };
-        } break;
+        }
+
+        case Procedure::Open: {
+            TRY(path, reader.read_path());
+            TRY(mode, reader.read_open_mode());
+            return req::Open{ .path = *path, .mode = *mode };
+        }
+
+        case Procedure::Close: {
+            TRY(fd, reader.read_int<u64>());
+            return req::Close{ .fd = *fd };
+        }
+
+        case Procedure::Read: {
+            TRY(fd, reader.read_int<u64>());
+            TRY(offset, reader.read_int<i64>());
+            TRY(size, reader.read_int<u64>());
+            return req::Read{
+                .fd     = *fd,
+                .offset = static_cast<off_t>(*offset),
+                .size   = static_cast<usize>(*size),
+            };
+        }
+
+        case Procedure::Write: {
+            TRY(fd, reader.read_int<u64>());
+            TRY(offset, reader.read_int<i64>());
+            TRY(bytes, reader.read_bytes());
+            return req::Write{ .fd = *fd, .offset = static_cast<off_t>(*offset), .in = *bytes };
+        }
         }
 
         return std::nullopt;
@@ -845,6 +879,21 @@ namespace madbfs::rpc
         }
 
         auto payload = std::move(resp).visit(Overload{
+            [&](resp::Stat&& resp) {
+                return builder    //
+                    .write_int<i64>(resp.size)
+                    .write_int<u64>(resp.links)
+                    .write_int<i64>(resp.mtime.tv_sec)
+                    .write_int<i64>(resp.mtime.tv_nsec)
+                    .write_int<i64>(resp.atime.tv_sec)
+                    .write_int<i64>(resp.atime.tv_nsec)
+                    .write_int<i64>(resp.ctime.tv_sec)
+                    .write_int<i64>(resp.ctime.tv_nsec)
+                    .write_int<u32>(resp.mode)
+                    .write_int<u32>(resp.uid)
+                    .write_int<u32>(resp.gid)
+                    .build();
+            },
             [&](resp::Listdir&& resp) {
                 builder.write_int<u64>(resp.entries.size());
                 for (const auto& [name, stat] : resp.entries) {
@@ -864,21 +913,6 @@ namespace madbfs::rpc
                 }
                 return builder.build();
             },
-            [&](resp::Stat&& resp) {
-                return builder    //
-                    .write_int<i64>(resp.size)
-                    .write_int<u64>(resp.links)
-                    .write_int<i64>(resp.mtime.tv_sec)
-                    .write_int<i64>(resp.mtime.tv_nsec)
-                    .write_int<i64>(resp.atime.tv_sec)
-                    .write_int<i64>(resp.atime.tv_nsec)
-                    .write_int<i64>(resp.ctime.tv_sec)
-                    .write_int<i64>(resp.ctime.tv_nsec)
-                    .write_int<u32>(resp.mode)
-                    .write_int<u32>(resp.uid)
-                    .write_int<u32>(resp.gid)
-                    .build();
-            },
             // clang-format off
             [&](resp::Readlink&&      resp) { return builder.write_path(resp.target).build();   },
             [&](resp::Mknod&&             ) { return builder.build();                           },
@@ -887,10 +921,12 @@ namespace madbfs::rpc
             [&](resp::Rmdir&&             ) { return builder.build();                           },
             [&](resp::Rename&&            ) { return builder.build();                           },
             [&](resp::Truncate&&          ) { return builder.build();                           },
-            [&](resp::Read&&          resp) { return builder.write_bytes   (resp.read).build(); },
-            [&](resp::Write&&         resp) { return builder.write_int<u64>(resp.size).build(); },
             [&](resp::Utimens&&           ) { return builder.build();                           },
             [&](resp::CopyFileRange&& resp) { return builder.write_int<u64>(resp.size).build(); },
+            [&](resp::Open&&          resp) { return builder.write_int<u64>(resp.fd  ).build(); },
+            [&](resp::Close&&             ) { return builder.build();                           },
+            [&](resp::Read&&          resp) { return builder.write_bytes   (resp.read).build(); },
+            [&](resp::Write&&         resp) { return builder.write_int<u64>(resp.size).build(); },
             // clang-format on
         });
 
@@ -905,8 +941,8 @@ namespace madbfs::rpc
     Str to_string(Procedure procedure)
     {
         switch (procedure) {
-        case Procedure::Listdir: return "Listdir";
         case Procedure::Stat: return "Stat";
+        case Procedure::Listdir: return "Listdir";
         case Procedure::Readlink: return "Readlink";
         case Procedure::Mknod: return "Mknod";
         case Procedure::Mkdir: return "Mkdir";
@@ -914,10 +950,12 @@ namespace madbfs::rpc
         case Procedure::Rmdir: return "Rmdir";
         case Procedure::Rename: return "Rename";
         case Procedure::Truncate: return "Truncate";
-        case Procedure::Read: return "Read";
-        case Procedure::Write: return "Write";
         case Procedure::Utimens: return "Utimens";
         case Procedure::CopyFileRange: return "CopyFileRange";
+        case Procedure::Open: return "Open";
+        case Procedure::Close: return "Close";
+        case Procedure::Read: return "Read";
+        case Procedure::Write: return "Write";
         }
 
         return "Unknown";
