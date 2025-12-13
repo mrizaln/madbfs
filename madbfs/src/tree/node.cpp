@@ -1,28 +1,83 @@
 #include "madbfs/tree/node.hpp"
+#include "madbfs-common/log.hpp"
 
-namespace madbfs::tree
+namespace madbfs::tree::node
 {
-    u64 node::Directory::NodeHash::operator()(const Uniq<Node>& node) const
+    Regular::Mode Regular::open(u64 fd, int flags)
+    {
+        assert(not is_open(fd));
+
+        auto mode = static_cast<Mode>(O_ACCMODE & flags);
+
+        m_reader += (mode == Mode::Read) != 0;
+        m_writer += (mode == Mode::Write) != 0;
+        m_reader += (mode == Mode::ReadWrite) != 0;
+        m_writer += (mode == Mode::ReadWrite) != 0;
+
+        m_open_fds.emplace_back(fd, mode);
+
+        if (m_reader and m_writer) {
+            m_current_mode = Mode::ReadWrite;
+        } else if (m_writer) {
+            m_current_mode = Mode::Write;
+        } else if (m_reader) {
+            m_current_mode = Mode::Read;
+        }
+
+        assert(m_current_mode.has_value());
+
+        return *m_current_mode;
+    }
+
+    bool Regular::close(u64 fd)
+    {
+        if (auto found = sr::find(m_open_fds, fd, &Entry::fd); found != m_open_fds.end()) {
+            auto [fd, mode] = *found;
+            m_open_fds.erase(found);
+
+            m_reader -= (mode == Mode::Read) != 0;
+            m_writer -= (mode == Mode::Write) != 0;
+            m_reader -= (mode == Mode::ReadWrite) != 0;
+            m_writer -= (mode == Mode::ReadWrite) != 0;
+
+            if (m_reader and m_writer) {
+                m_current_mode = Mode::ReadWrite;
+            } else if (m_writer) {
+                m_current_mode = Mode::Write;
+            } else if (m_reader) {
+                m_current_mode = Mode::Read;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+}
+
+namespace madbfs::tree::node
+{
+    u64 Directory::NodeHash::operator()(const Uniq<Node>& node) const
     {
         return (*this)(node->name());
     }
 
-    bool node::Directory::NodeEq::operator()(Str lhs, const Uniq<Node>& rhs) const
+    bool Directory::NodeEq::operator()(Str lhs, const Uniq<Node>& rhs) const
     {
         return lhs == rhs->name();
     }
 
-    bool node::Directory::NodeEq::operator()(const Uniq<Node>& lhs, Str rhs) const
+    bool Directory::NodeEq::operator()(const Uniq<Node>& lhs, Str rhs) const
     {
         return lhs->name() == rhs;
     }
 
-    bool node::Directory::NodeEq::operator()(const Uniq<Node>& lhs, const Uniq<Node>& rhs) const
+    bool Directory::NodeEq::operator()(const Uniq<Node>& lhs, const Uniq<Node>& rhs) const
     {
         return lhs->name() == rhs->name();
     }
 
-    Expect<Ref<Node>> node::Directory::find(Str name) const
+    Expect<Ref<Node>> Directory::find(Str name) const
     {
         if (auto found = m_children.find(name); found != m_children.end()) {
             return *found->get();
@@ -30,7 +85,7 @@ namespace madbfs::tree
         return Unexpect{ Errc::no_such_file_or_directory };
     }
 
-    bool node::Directory::erase(Str name)
+    bool Directory::erase(Str name)
     {
         if (auto found = m_children.find(name); found != m_children.end()) {
             m_children.erase(found);
@@ -39,7 +94,7 @@ namespace madbfs::tree
         return false;
     }
 
-    Expect<Pair<Ref<Node>, Uniq<Node>>> node::Directory::insert(Uniq<Node> node, bool overwrite)
+    Expect<Pair<Ref<Node>, Uniq<Node>>> Directory::insert(Uniq<Node> node, bool overwrite)
     {
         auto found = m_children.find(node->name());
         if (found != m_children.end() and not overwrite) {
@@ -55,7 +110,7 @@ namespace madbfs::tree
         return Pair{ std::ref(*back->get()), std::move(released) };
     }
 
-    Expect<Uniq<Node>> node::Directory::extract(Str name)
+    Expect<Uniq<Node>> Directory::extract(Str name)
     {
         if (auto found = m_children.find(name); found != m_children.end()) {
             return std::move(m_children.extract(found).value());
@@ -402,11 +457,11 @@ namespace madbfs::tree
         }
         auto& file = may_file->get();
 
-        auto fd  = context.fd_counter.fetch_add(1, std::memory_order::relaxed) + 1;
-        auto res = file.open(fd, flags);
-        assert(res);
+        auto fd   = context.fd_counter.fetch_add(1, std::memory_order::relaxed) + 1;
+        auto mode = file.open(fd, flags);
 
-        co_return fd;
+        // send hint to cache to prepare a real fd that can be used for further operations
+        co_return (co_await context.cache.hint_open(id(), context.path, mode)).transform([&] { return fd; });
     }
 
     AExpect<usize> Node::read(Context context, u64 fd, Span<char> out, off_t offset)
@@ -421,7 +476,7 @@ namespace madbfs::tree
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        co_return (co_await context.cache.read(id(), context.path, out, offset)).transform([&](usize ret) {
+        co_return (co_await context.cache.read(id(), out, offset)).transform([&](usize ret) {
             refresh_stat(timespec_now, timespec_omit);
             return ret;
         });
@@ -440,7 +495,7 @@ namespace madbfs::tree
         }
 
         file.set_dirty(true);
-        co_return (co_await context.cache.write(id(), context.path, in, offset)).transform([&](usize ret) {
+        co_return (co_await context.cache.write(id(), in, offset)).transform([&](usize ret) {
             // the file size is defined as offset + size from last write if it's higher than previous size
             // NOTE: this may be different for sparse files but I don't think Android has it
             auto new_size = offset + static_cast<off_t>(ret);
@@ -482,13 +537,24 @@ namespace madbfs::tree
         if (not file.close(fd)) {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
-        if (not file.is_dirty()) {
-            co_return Expect<void>{};    // no write, do nothing
-        }
-        co_return (co_await context.cache.flush(id())).transform([&] {
+
+        if (file.is_dirty()) {
+            if (auto res = co_await context.cache.flush(id()); not res) {
+                co_return Unexpect{ res.error() };
+            }
+
             refresh_stat(timespec_omit, timespec_now);
             file.set_dirty(false);
-        });
+        }
+
+        // send hint to cache to close its associated fd for this node if exist
+        if (not file.has_open_fds()) {
+            if (auto res = co_await context.cache.hint_close(id()); not res) {
+                co_return Unexpect{ res.error() };
+            }
+        }
+
+        co_return Expect<void>{};
     }
 
     AExpect<void> Node::utimens(Context context, timespec atime, timespec mtime)

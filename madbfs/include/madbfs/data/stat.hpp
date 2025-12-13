@@ -74,4 +74,11 @@ namespace madbfs::data
         static constexpr auto tolerance_sec = 2;
         return remote.mtime.tv_sec - host.mtime.tv_sec > tolerance_sec;
     }
+
+    enum class OpenMode : u8
+    {
+        Read      = 0,
+        Write     = 1,
+        ReadWrite = 2,
+    };
 }

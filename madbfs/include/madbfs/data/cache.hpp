@@ -91,8 +91,13 @@ namespace madbfs::data
         struct LookupEntry
         {
             std::map<usize, Lru::iterator> pages;
-            path::PathBuf                  path;
             bool                           dirty = false;
+        };
+
+        struct FdEntry
+        {
+            u64            fd;
+            data::OpenMode mode;
         };
 
         /**
@@ -105,10 +110,31 @@ namespace madbfs::data
         Cache(connection::Connection& connection, usize page_size, usize max_pages);
 
         /**
+         * @brief Hint the cache to open a real fd to a file in the device for further operations.
+         *
+         * @param id Associated node.
+         * @param path Associated path.
+         * @param mode Access mode of the operation.
+         *
+         * This function will only open a real file if the file is not opened yet. If file is already opened
+         * and the mode can upgraded from O_RDONLY or O_WRONLY to O_RDRW the file will be closed then reopened
+         * with the O_RDRW mode.
+         */
+        AExpect<void> hint_open(Id id, path::Path path, data::OpenMode mode);
+
+        /**
+         * @brief Close the associated fd to real file for this node.
+         *
+         * @param id Associated node Id.
+         *
+         * Unlike `hint_open()` this function will immediately close the file descriptor to the real file.
+         */
+        AExpect<void> hint_close(Id id);
+
+        /**
          * @brief Read bytes from file with desired id at an offset into buffer.
          *
          * @param id File id.
-         * @param path Path to the file.
          * @param out Output buffer.
          * @param offset Read offset.
          *
@@ -118,13 +144,12 @@ namespace madbfs::data
          * LRU. It may also flush an entry (may or may not be related to the file being read) to make space
          * for new data if the LRU pages reaches its maximum.
          */
-        AExpect<usize> read(Id id, path::Path path, Span<char> out, off_t offset);
+        AExpect<usize> read(Id id, Span<char> out, off_t offset);
 
         /**
          * @brief Write bytes into file with desired id at an offset from buffer.
          *
          * @param id File id.
-         * @param path Path to the file.
          * @param in Input buffer.
          * @param offset Write offset.
          *
@@ -133,7 +158,7 @@ namespace madbfs::data
          * This function only writes into the cache in memory. Writes to the actual file on the device will
          * only happen when eviction occurs or `flush()` is explicitly called.
          */
-        AExpect<usize> write(Id id, path::Path path, Span<const char> in, off_t offset);
+        AExpect<usize> write(Id id, Span<const char> in, off_t offset);
 
         /**
          * @brief Flush data into actual file to the device.
@@ -156,14 +181,6 @@ namespace madbfs::data
          * TODO: do the truncation here, why separate it?
          */
         AExpect<void> truncate(Id id, usize old_size, usize new_size);
-
-        /**
-         * @brief Rename/relink path pointed by its id to a new path.
-         *
-         * @param id File id.
-         * @param new_name New path for the file.
-         */
-        Await<void> rename(Id id, path::Path new_name);
 
         /**
          * @brief Invalidate entries for a file by its id.
@@ -199,16 +216,15 @@ namespace madbfs::data
          * @brief Look up for pages using its file id.
          *
          * @param id File identifier.
-         * @param path Path to file.
+         * @param add_entry If true add new entry if lookup failed.
          *
          * @return A lookup entry or none if not exists.
          *
-         * If the `path` parameter is set, the function will try to insert a new entry (zero pages) into the
-         * lookup table if lookup failed (entry not found). The returned value then will always contained a
-         * value if `path` is set, otherwise the returned value will be `std::nullopt` if lookup failed to
-         * find the file.
+         * The returned value will be `std::nullopt` only when lookup failed and `add_entry` is set to false.
+         * In the case of lookup failure and `add_entry` is set to true, the newly created entry is returned
+         * (zero page).
          */
-        Opt<Ref<LookupEntry>> lookup(Id id, Opt<path::Path> path);
+        Opt<Ref<LookupEntry>> lookup(Id id, bool add_entry);
 
         /**
          * @brief Operation to do on cache miss.
@@ -294,7 +310,8 @@ namespace madbfs::data
          */
         AExpect<void> flush_at(Page& page, Id id);
 
-        connection::Connection& m_connection;
+        connection::Connection&         m_connection;
+        std::unordered_map<Id, FdEntry> m_fd_map;    // maps node Id to real fd on to a file on device
 
         Lru    m_lru;      // most recently used is at the front
         Lookup m_table;    // lookup table for fast page access

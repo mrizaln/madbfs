@@ -120,24 +120,6 @@ namespace madbfs::connection
         virtual AExpect<void> truncate(path::Path path, off_t size) = 0;
 
         /**
-         * @brief Read from a file on the device.
-         *
-         * @param path Path to the file on the device.
-         * @param out Buffer to read into.
-         * @param offset Offset to read from.
-         */
-        virtual AExpect<usize> read(path::Path path, Span<char> out, off_t offset) = 0;
-
-        /**
-         * @brief Write to a file on the device.
-         *
-         * @param path Path to the file on the device.
-         * @param in Buffer to write from.
-         * @param offset Offset to write to.
-         */
-        virtual AExpect<usize> write(path::Path path, Span<const char> in, off_t offset) = 0;
-
-        /**
          * @brief Update change time and modification time of a file
          *
          * @param path Path to the file on the device.
@@ -162,6 +144,39 @@ namespace madbfs::connection
             off_t      out_off,
             usize      size
         ) = 0;
+
+        /**
+         * @brief Open a file from the device.
+         *
+         * @param path Path to the file on the device.
+         * @param mode Mode in which the file will be opened.
+         */
+        virtual AExpect<u64> open(path::Path path, data::OpenMode mode) = 0;
+
+        /**
+         * @brief Close a file descriptor.
+         *
+         * @param fd File descriptor to a file on the device.
+         */
+        virtual AExpect<void> close(u64 fd) = 0;
+
+        /**
+         * @brief Read from a file on the device.
+         *
+         * @param fd File descriptor to a file on the device.
+         * @param out Buffer to read into.
+         * @param offset Offset to read from.
+         */
+        virtual AExpect<usize> read(u64 fd, Span<char> out, off_t offset) = 0;
+
+        /**
+         * @brief Write to a file on the device.
+         *
+         * @param fd File descriptor to a file on the device.
+         * @param in Buffer to write from.
+         * @param offset Offset to write to.
+         */
+        virtual AExpect<usize> write(u64 fd, Span<const char> in, off_t offset) = 0;
 
         // ---------------
 
