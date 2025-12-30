@@ -140,7 +140,7 @@ def environ(request):
         BINARY_PATH,
         "-f",
         f"--log-file={log_path}",
-        "--log-level=debug",
+        f"--log-level={DEFAULT_LOG_LEVEL}",
         f"--server={server_path}" if request.param else "--no-server",
     ]
 
@@ -729,7 +729,9 @@ def tst_ipc(work_dir: str, serial: str, server_used: bool):
 
     # restore immediately since I need the logs to still be in debug :P
     with ipc_connect(serial) as sock:
-        Protocol.send(sock, json.dumps({"op": "set_log_level", "value": "debug"}))
+        Protocol.send(
+            sock, json.dumps({"op": "set_log_level", "value": DEFAULT_LOG_LEVEL})
+        )
         resp = Protocol.receive(sock)
         assert resp is not None
 

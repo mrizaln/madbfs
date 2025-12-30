@@ -1,9 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
 project(
-    madbfs
-    VERSION 0.9.0
-    LANGUAGES CXX
-    DESCRIPTION "Userspace filesystem for Android via adb using FUSE"
+  madbfs
+  VERSION 0.9.0
+  LANGUAGES CXX
+  DESCRIPTION "Userspace filesystem for Android via adb using FUSE"
 )
 
 # use unity build. turn off if you don't want to
@@ -25,7 +25,7 @@ add_subdirectory(madbfs)
 add_subdirectory(madbfs-msg)
 
 if(MADBFS_ENABLE_TESTS)
-    message(STATUS "madbfs: Building tests")
-    enable_testing()
-    add_subdirectory(test)
+  message(STATUS "madbfs: Building tests")
+  enable_testing()
+  add_subdirectory(test)
 endif()

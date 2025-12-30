@@ -62,7 +62,7 @@ namespace
     )
     {
         using madbfs::log::Level;
-        auto log = [=]<typename... Args>(Level level, fmt::format_string<Args...>&& fmt, Args&&... args) {
+        auto log = [=]<typename... Args>(Level level, std::format_string<Args...>&& fmt, Args&&... args) {
             madbfs::log::log_loc(loc, level, std::move(fmt), std::forward<Args>(args)...);
         };
 

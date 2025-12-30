@@ -5,10 +5,8 @@
 
 #include <boost/ut.hpp>
 #include <dtlx/dtlx.hpp>
-#include <fmt/base.h>
-#include <fmt/color.h>
-#include <fmt/format.h>
 
+#include <format>
 #include <source_location>
 
 namespace ut = boost::ext::ut;
@@ -70,7 +68,7 @@ constexpr auto expected_rm = R"(
 
 // NOTE: since there is no ordering guarantee from the VFS, this formatter just order them alphabetically
 template <>
-struct fmt::formatter<madbfs::tree::Node> : fmt::formatter<Str>
+struct std::formatter<madbfs::tree::Node> : std::formatter<Str>
 {
     auto format(const madbfs::tree::Node& node, auto&& ctx) const
     {
@@ -82,11 +80,11 @@ struct fmt::formatter<madbfs::tree::Node> : fmt::formatter<Str>
             }
 
             for (auto _ : sv::iota(0u, depth)) {
-                fmt::format_to(ctx.out(), "    ");
+                std::format_to(ctx.out(), "    ");
             }
 
             auto visitor = madbfs::Overload{
-                [&](const node::Link& link) { return fmt::format("    ->    {}", link.target); },
+                [&](const node::Link& link) { return std::format("    ->    {}", link.target); },
                 [&](const node::Directory&) { return String{ "/" }; },
                 [&](const auto&) { return String{ "" }; },
             };
@@ -94,7 +92,7 @@ struct fmt::formatter<madbfs::tree::Node> : fmt::formatter<Str>
 
             // if root, don't print the name since additional will print dir mark (/)
             auto name = node->name() == "/" ? "" : node->name();
-            fmt::format_to(ctx.out(), "- {}{}\n", name, additional);
+            std::format_to(ctx.out(), "- {}{}\n", name, additional);
 
             if (auto* dir = std::get_if<node::Directory>(&node->value())) {
                 auto to_ref = [](const Uniq<Node>& f) { return std::ref(*f); };
@@ -117,7 +115,7 @@ class ExpectError : public std::runtime_error
 public:
     ExpectError(Errc errc, std::source_location loc = std::source_location::current())
         : runtime_error{
-            fmt::format("{}:{}:{} [{}]", loc.file_name(), loc.line(), loc.column(), madbfs::err_msg(errc))
+            std::format("{}:{}:{} [{}]", loc.file_name(), loc.line(), loc.column(), madbfs::err_msg(errc))
         }
     {
     }
@@ -137,8 +135,9 @@ String diff_str(Str str1, Str str2)
     auto lines1 = madbfs::util::split(str1, '\n');
     auto lines2 = madbfs::util::split(str2, '\n');
 
-    const auto red   = fmt::fg(fmt::color::red);
-    const auto green = fmt::fg(fmt::color::green);
+    const auto red   = "\033[1;31m";
+    const auto green = "\033[1;32m";
+    const auto reset = "\033[0m";
 
     auto res = dtlx::diff(lines1, lines2);
     auto buf = String{};
@@ -146,9 +145,9 @@ String diff_str(Str str1, Str str2)
 
     for (auto [elem, info] : res.ses.get()) {
         switch (info.type) {
-        case dtlx::SesEdit::Delete: fmt::format_to(out, red, "{}\n", elem); break;
-        case dtlx::SesEdit::Common: fmt::format_to(out, "{}\n", elem); break;
-        case dtlx::SesEdit::Add: fmt::format_to(out, green, "{}\n", elem); break;
+        case dtlx::SesEdit::Delete: std::format_to(out, "{}{}{}\n", red, elem, reset); break;
+        case dtlx::SesEdit::Common: std::format_to(out, "{}\n", elem); break;
+        case dtlx::SesEdit::Add: std::format_to(out, "{}{}{}\n", green, elem, reset); break;
         }
     }
 
@@ -266,7 +265,7 @@ int main()
             _ = hello.symlink("wife", wife.build_path().str()).unwrap();
             _ = (co_await bye.mknod(make_context("theresa.txt"), 0, 0)).unwrap();
 
-            auto tree_str = fmt::format("\n{}", root);
+            auto tree_str = std::format("\n{}", root);
             expect(expected == tree_str) << diff_str(expected, tree_str);
         };
 
@@ -319,7 +318,7 @@ int main()
 
             (co_await tree.mknod("/bye/theresa.txt"_path, 0, 0)).unwrap(Node*);
 
-            auto tree_str = fmt::format("\n{}", tree.root());
+            auto tree_str = std::format("\n{}", tree.root());
             expect(expected == tree_str) << diff_str(expected, tree_str);
 
             (co_await tree.unlink("/hello/world.txt"_path)).unwrap(void);
@@ -345,7 +344,7 @@ int main()
 
             (co_await tree.rmdir("/hello/bar"_path)).unwrap(void);
 
-            tree_str = fmt::format("\n{}", tree.root());
+            tree_str = std::format("\n{}", tree.root());
             expect(expected_rm == tree_str) << diff_str(expected_rm, tree_str);
         };
 

@@ -2,8 +2,6 @@
 
 #include "madbfs-common/aliases.hpp"
 
-#include <spdlog/fmt/ranges.h>    // to enable ranges formatting
-#include <spdlog/fmt/std.h>
 #include <spdlog/pattern_formatter.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -47,8 +45,8 @@ namespace madbfs::log
     template <typename... Args>
     struct FmtWithLoc
     {
-        fmt::format_string<Args...> fmt;
-        spdlog::source_loc          loc;
+        spdlog::format_string_t<Args...> fmt;
+        spdlog::source_loc               loc;
 
         template <typename Str>
         consteval FmtWithLoc(Str&& fmt, const std::source_location& loc = std::source_location::current())
@@ -218,9 +216,9 @@ namespace madbfs::log
      */
     template <typename... Args>
     inline void log_loc(
-        std::source_location        loc,
-        spdlog::level::level_enum   level,
-        fmt::format_string<Args...> fmt,
+        std::source_location             loc,
+        spdlog::level::level_enum        level,
+        spdlog::format_string_t<Args...> fmt,
         Args&&... args
     )
     {

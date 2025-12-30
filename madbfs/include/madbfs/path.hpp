@@ -3,7 +3,7 @@
 #include <madbfs-common/aliases.hpp>
 #include <madbfs-common/util/slice.hpp>
 
-#include <fmt/format.h>
+#include <print>
 
 // NOTE: I ended up reimplementing `std::filesystem::path` lol, but since std is missing the `path_view` I
 // think it's worth it. Also I want to avoid mistaking the path used by the filesystem as path in the host.
@@ -332,22 +332,22 @@ namespace madbfs::path::inline literals
 }
 
 template <>
-struct fmt::formatter<madbfs::path::Path> : fmt::formatter<madbfs::Str>
+struct std::formatter<madbfs::path::Path> : std::formatter<madbfs::Str>
 {
     auto format(const madbfs::path::Path& path, auto& ctx) const
     {
-        return fmt::formatter<madbfs::Str>::format(path.str(), ctx);
+        return std::formatter<madbfs::Str>::format(path.str(), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<madbfs::path::PathBuf> : fmt::formatter<madbfs::Str>
+struct std::formatter<madbfs::path::PathBuf> : std::formatter<madbfs::Str>
 {
     auto format(const madbfs::path::PathBuf& path, auto& ctx) const
     {
-        return fmt::formatter<madbfs::Str>::format(path.str(), ctx);
+        return std::formatter<madbfs::Str>::format(path.str(), ctx);
     }
 };
 
-static_assert(fmt::formattable<madbfs::path::Path>);
-static_assert(fmt::formattable<madbfs::path::PathBuf>);
+static_assert(std::formattable<madbfs::path::Path, char>);
+static_assert(std::formattable<madbfs::path::PathBuf, char>);

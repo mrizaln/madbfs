@@ -13,6 +13,7 @@
 
 #include <filesystem>
 #include <limits>
+#include <print>
 
 namespace madbfs::args
 {
@@ -115,8 +116,8 @@ namespace madbfs::args
      */
     inline void show_help(const char* prog)
     {
-        fmt::print(stdout, "usage: {} [options] <mountpoint>\n\n", prog);
-        fmt::print(
+        std::print(stdout, "usage: {} [options] <mountpoint>\n\n", prog);
+        std::print(
             stdout,
             "Options for madbfs:\n"
             "    --serial=<str>         serial number of the device to mount\n"
@@ -137,6 +138,7 @@ namespace madbfs::args
             "    --page-size=<int>      page size for cache & transfer in KiB\n"
             "                             (default: 128)\n"
             "                             (minimum: 64)\n"
+            "                             (maximum: 4096)\n"
             "                             (value will be rounded up to the next power of 2)\n"
             "    --ttl=<int>            set the TTL of the stat cache of the filesystem in seconds\n"
             "                             (default: 30)\n"
@@ -153,7 +155,7 @@ namespace madbfs::args
             log::level_names
         );
 
-        fmt::println(stdout, "\nOptions for libfuse:");
+        std::println(stdout, "\nOptions for libfuse:");
         ::fuse_cmdline_help();
         ::fuse_lowlevel_help();
     };
@@ -196,13 +198,13 @@ namespace madbfs::args
         if (devices.empty()) {
             co_return "";
         } else if (devices.size() == 1) {
-            fmt::println("[madbfs] only one device found, using serial '{}'", devices[0].serial);
+            std::println("[madbfs] only one device found, using serial '{}'", devices[0].serial);
             co_return devices[0].serial;
         }
 
-        fmt::println("[madbfs] multiple devices detected,");
+        std::println("[madbfs] multiple devices detected,");
         for (auto i : madbfs::sv::iota(0u, devices.size())) {
-            fmt::println("         - {}: {}", i + 1, devices[i].serial);
+            std::println("         - {}: {}", i + 1, devices[i].serial);
         }
 
         auto choice = 1uz;
@@ -212,14 +214,14 @@ namespace madbfs::args
                 choice = *input;
                 break;
             } else if (not input and linr::is_stream_error(input.error())) {
-                fmt::println("\n[madbfs] stdin closed, aborting.");
+                std::println("\n[madbfs] stdin closed, aborting.");
                 std::exit(1);    // I don't think there is an easy way out of this but exit
             } else {
-                fmt::println("[madbfs] invalid choice, enter a number between 1 - {}: ", devices.size());
+                std::println("[madbfs] invalid choice, enter a number between 1 - {}: ", devices.size());
                 continue;
             }
         }
-        fmt::println("[madbfs] using serial '{}'", devices[choice - 1].serial);
+        std::println("[madbfs] using serial '{}'", devices[choice - 1].serial);
 
         co_return devices[choice - 1].serial;
     }
@@ -278,7 +280,7 @@ namespace madbfs::args
                 file = candidate;
                 return file;
             }
-            fmt::println("[madbfs] candidate not exist or not regular file: {}", candidate.c_str());
+            std::println("[madbfs] candidate not exist or not regular file: {}", candidate.c_str());
         }
 
         return std::nullopt;
@@ -306,7 +308,7 @@ namespace madbfs::args
         // resultant opts will not be used and args will be parsed again in fuse_main later.
         {
             if (::fuse_parse_cmdline(&args, &opts) != 0) {
-                fmt::println(stderr, "error: failed to parse options\n");
+                std::println(stderr, "error: failed to parse options\n");
                 show_help(argv[0]);
                 ::fuse_opt_free_args(&args);
                 co_return ParseResult{ 1 };
@@ -320,8 +322,8 @@ namespace madbfs::args
             }
 
             if (opts.show_version) {
-                fmt::println("madbfs version {}", MADBFS_VERSION_STRING);
-                fmt::println("FUSE library version {}", ::fuse_pkgversion());
+                std::println("madbfs version {}", MADBFS_VERSION_STRING);
+                std::println("FUSE library version {}", ::fuse_pkgversion());
                 ::fuse_lowlevel_version();
                 ::fuse_opt_free_args(&args);
                 ::free(opts.mountpoint);
@@ -329,7 +331,7 @@ namespace madbfs::args
             }
 
             if (opts.mountpoint == nullptr) {
-                fmt::println(stderr, "error: no mountpoint specified");
+                std::println(stderr, "error: no mountpoint specified");
                 show_help(argv[0]);
                 ::fuse_opt_free_args(&args);
                 co_return ParseResult{ 2 };
@@ -350,60 +352,60 @@ namespace madbfs::args
         };
 
         if (fuse_opt_parse(&args, &madbfs_opt, madbfs_opt_spec.data(), NULL) != 0) {
-            fmt::println(stderr, "error: failed to parse options\n");
+            std::println(stderr, "error: failed to parse options\n");
             show_help(argv[0]);
             co_return ParseResult{ 1 };
         }
 
         if (madbfs_opt.cache_size <= 0) {
-            fmt::println(stderr, "error: cache size must be positive");
+            std::println(stderr, "error: cache size must be positive");
             co_return ParseResult{ 1 };
         }
 
         if (madbfs_opt.page_size <= 0) {
-            fmt::println(stderr, "error: page size must be positive");
+            std::println(stderr, "error: page size must be positive");
             co_return ParseResult{ 1 };
         }
 
         if (madbfs_opt.port > std::numeric_limits<u16>::max() or madbfs_opt.port <= 0) {
-            fmt::println("[madbfs] invalid port {}", madbfs_opt.port);
+            std::println("[madbfs] invalid port {}", madbfs_opt.port);
             ::fuse_opt_free_args(&args);
             co_return ParseResult{ 1 };
         }
 
-        fmt::println("[madbfs] checking adb availability...");
+        std::println("[madbfs] checking adb availability...");
         if (auto status = co_await connection::start_connection(); not status) {
-            fmt::println(stderr, "\nerror: failed to start adb server [{}].", err_msg(status.error()));
-            fmt::println(stderr, "\nnote: make sure adb is installed and in PATH.");
-            fmt::println(stderr, "note: make sure phone debugging permission is enabled.");
-            fmt::println(stderr, "      phone with its screen locked might denies adb connection.");
-            fmt::println(stderr, "      you might need to unlock your device first to be able to use adb.");
+            std::println(stderr, "\nerror: failed to start adb server [{}].", err_msg(status.error()));
+            std::println(stderr, "\nnote: make sure adb is installed and in PATH.");
+            std::println(stderr, "note: make sure phone debugging permission is enabled.");
+            std::println(stderr, "      phone with its screen locked might denies adb connection.");
+            std::println(stderr, "      you might need to unlock your device first to be able to use adb.");
             co_return ParseResult{ 1 };
         }
 
         auto log_level = log::level_from_str(madbfs_opt.log_level);
         if (not log_level.has_value()) {
-            fmt::println(stderr, "error: invalid log level '{}'", madbfs_opt.log_level);
-            fmt::println(stderr, "       valid log levels: {}", log::level_names);
+            std::println(stderr, "error: invalid log level '{}'", madbfs_opt.log_level);
+            std::println(stderr, "       valid log levels: {}", log::level_names);
             ::fuse_opt_free_args(&args);
             co_return ParseResult{ 1 };
         }
 
         if (madbfs_opt.serial == nullptr) {
             if (auto serial = ::getenv("ANDROID_SERIAL"); serial != nullptr) {
-                fmt::println("[madbfs] using serial '{}' from env variable 'ANDROID_SERIAL'", serial);
+                std::println("[madbfs] using serial '{}' from env variable 'ANDROID_SERIAL'", serial);
                 madbfs_opt.serial = ::strdup(serial);
             } else if (auto serial = co_await get_serial(); not serial.empty()) {
                 madbfs_opt.serial = ::strdup(serial.c_str());
             } else {
-                fmt::println(stderr, "error: no device found, make sure your device is connected");
+                std::println(stderr, "error: no device found, make sure your device is connected");
                 ::fuse_opt_free_args(&args);
                 co_return ParseResult{ 1 };
             }
         }
 
         if (auto dev = co_await check_serial(madbfs_opt.serial); dev != connection::DeviceStatus::Device) {
-            fmt::println(stderr, "error: serial '{} 'is not valid ({})", madbfs_opt.serial, to_string(dev));
+            std::println(stderr, "error: serial '{} 'is not valid ({})", madbfs_opt.serial, to_string(dev));
             ::fuse_opt_free_args(&args);
             co_return ParseResult{ 1 };
         }
@@ -414,7 +416,7 @@ namespace madbfs::args
                 ::free((void*)madbfs_opt.server);
                 madbfs_opt.server = nullptr;
             }
-            fmt::println("[madbfs] no-server flag specified, won't launch server");
+            std::println("[madbfs] no-server flag specified, won't launch server");
         } else if (madbfs_opt.server == nullptr) {
             auto exe = std::filesystem::path{ argv[0] == nullptr ? "madbfs" : argv[0] };
             auto abi = co_await cmd::exec(
@@ -422,27 +424,27 @@ namespace madbfs::args
             );
 
             if (not abi) {
-                fmt::println("[madbfs] the device's Android ABI can't be queried");
+                std::println("[madbfs] the device's Android ABI can't be queried");
             } else {
-                fmt::println("[madbfs] the device is running with Android ABI '{}'", util::strip(*abi));
-                auto server_name = fmt::format("madbfs-server-{}", util::strip(*abi));
-                fmt::println("[madbfs] server is not specified, attempting to search '{}'...", server_name);
+                std::println("[madbfs] the device is running with Android ABI '{}'", util::strip(*abi));
+                auto server_name = std::format("madbfs-server-{}", util::strip(*abi));
+                std::println("[madbfs] server is not specified, attempting to search '{}'...", server_name);
                 server = get_server_path(exe, server_name);
             }
 
             if (not server) {
                 constexpr auto server_name = "madbfs-server";
-                fmt::println("[madbfs] trying to find 'madbfs-server'...");
+                std::println("[madbfs] trying to find 'madbfs-server'...");
                 server = get_server_path(exe, server_name);
             }
 
             if (not server) {
-                fmt::println("[madbfs] can't find server falling back to direct adb transport");
+                std::println("[madbfs] can't find server falling back to direct adb transport");
             } else {
-                fmt::println("[madbfs] server is found: {}", server->c_str());
+                std::println("[madbfs] server is found: {}", server->c_str());
             }
         } else {
-            fmt::println("[madbfs] server path is set to {}", madbfs_opt.server);
+            std::println("[madbfs] server path is set to {}", madbfs_opt.server);
             server = std::filesystem::absolute(madbfs_opt.server);
         }
 
@@ -451,6 +453,9 @@ namespace madbfs::args
                           ? ""
                           : madbfs_opt.log_file;
 
+        auto cache_size = std::max(std::bit_ceil(static_cast<usize>(madbfs_opt.cache_size)), 128uz);
+        auto page_size  = std::clamp(std::bit_ceil(static_cast<usize>(madbfs_opt.page_size)), 64uz, 4096uz);
+
         co_return ParseResult::Opt{
             .opt = {
                 .mount     = std::move(mountpoint),
@@ -458,8 +463,8 @@ namespace madbfs::args
                 .server    = server,
                 .log_level = log_level.value(),
                 .log_file  = log_file,
-                .cachesize = std::bit_ceil(std::max(static_cast<usize>(madbfs_opt.cache_size), 128uz)),
-                .pagesize  = std::bit_ceil(std::max(static_cast<usize>(madbfs_opt.page_size), 64uz)),
+                .cachesize = cache_size,
+                .pagesize  = page_size,
                 .ttl       = madbfs_opt.ttl,
                 .timeout   = madbfs_opt.timeout,
                 .port      = static_cast<u16>(madbfs_opt.port),

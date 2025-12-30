@@ -2,6 +2,8 @@
 #include "madbfs-common/async/async.hpp"
 #include "madbfs-common/log.hpp"
 
+#include <bit>
+
 // error handling that adapts error_code into errc
 #define HANDLE_ERROR(Res, Want, Msg)                                                                         \
     if (not(Res)) {                                                                                          \
@@ -973,7 +975,7 @@ namespace madbfs::rpc
 
     AExpect<void> handshake(Socket& sock)
     {
-        const auto message = fmt::format("{}:{}\n", server_ready_string, MADBFS_VERSION_STRING);
+        const auto message = std::format("{}:{}\n", server_ready_string, MADBFS_VERSION_STRING);
 
         auto n = co_await async::write_lv<char>(sock, message);
         HANDLE_ERROR(n, message.size(), "failed to send handshake to server");

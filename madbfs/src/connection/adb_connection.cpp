@@ -114,7 +114,7 @@ namespace
      */
     madbfs::String quote(madbfs::path::Path path)
     {
-        return fmt::format("\"{}\"", path);
+        return std::format("\"{}\"", path);
     }
 }
 
@@ -221,7 +221,7 @@ namespace madbfs::connection
 
     AExpect<void> AdbConnection::truncate(path::Path path, off_t size)
     {
-        const auto size_str = fmt::format("{}", size);
+        const auto size_str = std::format("{}", size);
 
         auto res = co_await cmd::exec({ "adb", "shell", "truncate", "-s", size_str, quote(path) });
         co_return res.transform(sink_void);
@@ -244,7 +244,9 @@ namespace madbfs::connection
                     co_return Unexpect{ Errc::invalid_argument };
                 }
 
-                const auto t = fmt::format("{:%Y%m%d%H%M.%S}{}", tm, time.tv_nsec);
+                const auto sys = std::chrono::system_clock::from_time_t(std::mktime(&tm));
+                const auto t   = std::format("{:%Y%m%d%H%M.%S}{}", sys, time.tv_nsec);
+
                 log_i("{}: utimens to {}", __func__, t);
 
                 auto res = co_await cmd::exec({ "adb", "shell", "touch", "-c", flag, "-t", t, quote(path) });
@@ -265,11 +267,11 @@ namespace madbfs::connection
         usize      size
     )
     {
-        const auto skip  = fmt::format("skip={}", in_off);
-        const auto count = fmt::format("count={}", size);
-        const auto ifile = fmt::format("if=\"{}\"", in);
-        const auto seek  = fmt::format("seek={}", out_off);
-        const auto ofile = fmt::format("of=\"{}\"", out);
+        const auto skip  = std::format("skip={}", in_off);
+        const auto count = std::format("count={}", size);
+        const auto ifile = std::format("if=\"{}\"", in);
+        const auto seek  = std::format("seek={}", out_off);
+        const auto ofile = std::format("of=\"{}\"", out);
 
         // count_bytes: https://stackoverflow.com/a/40792605/16506263
         // notrunc    : https://unix.stackexchange.com/a/146923
@@ -333,9 +335,9 @@ namespace madbfs::connection
 
         auto path = entry->second.view();
 
-        const auto skip  = fmt::format("skip={}", offset);
-        const auto count = fmt::format("count={}", out.size());
-        const auto ifile = fmt::format("if=\"{}\"", path);
+        const auto skip  = std::format("skip={}", offset);
+        const auto count = std::format("count={}", out.size());
+        const auto ifile = std::format("if=\"{}\"", path);
 
         // `bs` is skipped, relies on `count_bytes`: https://stackoverflow.com/a/40792605/16506263
         auto res = co_await cmd::exec(
@@ -358,8 +360,8 @@ namespace madbfs::connection
 
         auto path = entry->second.view();
 
-        const auto seek  = fmt::format("seek={}", offset);
-        const auto ofile = fmt::format("of=\"{}\"", path);
+        const auto seek  = std::format("seek={}", offset);
+        const auto ofile = std::format("of=\"{}\"", path);
 
         auto in_str = Str{ in.data(), in.size() };
 

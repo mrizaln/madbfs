@@ -45,7 +45,7 @@ namespace
     inline madbfs::Str get_no_dev_serial()
     {
         if (auto* serial = std::getenv("ANDROID_SERIAL"); serial != nullptr) {
-            static auto no_dev_serial = fmt::format("adb: device '{}' not found", serial);
+            static auto no_dev_serial = std::format("adb: device '{}' not found", serial);
             return no_dev_serial;
         }
         return {};

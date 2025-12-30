@@ -1,6 +1,6 @@
 # madbfs
 
-`madbfs` (Modern `adb` Filesystem, formerly `adbfsm`) is a userspace filesystem for Android via `adb` built using `libfuse`. It focuses on being fast, reliable, and safe, with straightforward, well-structured code that follows modern C++ practices.
+`madbfs` (Modern `adb` Filesystem, formerly `adbfsm`) is a userspace filesystem for Android via `adb` built using `libfuse`.
 
 ## Preview
 
@@ -103,7 +103,6 @@ These limitations lead me to decide to rebuild the project from ground up in ord
   Library dependencies
 
   - Boost (Asio, Process, and JSON component)
-  - fmt
   - libfuse
   - rapidhash
   - spdlog
@@ -119,7 +118,6 @@ These limitations lead me to decide to rebuild the project from ground up in ord
   Library dependencies
 
   - Asio (non-Boost variant)
-  - fmt
   - spdlog
 
 ## Building

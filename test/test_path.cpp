@@ -1,11 +1,10 @@
 #include <madbfs/path.hpp>
 
 #include <boost/ut.hpp>
-#include <fmt/base.h>
-#include <fmt/std.h>
 
 #include <array>
 #include <iostream>
+#include <print>
 
 namespace ut = boost::ut;
 using namespace madbfs::aliases;
@@ -28,7 +27,7 @@ struct TestIter
 std::ostream& operator<<(std::ostream& out, const TestConstruct& test)
 {
     auto [input, upper_parent, upper_filename, parent, filename] = test;
-    fmt::print(
+    std::print(
         out,
         "\ninput         : [{}]"
         "\nupper_parent  : [{}]"
@@ -308,7 +307,7 @@ int main()
             }
 
             // full path may be modified: repeating '/' is truncated e.g "/home///user -> "/home/user"
-            auto full = fmt::format("{}{}{}", path.parent(), parent.is_root() ? "" : "/", path.filename());
+            auto full = std::format("{}{}{}", path.parent(), parent.is_root() ? "" : "/", path.filename());
 
             expect(new_path->str() == full) << test;
             expect(new_path->parent() == path.parent()) << test;
@@ -323,7 +322,7 @@ int main()
         if (comp_path.has_value()) {
             auto&& [comp, path] = *comp_path;
 
-            ut::log << fmt::format(
+            ut::log << std::format(
                 "somehow has value? case: {} -- {} | {}", test, path.parent(), path.filename()
             );
         }
@@ -332,7 +331,7 @@ int main()
     "Path component should be able to be iterated from root to basename"_test = [](const TestIter& test) {
         auto [comp, path] = create(test.input).value();
         auto iterated     = path.iter() | sr::to<std::vector>();
-        expect(that % test.iterated == iterated) << fmt::format("On input: {:?}", test.input);
+        expect(that % test.iterated == iterated) << std::format("On input: {:?}", test.input);
     } | iter_testcases;
 
     "Path component should be able to be iterated from root to dirname"_test = [](const TestIter& test) {
@@ -340,7 +339,7 @@ int main()
         auto iterated     = path.parent_path().iter() | sr::to<std::vector>();
         auto expected     = test.iterated;
         expected.size() > 0 ? expected.pop_back() : void();
-        expect(that % expected == iterated) << fmt::format("On input: {:?}", test.input);
+        expect(that % expected == iterated) << std::format("On input: {:?}", test.input);
     } | iter_testcases;
 
     "PathBuf can be constructed using literals"_test = [] {

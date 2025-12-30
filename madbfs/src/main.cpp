@@ -8,6 +8,7 @@
 #include <array>
 #include <csignal>
 #include <cstdlib>
+#include <print>
 
 /**
  * @brief Handler for unexpected program end.
@@ -20,7 +21,7 @@
  */
 void unexpected_program_end(const char* msg, bool is_sigsegv)
 {
-    fmt::println("> Program reached an unexpected end: {}", msg);
+    std::println("> Program reached an unexpected end: {}", msg);
 
     if (not is_sigsegv) {
         auto exception = std::current_exception();
@@ -28,9 +29,9 @@ void unexpected_program_end(const char* msg, bool is_sigsegv)
             try {
                 std::rethrow_exception(exception);
             } catch (const std::exception& e) {
-                fmt::println("> Uncaught exception:\n{}", e.what());
+                std::println("> Uncaught exception:\n{}", e.what());
             } catch (...) {
-                fmt::println("> Uncaught exception (unknown type)");
+                std::println("> Uncaught exception (unknown type)");
             }
         }
     }
@@ -43,9 +44,9 @@ void unexpected_program_end(const char* msg, bool is_sigsegv)
     for (auto i : madbfs::sv::iota(0, size)) {
         madbfs::log_c("\t{}", names[i]);
     }
-    fmt::println("> Backtrace:");
+    std::println("> Backtrace:");
     for (auto i : madbfs::sv::iota(0, size)) {
-        fmt::println("\t{}", names[i]);
+        std::println("\t{}", names[i]);
     }
     ::free(names);
 
@@ -73,8 +74,8 @@ try {
         return 1;
     }
 
-    fmt::println("[madbfs] mount '{}' [cache={} MiB, page={} KiB]", opt.serial, opt.cachesize, opt.pagesize);
-    fmt::println("[madbfs] unmount with 'fusermount -u {:?}'", opt.mount);
+    std::println("[madbfs] mount '{}' [cache={} MiB, page={} KiB]", opt.serial, opt.cachesize, opt.pagesize);
+    std::println("[madbfs] unmount with 'fusermount -u {:?}'", opt.mount);
 
     if (opt.log_file != "-") {
         madbfs::log_i(
@@ -87,7 +88,7 @@ try {
     }
 
     if (::setenv("ANDROID_SERIAL", opt.serial.c_str(), 1) < 0) {
-        fmt::println(stderr, "error: failed to set env variable 'ANDROID_SERIAL' ({})", strerror(errno));
+        std::println(stderr, "error: failed to set env variable 'ANDROID_SERIAL' ({})", strerror(errno));
         return 1;
     }
 
@@ -101,9 +102,9 @@ try {
 
     return ret;
 } catch (const std::exception& e) {
-    fmt::println(stderr, "error: exception occurred: {}", e.what());
+    std::println(stderr, "error: exception occurred: {}", e.what());
     return 1;
 } catch (...) {
-    fmt::println(stderr, "error: exception occurred (unknown exception)");
+    std::println(stderr, "error: exception occurred (unknown exception)");
     return 1;
 }

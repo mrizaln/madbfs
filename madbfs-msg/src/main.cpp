@@ -7,6 +7,7 @@
 
 #include <filesystem>
 #include <iostream>
+#include <print>
 #include <regex>
 
 namespace po    = boost::program_options;
@@ -104,8 +105,8 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
 
     auto print_help = [&](bool err) {
         auto out = err ? stderr : stdout;
-        fmt::println(out, "madbfs-msg: send message to active madbfs instance over IPC socket");
-        fmt::println(out, "usage: [options] [message]");
+        std::println(out, "madbfs-msg: send message to active madbfs instance over IPC socket");
+        std::println(out, "usage: [options] [message]");
         std::cerr << '\n' << desc << '\n';
         return Exit{ 1 };
     };
@@ -119,7 +120,7 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
         po::store(po::command_line_parser{ argc, argv }.options(desc).positional(pos).run(), vm);
         po::notify(vm);
     } catch (const std::exception& e) {
-        fmt::println(stderr, "{}", e.what());
+        std::println(stderr, "{}", e.what());
         return Exit{ 2 };
     }
 
@@ -128,15 +129,15 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
     }
 
     if (vm.count("version")) {
-        fmt::println(stdout, "{}", MADBFS_VERSION_STRING);
+        std::println(stdout, "{}", MADBFS_VERSION_STRING);
         return Exit{ 0 };
     }
 
     if (not fs::exists(search_path)) {
-        fmt::println(stderr, "error: path '{}' does not exist", search_path.c_str());
+        std::println(stderr, "error: path '{}' does not exist", search_path.c_str());
         return Exit{ 1 };
     } else if (not fs::is_directory(search_path)) {
-        fmt::println(stderr, "error: path '{}' is not a directory", search_path.c_str());
+        std::println(stderr, "error: path '{}' is not a directory", search_path.c_str());
         return Exit{ 1 };
     }
 
@@ -154,25 +155,25 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
         auto sockets = get_socket_list(search_path);
         switch (sockets.size()) {
         case 0: {
-            fmt::println(stderr, "error: no device found");
+            std::println(stderr, "error: no device found");
             return Exit{ 1 };
         } break;
         case 1: {
             serial = sockets.front().serial;
         } break;
         default: {
-            fmt::println(stderr, "error: multiple device exists");
+            std::println(stderr, "error: multiple device exists");
             for (auto&& [serial, _] : sockets) {
-                fmt::println(stderr, "error:     - {}", serial);
+                std::println(stderr, "error:     - {}", serial);
             }
-            fmt::println(stderr, "error: specify one in the command using '--serial' or 'ANDROID_SERIAL'");
+            std::println(stderr, "error: specify one in the command using '--serial' or 'ANDROID_SERIAL'");
             return Exit{ 1 };
         }
         }
     }
 
     if (not vm.count("message")) {
-        fmt::println(stderr, "error: no message is specified");
+        std::println(stderr, "error: no message is specified");
         return Exit{ 1 };
     }
 
@@ -273,7 +274,7 @@ int perform_list(fs::path search_path)
 {
     auto sockets = get_socket_list(search_path);
     if (sockets.empty()) {
-        fmt::println("no active sockets at the moment");
+        std::println("no active sockets at the moment");
         return 0;
     }
 
@@ -284,9 +285,9 @@ int perform_list(fs::path search_path)
         max_serial_len = std::max(max_serial_len, serial.size());
     }
 
-    fmt::println("active sockets:");
+    std::println("active sockets:");
     for (const auto& [serial, path] : sockets) {
-        fmt::println("    - {:<{}} -> {}", serial, max_serial_len, path.c_str());
+        std::println("    - {:<{}} -> {}", serial, max_serial_len, path.c_str());
     }
 
     return 0;
@@ -299,7 +300,7 @@ std::optional<Int> to_int(std::string_view str)
     auto [ptr, ec] = std::from_chars(str.begin(), str.end(), value);
 
     if (ptr != str.end() or ec != std::error_code{}) {
-        fmt::println(stderr, "error: unable to parse '{}' to an integer", str);
+        std::println(stderr, "error: unable to parse '{}' to an integer", str);
         return {};
     } else {
         return value;
@@ -309,11 +310,11 @@ std::optional<Int> to_int(std::string_view str)
 std::optional<ipc::Op> parse_message(std::span<const std::string> message)
 {
     auto too_much = [&](std::string_view cmd, int num) {
-        fmt::println(stderr, "error: too much argument passed to command '{}' (expects {} args)", cmd, num);
+        std::println(stderr, "error: too much argument passed to command '{}' (expects {} args)", cmd, num);
     };
 
     auto too_few = [&](std::string_view cmd, int num) {
-        fmt::println(stderr, "error: too few argument passed to command '{}' (expects {} args)", cmd, num);
+        std::println(stderr, "error: too few argument passed to command '{}' (expects {} args)", cmd, num);
     };
 
     auto op_str    = std::string_view{ message[0] };
@@ -392,12 +393,12 @@ std::optional<ipc::Op> parse_message(std::span<const std::string> message)
         } else if (message.size() > 2) {
             too_much(op_str, 1);
         } else if (not madbfs::log::level_from_str(*value_str)) {
-            fmt::println(stderr, "error: '{} is not valid {}", *value_str, madbfs::log::level_names);
+            std::println(stderr, "error: '{} is not valid {}", *value_str, madbfs::log::level_names);
         } else {
             op = ipc::op::SetLogLevel{ .lvl = std::string{ *value_str } };
         }
     } else {
-        fmt::println(stderr, "error: unknown command '{}'", op_str);
+        std::println(stderr, "error: unknown command '{}'", op_str);
     }
 
     return op;
@@ -415,7 +416,7 @@ int send_message(std::span<const std::string> message, fs::path socket_path, boo
     auto context = async::Context{};
     auto client  = ipc::Client::create(context, socket_path.c_str());
     if (not client) {
-        fmt::println(stderr, "error: failed to create client: {}", madbfs::err_msg(client.error()));
+        std::println(stderr, "error: failed to create client: {}", madbfs::err_msg(client.error()));
         return 1;
     }
 
@@ -426,7 +427,7 @@ int send_message(std::span<const std::string> message, fs::path socket_path, boo
         [&](this auto, ipc::FsOp op) -> madbfs::Await<int> {
             auto response = co_await client->send(op);
             if (not response) {
-                fmt::println(stderr, "error: failed to send message: {}", madbfs::err_msg(response.error()));
+                std::println(stderr, "error: failed to send message: {}", madbfs::err_msg(response.error()));
                 co_return 1;
             }
 
@@ -438,7 +439,7 @@ int send_message(std::span<const std::string> message, fs::path socket_path, boo
         [&](this auto, ipc::op::Help) -> madbfs::Await<int> {
             auto response = co_await client->help();
             if (not response) {
-                fmt::println(stderr, "error: failed to send message: {}", madbfs::err_msg(response.error()));
+                std::println(stderr, "error: failed to send message: {}", madbfs::err_msg(response.error()));
                 co_return 1;
             }
 
@@ -450,7 +451,7 @@ int send_message(std::span<const std::string> message, fs::path socket_path, boo
         [&](this auto, ipc::op::Version) -> madbfs::Await<int> {
             auto response = co_await client->version();
             if (not response) {
-                fmt::println(stderr, "error: failed to send message: {}", madbfs::err_msg(response.error()));
+                std::println(stderr, "error: failed to send message: {}", madbfs::err_msg(response.error()));
                 co_return 1;
             }
 
@@ -462,11 +463,11 @@ int send_message(std::span<const std::string> message, fs::path socket_path, boo
         [&](this auto, ipc::op::Logcat) -> madbfs::Await<int> {
             auto response = co_await client->logcat({ .color = color });
             if (not response) {
-                fmt::println(stderr, "error: failed to send message: {}", madbfs::err_msg(response.error()));
+                std::println(stderr, "error: failed to send message: {}", madbfs::err_msg(response.error()));
                 co_return 1;
             }
 
-            fmt::println("{:-^80}", "[ LOGCAT START ]");
+            std::println("{:-^80}", "[ LOGCAT START ]");
 
             for (auto awaitable : *response) {
                 auto message = co_await std::move(awaitable);
@@ -474,10 +475,10 @@ int send_message(std::span<const std::string> message, fs::path socket_path, boo
                     break;
                 }
 
-                fmt::println("{}", *message);
+                std::println("{}", *message);
             }
 
-            fmt::println("{:-^80}", "[ LOGCAT END ]");
+            std::println("{:-^80}", "[ LOGCAT END ]");
 
             sig_set.cancel();
             co_return 0;
@@ -503,7 +504,7 @@ try {
         auto sockets = get_socket_list(search_path);
         auto socket  = std::ranges::find(sockets, args.serial, &Socket::serial);
         if (socket == sockets.end()) {
-            fmt::println(stderr, "error: no socket for '{}' in '{}'", args.serial, search_path.c_str());
+            std::println(stderr, "error: no socket for '{}' in '{}'", args.serial, search_path.c_str());
             return 1;
         }
         return send_message(args.message, socket->path, args.color);
@@ -511,9 +512,9 @@ try {
     default: return 1;
     }
 } catch (const std::exception& e) {
-    fmt::println(stderr, "error: exception occurred: {}", e.what());
+    std::println(stderr, "error: exception occurred: {}", e.what());
     return 1;
 } catch (...) {
-    fmt::println(stderr, "error: exception occurred (unknown exception)");
+    std::println(stderr, "error: exception occurred (unknown exception)");
     return 1;
 }
