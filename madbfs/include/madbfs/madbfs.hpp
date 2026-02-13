@@ -45,6 +45,8 @@ namespace madbfs
         Str mountpoint() const { return m_mountpoint; }
 
     private:
+        struct IpcHandler;
+
         /**
          * @brief Prepare and create connection to device.
          *

@@ -7,6 +7,133 @@
 
 #include <boost/json.hpp>
 
+namespace json = boost::json;
+
+namespace madbfs
+{
+    constexpr usize lowest_page_size  = 64 * 1024;
+    constexpr usize highest_page_size = 4 * 1024 * 1024;
+    constexpr usize lowest_max_pages  = 128;
+
+    // NOTE: normally, I'll use overloads of coro-lambdas with `this auto` as 1st param, but gcc segfaulted.
+    // see: https://gcc.gnu.org/bugzilla/show_bug.cgi?format=multiple&id=114632.
+    // last-checked: 2026-02-13 21:15.
+    // on: gcc (GCC) 15.2.1 20251211 (Red Hat 15.2.1-5).
+    struct Madbfs::IpcHandler
+    {
+        Await<json::value> handle(ipc::op::Info)
+        {
+            const auto page_size     = madbfs.m_cache.page_size();
+            const auto max_pages     = madbfs.m_cache.max_pages();
+            const auto current_pages = madbfs.m_cache.current_pages();
+            const auto ttl_sec       = madbfs.m_tree.ttl().transform(&Seconds::count);
+            const auto timeout_sec   = madbfs.m_connection->timeout().transform(&Seconds::count);
+
+            co_return json::value{
+                { "connection", madbfs.m_connection->name() },
+                { "log_level", log::level_to_str(log::get_level()) },
+                { "ttl", ttl_sec.value_or(0) },
+                { "timeout", timeout_sec.value_or(0) },
+                { "page_size", page_size / 1024 },
+                { "cache_size",
+                  { { "max", page_size * max_pages / 1024 / 1024 },
+                    { "current", page_size * current_pages / 1024 / 1024 } } },
+            };
+        }
+
+        Await<json::value> handle(ipc::op::InvalidateCache)
+        {
+            const auto page_size     = madbfs.m_cache.page_size();
+            const auto current_pages = madbfs.m_cache.current_pages();
+
+            co_await madbfs.m_cache.invalidate_all();
+
+            co_return json::value{ { "size", page_size * current_pages / 1024 / 1024 } };
+        }
+
+        Await<json::value> handle(ipc::op::SetPageSize size)
+        {
+            const auto old_size = madbfs.m_cache.page_size();
+            const auto old_max  = madbfs.m_cache.max_pages();
+
+            auto new_size = std::bit_ceil(size.kib * 1024);
+            new_size      = std::clamp(new_size, lowest_page_size, highest_page_size);
+
+            auto new_max = std::bit_ceil(old_max * old_size / new_size);
+            new_max      = std::max(new_max, lowest_max_pages);
+
+            co_await madbfs.m_cache.set_page_size(new_size);
+            co_await madbfs.m_cache.set_max_pages(new_max);
+
+            co_return json::value{
+                { "page_size",
+                  { { "old", old_size / 1024 },    //
+                    { "new", new_size / 1024 } } },
+                { "cache_size",
+                  { { "old", old_max * old_size / 1024 / 1024 },
+                    { "new", new_max * new_size / 1024 / 1024 } } },
+            };
+        }
+
+        Await<json::value> handle(ipc::op::SetCacheSize size)
+        {
+            const auto page    = madbfs.m_cache.page_size();
+            const auto old_max = madbfs.m_cache.max_pages();
+
+            auto new_max = std::bit_ceil(size.mib * 1024 * 1024 / page);
+            new_max      = std::max(new_max, lowest_max_pages);
+
+            co_await madbfs.m_cache.set_max_pages(new_max);
+
+            co_return json::value{
+                { "cache_size",
+                  { { "old", old_max * page / 1024 / 1024 },    //
+                    { "new", new_max * page / 1024 / 1024 } } },
+            };
+        }
+
+        Await<json::value> handle(ipc::op::SetTTL ttl)
+        {
+            const auto new_ttl = ttl.sec < 1 ? std::nullopt : Opt<Seconds>{ ttl.sec };
+            const auto old_ttl = madbfs.m_tree.set_ttl(new_ttl);
+
+            co_return json::value{
+                { "ttl",
+                  { { "old", old_ttl.transform(&Seconds::count).value_or(0) },    //
+                    { "new", new_ttl.transform(&Seconds::count).value_or(0) } } },
+            };
+        }
+
+        Await<json::value> handle(ipc::op::SetTimeout ttl)
+        {
+            const auto new_timeout = ttl.sec < 1 ? std::nullopt : Opt<Seconds>{ ttl.sec };
+            const auto old_timeout = madbfs.m_connection->set_timeout(new_timeout);
+
+            co_return json::value{
+                { "timeout",
+                  { { "old", old_timeout.transform(&Seconds::count).value_or(0) },    //
+                    { "new", new_timeout.transform(&Seconds::count).value_or(0) } } },
+            };
+        }
+
+        Await<json::value> handle(this auto, ipc::op::SetLogLevel op)
+        {
+            const auto prev_level = log::get_level();
+            const auto new_level  = log::level_from_str(op.lvl).value_or(prev_level);
+
+            log::set_level(new_level);
+
+            co_return json::value{
+                { "log_level",
+                  { { "old", log::level_to_str(prev_level) },    //
+                    { "new", log::level_to_str(new_level) } } },
+            };
+        }
+
+        Madbfs& madbfs;
+    };
+}
+
 namespace madbfs
 {
     Uniq<connection::Connection> Madbfs::prepare_connection(
@@ -109,112 +236,9 @@ namespace madbfs
         m_work_thread.join();
     }
 
-    Await<boost::json::value> Madbfs::ipc_handler(ipc::FsOp op)
+    Await<json::value> Madbfs::ipc_handler(ipc::FsOp op)
     {
-        namespace json = boost::json;
-
-        constexpr usize lowest_page_size  = 64 * 1024;
-        constexpr usize highest_page_size = 4 * 1024 * 1024;
-        constexpr usize lowest_max_pages  = 128;
-
-        auto coro = std::move(op).visit(Overload{
-            [&](ipc::op::Info) -> Await<json::value> {
-                const auto page_size     = m_cache.page_size();
-                const auto max_pages     = m_cache.max_pages();
-                const auto current_pages = m_cache.current_pages();
-                const auto ttl_sec       = m_tree.ttl().transform(&Seconds::count);
-                const auto timeout_sec   = m_connection->timeout().transform(&Seconds::count);
-
-                co_return json::value{
-                    { "connection", m_connection->name() },
-                    { "log_level", log::level_to_str(log::get_level()) },
-                    { "ttl", ttl_sec.value_or(0) },
-                    { "timeout", timeout_sec.value_or(0) },
-                    { "page_size", page_size / 1024 },
-                    { "cache_size",
-                      { { "max", page_size * max_pages / 1024 / 1024 },
-                        { "current", page_size * current_pages / 1024 / 1024 } } },
-                };
-            },
-            [&](ipc::op::InvalidateCache) -> Await<json::value> {
-                const auto page_size     = m_cache.page_size();
-                const auto current_pages = m_cache.current_pages();
-
-                co_await m_cache.invalidate_all();
-
-                co_return json::value{ { "size", page_size * current_pages / 1024 / 1024 } };
-            },
-            [&](ipc::op::SetPageSize size) -> Await<json::value> {
-                const auto old_size = m_cache.page_size();
-                const auto old_max  = m_cache.max_pages();
-
-                auto new_size = std::bit_ceil(size.kib * 1024);
-                new_size      = std::clamp(new_size, lowest_page_size, highest_page_size);
-
-                auto new_max = std::bit_ceil(old_max * old_size / new_size);
-                new_max      = std::max(new_max, lowest_max_pages);
-
-                co_await m_cache.set_page_size(new_size);
-                co_await m_cache.set_max_pages(new_max);
-
-                co_return json::value{
-                    { "page_size",
-                      { { "old", old_size / 1024 },    //
-                        { "new", new_size / 1024 } } },
-                    { "cache_size",
-                      { { "old", old_max * old_size / 1024 / 1024 },
-                        { "new", new_max * new_size / 1024 / 1024 } } },
-                };
-            },
-            [&](ipc::op::SetCacheSize size) -> Await<json::value> {
-                const auto page    = m_cache.page_size();
-                const auto old_max = m_cache.max_pages();
-
-                auto new_max = std::bit_ceil(size.mib * 1024 * 1024 / page);
-                new_max      = std::max(new_max, lowest_max_pages);
-
-                co_await m_cache.set_max_pages(new_max);
-
-                co_return json::value{
-                    { "cache_size",
-                      { { "old", old_max * page / 1024 / 1024 },    //
-                        { "new", new_max * page / 1024 / 1024 } } },
-                };
-            },
-            [&](ipc::op::SetTTL ttl) -> Await<json::value> {
-                const auto new_ttl = ttl.sec < 1 ? std::nullopt : Opt<Seconds>{ ttl.sec };
-                const auto old_ttl = m_tree.set_ttl(new_ttl);
-
-                co_return json::value{
-                    { "ttl",
-                      { { "old", old_ttl.transform(&Seconds::count).value_or(0) },    //
-                        { "new", new_ttl.transform(&Seconds::count).value_or(0) } } },
-                };
-            },
-            [&](ipc::op::SetTimeout ttl) -> Await<json::value> {
-                const auto new_timeout = ttl.sec < 1 ? std::nullopt : Opt<Seconds>{ ttl.sec };
-                const auto old_timeout = m_connection->set_timeout(new_timeout);
-
-                co_return json::value{
-                    { "timeout",
-                      { { "old", old_timeout.transform(&Seconds::count).value_or(0) },    //
-                        { "new", new_timeout.transform(&Seconds::count).value_or(0) } } },
-                };
-            },
-            [&](ipc::op::SetLogLevel op) -> Await<json::value> {
-                const auto prev_level = log::get_level();
-                const auto new_level  = log::level_from_str(op.lvl).value_or(prev_level);
-
-                log::set_level(new_level);
-
-                co_return json::value{
-                    { "log_level",
-                      { { "old", log::level_to_str(prev_level) },    //
-                        { "new", log::level_to_str(new_level) } } },
-                };
-            },
-        });
-
-        co_return co_await std::move(coro);
+        auto handler = IpcHandler{ *this };
+        co_return co_await op.visit([&](auto&& op) { return handler.handle(op); });
     }
 }
