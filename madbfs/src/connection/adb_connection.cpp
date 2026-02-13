@@ -229,6 +229,19 @@ namespace madbfs::connection
 
     AExpect<void> AdbConnection::utimens(path::Path path, timespec atime, timespec mtime)
     {
+        namespace chr = std::chrono;
+
+        static const chr::time_zone* z = nullptr;
+
+        if (z == nullptr) {
+            try {
+                z = chr::current_zone();
+            } catch (const std::runtime_error& e) {
+                log_c("{}: {}", __func__, e.what());
+                co_return Unexpect{ Errc::resource_unavailable_try_again };
+            }
+        }
+
         for (auto [time, flag] : { Pair{ atime, "-a" }, Pair{ mtime, "-m" } }) {
             switch (time.tv_nsec) {
             case UTIME_OMIT: continue;
@@ -238,14 +251,10 @@ namespace madbfs::connection
                     co_return Unexpect{ res.error() };
                 }
             } break;
-            default:
-                auto tm = std::tm{};
-                if (::localtime_r(&time.tv_sec, &tm) == nullptr) {    // localtime_r is C23 feature
-                    co_return Unexpect{ Errc::invalid_argument };
-                }
-
-                const auto sys = std::chrono::system_clock::from_time_t(std::mktime(&tm));
-                const auto t   = std::format("{:%Y%m%d%H%M.%S}{}", sys, time.tv_nsec);
+            default: {
+                const auto tp = chr::system_clock::time_point{ chr::seconds{ time.tv_sec } };
+                const auto zt = z->to_local(chr::floor<chr::seconds>(tp));
+                const auto t  = std::format("{:%Y%m%d%H%M.%S}{}", zt, time.tv_nsec);
 
                 log_i("{}: utimens to {}", __func__, t);
 
@@ -253,6 +262,7 @@ namespace madbfs::connection
                 if (not res) {
                     co_return Unexpect{ res.error() };
                 }
+            }
             }
         }
 
