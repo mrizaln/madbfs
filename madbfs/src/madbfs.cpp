@@ -116,7 +116,7 @@ namespace madbfs
             };
         }
 
-        Await<json::value> handle(this auto, ipc::op::SetLogLevel op)
+        Await<json::value> handle(ipc::op::SetLogLevel op)
         {
             const auto prev_level = log::get_level();
             const auto new_level  = log::level_from_str(op.lvl).value_or(prev_level);

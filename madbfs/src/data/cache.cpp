@@ -161,7 +161,6 @@ namespace madbfs::data
         co_return read;
     }
 
-    // TODO: write operation seems to be not working... :(
     AExpect<usize> Cache::write(Id id, Span<const char> in, off_t offset)
     {
         auto first = static_cast<usize>(offset) / m_page_size;

@@ -22,7 +22,6 @@
 #endif
 
 #include <atomic>
-#include <expected>
 #include <utility>
 
 namespace madbfs::net
