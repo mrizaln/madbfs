@@ -213,6 +213,7 @@ namespace madbfs
         , m_cache{ *m_connection, page_size, max_pages }
         , m_tree{ *m_connection, m_cache, ttl }
         , m_ipc{ create_ipc(m_async_ctx) }
+        , m_signal{ m_async_ctx, SIGINT, SIGTERM }
         , m_mountpoint{ mountpoint }
     {
         if (m_ipc) {
@@ -225,6 +226,8 @@ namespace madbfs
 
     Madbfs::~Madbfs()
     {
+        m_signal.cancel();
+
         if (m_ipc) {
             m_ipc->stop();
         }
@@ -234,6 +237,11 @@ namespace madbfs
         m_work_guard.reset();
         m_async_ctx.stop();
         m_work_thread.join();
+    }
+
+    void Madbfs::on_signal(SignalHandler handler)
+    {
+        m_signal.async_wait(std::move(handler));
     }
 
     Await<json::value> Madbfs::ipc_handler(ipc::FsOp op)

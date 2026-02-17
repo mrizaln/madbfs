@@ -119,22 +119,27 @@ namespace madbfs::operations
             args->server.reset();
         }
 
+        auto server = args->server.and_then([](const auto& f) {
+            return path::create(f.c_str()).transform(proj(&path::SemiPath::path));
+        });
+
         auto cache_size = args->cachesize * 1024 * 1024;
         auto page_size  = args->pagesize * 1024;
         auto max_pages  = cache_size / page_size;
-        auto server     = args->server.transform(&std::filesystem::path::c_str).and_then(&path::create);
         auto ttl        = args->ttl < 1 ? std::nullopt : Opt<Seconds>{ args->ttl };
         auto timeout    = args->timeout < 1 ? std::nullopt : Opt<Seconds>{ args->timeout };
 
-        return new Madbfs{
-            server.transform(proj(&path::SemiPath::path)),
-            args->port,
-            page_size,
-            max_pages,
-            args->mount,
-            ttl,
-            timeout,
-        };
+        auto madbfs = new Madbfs{ server, args->port, page_size, max_pages, args->mount, ttl, timeout };
+
+        madbfs->on_signal([fuse = ::fuse_get_context()->fuse, pid = ::getpid()](net::error_code ec, int sig) {
+            if (not ec) {
+                madbfs::log_w("signal raised: SIG{} ({})", ::sigabbrev_np(sig), sig);
+                ::fuse_exit(fuse);
+                ::kill(pid, SIGPIPE);
+            }
+        });
+
+        return madbfs;
     }
 
     void destroy(void* private_data) noexcept

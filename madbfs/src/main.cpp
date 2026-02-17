@@ -3,66 +3,28 @@
 
 #include <madbfs-common/log.hpp>
 
-#include <execinfo.h>
-
-#include <array>
-#include <csignal>
-#include <cstdlib>
+#include <exception>
 #include <print>
 
-/**
- * @brief Handler for unexpected program end.
- *
- * This handler is based on Stack Overflow answer:
- * - https://stackoverflow.com/a/77336/16506263
- *
- * FIXME: Currently the signal handling is hacky and may not work properly because there are invocations to
- * functions that are not signal safe inside it.
- */
-void unexpected_program_end(const char* msg, bool is_sigsegv)
+void termination()
 {
-    std::println("> Program reached an unexpected end: {}", msg);
-
-    if (not is_sigsegv) {
-        auto exception = std::current_exception();
-        if (exception != nullptr) {
-            try {
-                std::rethrow_exception(exception);
-            } catch (const std::exception& e) {
-                std::println("> Uncaught exception:\n{}", e.what());
-            } catch (...) {
-                std::println("> Uncaught exception (unknown type)");
-            }
+    if (auto e = std::current_exception(); e != nullptr) {
+        try {
+            std::rethrow_exception(e);
+        } catch (const std::exception& e) {
+            madbfs::log_c("> Uncaught exception:\n{}", e.what());
+        } catch (...) {
+            madbfs::log_c("> Uncaught exception (unknown type)");
         }
     }
-
-    auto array = std::array<void*, 10>{};
-    auto size  = ::backtrace(array.data(), array.size());
-
-    madbfs::log_c("> Backtrace:");
-    auto names = ::backtrace_symbols(array.data(), size);
-    for (auto i : madbfs::sv::iota(0, size)) {
-        madbfs::log_c("\t{}", names[i]);
-    }
-    std::println("> Backtrace:");
-    for (auto i : madbfs::sv::iota(0, size)) {
-        std::println("\t{}", names[i]);
-    }
-    ::free(names);
-
-    if (is_sigsegv) {
-        std::signal(SIGSEGV, SIG_DFL);
-        std::raise(SIGSEGV);
-    }
-
+    madbfs::log_c("> Terminating");
     madbfs::log::shutdown();
+    std::abort();
 }
 
 int main(int argc, char** argv)
 try {
-    std::set_terminate([] { unexpected_program_end("std::terminate", false); });
-    std::signal(SIGSEGV, [](int) { unexpected_program_end("SIGSEGV", true); });
-    std::signal(SIGTERM, [](int) { madbfs::log::shutdown(); });
+    std::set_terminate(termination);
 
     auto parsed = madbfs::async::once(madbfs::args::parse(argc, argv));
     if (parsed.is_exit()) {

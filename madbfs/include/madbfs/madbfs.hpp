@@ -20,6 +20,8 @@ namespace madbfs
     class Madbfs
     {
     public:
+        using SignalHandler = std::move_only_function<void(net::error_code ec, int sig)>;
+
         Madbfs(
             Opt<path::Path> server,
             u16             port,
@@ -37,6 +39,8 @@ namespace madbfs
 
         Madbfs(const Madbfs&)            = delete;
         Madbfs& operator=(const Madbfs&) = delete;
+
+        void on_signal(SignalHandler handler);
 
         tree::FileTree&    tree() { return m_tree; }
         async::Context&    async_ctx() { return m_async_ctx; }
@@ -99,6 +103,7 @@ namespace madbfs
         data::Cache                  m_cache;
         tree::FileTree               m_tree;
         Opt<ipc::Server>             m_ipc;
+        net::signal_set              m_signal;
         String                       m_mountpoint;
     };
 }
