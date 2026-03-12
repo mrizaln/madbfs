@@ -344,6 +344,7 @@ Filesystem parameters can be reconfigured and queried during runtime though IPC 
 - set ttl,
 - set timeout,
 - set log level, and
+- unmount (on next FUSE operation)
 - logcat (read `madbfs` log in real-time, similar to `adb logcat`).
 
 The address of the socket in which you can connect to as client is composed of the name of the filesystem and the serial of the device. The socket itself is created in directory defined by `XDG_RUNTIME_DIR` environment variable (it's usually set to `/run/user/<uid>`). If the `XDG_RUNTIME_DIR` is not defined, as fallback, the directory is set to `/tmp`. The socket will be created when the filesystem initializes.
@@ -410,6 +411,8 @@ The read command is as follows:
 
 ## TODO
 
+- [ ] Add robust reconnection logic (relaunching the server when it doesn't respond)
+- [ ] Find a way to prevent the server from terminating when device sleeps (maybe make the server into an Android app like what scrcpy does)
 - [ ] Cache the file handle for read/write instead of opening the file each read/write operation.
 - [ ] Implement proper permission check (this is difficult since I need to open the file to actually check access, `mode_t` value is not sufficient).
 - [ ] Improve reconnection logic.

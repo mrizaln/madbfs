@@ -85,6 +85,12 @@ Some operations only requires `"op"` field, while some requires `"value"` field.
 
   > - `str` must corresponds to log level accepted by the `--log-level` option
 
+- `unmount`
+
+  ```json
+  { "op": "unmount" }
+  ```
+
 - `logcat`
 
   ```json
@@ -237,6 +243,15 @@ The `<value>` then will be different depending on the operation performed:
         "new": <str>
       }
     }
+  }
+  ```
+
+- `unmount`
+
+  ```json
+  {
+    "status": "success",
+    "value": null
   }
   ```
 
