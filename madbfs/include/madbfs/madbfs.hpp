@@ -7,6 +7,8 @@
 
 #include <thread>
 
+struct fuse;
+
 namespace madbfs
 {
     /**
@@ -20,9 +22,8 @@ namespace madbfs
     class Madbfs
     {
     public:
-        using SignalHandler = std::move_only_function<void(net::error_code ec, int sig)>;
-
         Madbfs(
+            struct fuse*    fuse,
             Opt<path::Path> server,
             u16             port,
             usize           max_pages,
@@ -39,8 +40,6 @@ namespace madbfs
 
         Madbfs(const Madbfs&)            = delete;
         Madbfs& operator=(const Madbfs&) = delete;
-
-        void on_signal(SignalHandler handler);
 
         tree::FileTree&    tree() { return m_tree; }
         async::Context&    async_ctx() { return m_async_ctx; }
@@ -94,6 +93,8 @@ namespace madbfs
          * This function handles all requested operations from peers that comes from `m_ipc` instance.
          */
         Await<boost::json::value> ipc_handler(ipc::FsOp op);
+
+        struct fuse* m_fuse;
 
         async::Context   m_async_ctx;
         async::WorkGuard m_work_guard;    // to prevent `async::Context` from returning immediately

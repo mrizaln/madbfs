@@ -139,7 +139,7 @@ namespace madbfs::rpc
         template <typename Self>
         Self&& write_path(this Self&& self, Str path)
         {
-            self.template write_int<u64>(path.size() + 1);
+            self.template write_int<u64>(path.size() + 1);    // with null terminator
             auto span = Span{ reinterpret_cast<const u8*>(path.data()), path.size() };
             self.m_buffer.insert(self.m_buffer.end(), span.begin(), span.end());
             self.m_buffer.push_back(0x00);    // null terminator

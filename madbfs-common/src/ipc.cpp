@@ -82,6 +82,8 @@ namespace madbfs::ipc
                 return Op{ op::SetLogLevel{ .lvl = level } };
             } else if (op == op::name::logcat) {
                 return op::Logcat{ .color = json::value_to<bool>(json.at("value")) };
+            } else if (op == op::name::unmount) {
+                return Op{ op::Unmount{} };
             }
 
             return Unexpect{ std::format("'{}' is not a valid operation, try 'help'", op) };
@@ -158,6 +160,7 @@ namespace madbfs::ipc
             [&](op::SetTTL       op) { return json::value{ { "op", n::set_ttl          }, { "value", op.sec } }; },
             [&](op::SetTimeout   op) { return json::value{ { "op", n::set_timeout      }, { "value", op.sec } }; },
             [&](op::SetLogLevel  op) { return json::value{ { "op", n::set_log_level    }, { "value", op.lvl } }; },
+            [&](op::Unmount        ) { return json::value{ { "op", n::unmount          }                      }; },
         });
         // clang-format on
 

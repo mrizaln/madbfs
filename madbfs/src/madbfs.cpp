@@ -5,6 +5,9 @@
 
 #include <madbfs-common/log.hpp>
 
+#define FUSE_USE_VERSION 31
+#include <fuse.h>
+
 #include <boost/json.hpp>
 
 namespace json = boost::json;
@@ -130,6 +133,12 @@ namespace madbfs
             };
         }
 
+        Await<json::value> handle(ipc::op::Unmount)
+        {
+            ::fuse_exit(madbfs.m_fuse);
+            co_return json::value{ nullptr };
+        }
+
         Madbfs& madbfs;
     };
 }
@@ -198,6 +207,7 @@ namespace madbfs
     }
 
     Madbfs::Madbfs(
+        struct fuse*    fuse,
         Opt<path::Path> server,
         u16             port,
         usize           page_size,
@@ -206,7 +216,8 @@ namespace madbfs
         Opt<Seconds>    ttl,
         Opt<Seconds>    timeout
     )
-        : m_async_ctx{}
+        : m_fuse{ fuse }
+        , m_async_ctx{}
         , m_work_guard{ m_async_ctx.get_executor() }
         , m_work_thread{ [this] { work_thread_function(m_async_ctx); } }
         , m_connection{ prepare_connection(m_async_ctx, server, port, timeout) }
@@ -222,6 +233,15 @@ namespace madbfs
                 log::log_exception(e, "Madbfs");
             });
         }
+
+        m_signal.async_wait([this, pid = ::getpid()](net::error_code ec, int sig) {
+            if (not ec) {
+                assert(m_fuse != nullptr);
+                madbfs::log_w("signal raised: SIG{} ({})", ::sigabbrev_np(sig), sig);
+                ::fuse_exit(m_fuse);
+                ::kill(pid, SIGPIPE);
+            }
+        });
     }
 
     Madbfs::~Madbfs()
@@ -237,11 +257,6 @@ namespace madbfs
         m_work_guard.reset();
         m_async_ctx.stop();
         m_work_thread.join();
-    }
-
-    void Madbfs::on_signal(SignalHandler handler)
-    {
-        m_signal.async_wait(std::move(handler));
     }
 
     Await<json::value> Madbfs::ipc_handler(ipc::FsOp op)

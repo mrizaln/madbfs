@@ -397,6 +397,12 @@ std::optional<ipc::Op> parse_message(std::span<const std::string> message)
         } else {
             op = ipc::op::SetLogLevel{ .lvl = std::string{ *value_str } };
         }
+    } else if (op_str == ipc::op::name::unmount) {
+        if (value_str) {
+            too_much(op_str, 0);
+        } else {
+            op = ipc::op::Unmount{};
+        }
     } else {
         std::println(stderr, "error: unknown command '{}'", op_str);
     }

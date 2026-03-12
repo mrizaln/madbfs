@@ -31,6 +31,7 @@ namespace madbfs::ipc
         struct SetTimeout      { usize sec; };
         struct SetLogLevel     { String lvl; };
         struct Logcat          { bool color; };
+        struct Unmount         { };
         // clang-format on
 
         namespace name
@@ -45,6 +46,7 @@ namespace madbfs::ipc
             constexpr auto set_timeout      = "set_timeout";
             constexpr auto set_log_level    = "set_log_level";
             constexpr auto logcat           = "logcat";
+            constexpr auto unmount          = "unmount";
         }
 
         constexpr auto names = std::to_array({
@@ -58,6 +60,7 @@ namespace madbfs::ipc
             name::set_timeout,
             name::set_log_level,
             name::logcat,
+            name::unmount,
         });
     }
 
@@ -74,7 +77,8 @@ namespace madbfs::ipc
               op::SetCacheSize,
               op::SetTTL,
               op::SetTimeout,
-              op::SetLogLevel>
+              op::SetLogLevel,
+              op::Unmount>
     {
         using VarWrapper::VarWrapper;
     };
