@@ -201,6 +201,8 @@ namespace madbfs::rpc
         {
         }
 
+        ~Client() { stop(); }
+
         /**
          * @brief Check whether the client sender/receiver channel is open.
          */
@@ -256,13 +258,25 @@ namespace madbfs::rpc
     class Server
     {
     public:
+        struct Promise
+        {
+            Vec<u8>   buffer;
+            Procedure procedure;
+        };
+
         using HandlerSig = Await<Var<Status, Response>>(Vec<u8>& buffer, Request request);
         using Handler    = std::function<HandlerSig>;
+        using Inflight   = std::unordered_map<Id, Promise, Id::Hash>;
+        using Channel    = async::Channel<Tup<Id, Var<Status, Response>>>;
 
         Server(Socket socket)
             : m_socket{ std::move(socket) }
+            , m_channel{ socket.get_executor() }
+            , m_pool{ 1 }
         {
         }
+
+        ~Server() { stop(); }
 
         /**
          * @brief Start listening for RPC requests.
@@ -277,10 +291,15 @@ namespace madbfs::rpc
         void stop();
 
     private:
+        AExpect<void> send();
         AExpect<void> send_resp(Id id, Procedure proc, Var<Status, Response> response);
 
         Socket m_socket;
         bool   m_running;
+
+        Channel          m_channel;
+        Inflight         m_requests;
+        net::thread_pool m_pool;
     };
 
     static constexpr Str server_ready_string = "SERVER_IS_READY";

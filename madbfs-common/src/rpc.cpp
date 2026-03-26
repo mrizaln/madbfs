@@ -541,11 +541,13 @@ namespace madbfs::rpc
 
     void Client::stop()
     {
-        m_running = false;
-        m_channel.cancel();
-        m_channel.close();
-        m_socket.cancel();
-        m_socket.close();
+        if (m_running) {
+            m_running = false;
+            m_channel.cancel();
+            m_channel.close();
+            m_socket.cancel();
+            m_socket.close();
+        }
     }
 
     AExpect<Response> Client::send_req(Vec<u8>& buffer, Request req, Opt<Milliseconds> timeout)
@@ -798,7 +800,17 @@ namespace madbfs::rpc
     {
         m_running = true;
 
-        auto buffer = Vec<u8>{};
+        auto exec = co_await async::current_executor();
+        async::spawn(exec, send(), [&](std::exception_ptr e, Expect<void> res) {
+            log::log_exception(e, "send");
+            if (not res) {
+                log_e("send: finished with error: {}", err_msg(res.error()));
+            }
+
+            m_channel.cancel();
+            m_channel.reset();
+        });
+
         while (m_running) {
             constexpr auto header_len = sizeof(Id) + sizeof(Procedure) + sizeof(u64);
 
@@ -822,13 +834,9 @@ namespace madbfs::rpc
 
             log_d("{}: recv req id={} | proc={} | size={}", __func__, id.inner(), to_string(*proc), size);
 
-            buffer.resize(size);
-
-            auto n1 = co_await async::read_exact<u8>(m_socket, buffer);
+            auto buffer = Vec<u8>(size);
+            auto n1     = co_await async::read_exact<u8>(m_socket, buffer);
             HANDLE_ERROR(n1, buffer.size(), "failed to read request payload");
-
-            // str = Str{ reinterpret_cast<const char*>(buffer.data()), buffer.size() };
-            // log_d("{}: [{}] payload: {:?}", __func__, id.inner(), str);
 
             auto request = parse_request(buffer, *proc);
             if (not request) {
@@ -836,22 +844,66 @@ namespace madbfs::rpc
                 continue;
             }
 
-            auto response = co_await handler(buffer, *request);
-            auto res      = co_await send_resp(id, *proc, std::move(response));
-            if (not res) {
-                log_e("{}: [{}] failed to send response", __func__, id.inner());
+            auto [it, _] = m_requests.emplace(id, Promise{ std::move(buffer), *proc });
+
+            async::spawn(
+                m_pool,
+                handler(it->second.buffer, std::move(*request)),
+                [id, &chan = m_channel](std::exception_ptr e, Var<Status, Response> resp) {
+                    log::log_exception(e, "handler");
+                    async::spawn(
+                        chan.get_executor(),
+                        chan.async_send({}, { id, std::move(resp) }),
+                        [](std::exception_ptr e, Expect<void, net::error_code> res) {
+                            log::log_exception(e, "handler");
+                            if (not res) {
+                                log_e("handler: finished with error: {}", res.error().message());
+                            }
+                        }
+                    );
+                }
+            );
+        }
+
+        // INFO: handler is captured by pool, waits the pool before handler is destroyed at end of function
+        m_pool.wait();
+
+        co_return Expect<void>{};
+    }
+
+    void Server::stop()
+    {
+        if (m_running) {
+            m_running = false;
+            m_pool.stop();
+            m_pool.wait();
+            m_channel.cancel();
+            m_channel.close();
+            m_socket.cancel();
+            m_socket.close();
+        }
+    }
+
+    AExpect<void> Server::send()
+    {
+        while (m_running and m_channel.is_open()) {
+            auto id_resp = co_await m_channel.async_receive();
+            if (not id_resp) {
+                log_e("{}: failed to recv response from channel: {}", __func__, id_resp.error().message());
+                co_return Unexpect{ async::to_generic_err(id_resp.error(), Errc::broken_pipe) };
             }
 
-            // TODO: redo the async handler
+            auto [id, response] = std::move(*id_resp);
+            log_d("{}: new response: {}", __func__, id.inner());
 
-            // auto exec = co_await async::current_executor();
-            // auto coro = [&, id, proc, r = std::move(request), b = std::move(buffer)] mutable -> Await<void>
-            // {
-            //     auto response = co_await handler(b, std::move(r).value());
-            //     std::ignore   = co_await send_resp(id, *proc, std::move(response));
-            // };
+            auto req = m_requests.extract(id);
+            if (req.empty()) {
+                log_e("{}: response incoming for id {} but no promise registered", __func__, id.inner());
+                continue;
+            }
 
-            // async::spawn(exec, coro(), async::detached);
+            auto& [buf, proc] = req.mapped();
+            std::ignore       = co_await send_resp(id, proc, std::move(response));
         }
 
         co_return Expect<void>{};
