@@ -6,51 +6,24 @@ namespace madbfs::tree::node
     Regular::Mode Regular::open(u64 fd, int flags)
     {
         assert(not is_open(fd));
-
         auto mode = static_cast<Mode>(O_ACCMODE & flags);
-
-        m_reader += (mode == Mode::Read) != 0;
-        m_writer += (mode == Mode::Write) != 0;
-        m_reader += (mode == Mode::ReadWrite) != 0;
-        m_writer += (mode == Mode::ReadWrite) != 0;
-
         m_open_fds.emplace_back(fd, mode);
-
-        if (m_reader and m_writer) {
-            m_current_mode = Mode::ReadWrite;
-        } else if (m_writer) {
-            m_current_mode = Mode::Write;
-        } else if (m_reader) {
-            m_current_mode = Mode::Read;
-        }
-
-        assert(m_current_mode.has_value());
-
-        return *m_current_mode;
+        return mode;
     }
 
-    bool Regular::close(u64 fd)
+    Opt<Regular::Mode> Regular::close(u64 fd)
     {
-        if (auto found = sr::find(m_open_fds, fd, &Entry::fd); found != m_open_fds.end()) {
-            auto [fd, mode] = *found;
-            m_open_fds.erase(found);
-
-            m_reader -= (mode == Mode::Read) != 0;
-            m_writer -= (mode == Mode::Write) != 0;
-            m_reader -= (mode == Mode::ReadWrite) != 0;
-            m_writer -= (mode == Mode::ReadWrite) != 0;
-
-            if (m_reader and m_writer) {
-                m_current_mode = Mode::ReadWrite;
-            } else if (m_writer) {
-                m_current_mode = Mode::Write;
-            } else if (m_reader) {
-                m_current_mode = Mode::Read;
-            }
-
-            return true;
+        if (auto entry = sr::find(m_open_fds, fd, &Entry::fd); entry != m_open_fds.end()) {
+            return m_open_fds.erase(entry)->mode;
         }
+        return std::nullopt;
+    }
 
+    bool Regular::check(u64 fd, Mode mode) const
+    {
+        if (auto entry = sr::find(m_open_fds, fd, &Entry::fd); entry != m_open_fds.end()) {
+            return entry->mode == Mode::ReadWrite or entry->mode == mode;
+        }
         return false;
     }
 }
@@ -461,7 +434,13 @@ namespace madbfs::tree
         auto mode = file.open(fd, flags);
 
         // send hint to cache to prepare a real fd that can be used for further operations
-        co_return (co_await context.cache.hint_open(id(), context.path, mode)).transform([&] { return fd; });
+        auto res = co_await context.cache.hint_open(id(), context.path, mode);
+        if (not res) {
+            file.close(fd);
+            co_return Unexpect{ res.error() };
+        }
+
+        co_return fd;
     }
 
     AExpect<usize> Node::read(Context context, u64 fd, Span<char> out, off_t offset)
@@ -472,7 +451,7 @@ namespace madbfs::tree
         }
         auto& file = may_file->get();
 
-        if (not file.is_open(fd)) {
+        if (not file.check(fd, data::OpenMode::Read)) {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
@@ -490,7 +469,7 @@ namespace madbfs::tree
         }
         auto& file = may_file->get();
 
-        if (not file.is_open(fd)) {
+        if (not file.check(fd, data::OpenMode::Write)) {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
@@ -534,7 +513,8 @@ namespace madbfs::tree
         }
         auto& file = may_file->get();
 
-        if (not file.close(fd)) {
+        auto mode = file.close(fd);
+        if (not mode) {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
@@ -548,10 +528,8 @@ namespace madbfs::tree
         }
 
         // send hint to cache to close its associated fd for this node if exist
-        if (not file.has_open_fds()) {
-            if (auto res = co_await context.cache.hint_close(id()); not res) {
-                co_return Unexpect{ res.error() };
-            }
+        if (auto res = co_await context.cache.hint_close(id(), *mode); not res) {
+            co_return Unexpect{ res.error() };
         }
 
         co_return Expect<void>{};

@@ -27,8 +27,6 @@ namespace madbfs::tree::node
      * @class Regular
      *
      * @brief Represent a regular file.
-     *
-     *  TODO: add open flags, use them to determine if file has suitable read/write permission
      */
     class Regular
     {
@@ -62,7 +60,17 @@ namespace madbfs::tree::node
          *
          * @return True if `fd` actually removed, false if fd can't be found.
          */
-        bool close(u64 fd);
+        Opt<Mode> close(u64 fd);
+
+        /**
+         * @brief Check the mode of the file.
+         *
+         * @param fd File descriptor.
+         * @param mode Mode to be checked.
+         *
+         * @return The function checks whether the fd can be operated on the least possible mode.
+         */
+        bool check(u64 fd, Mode mode) const;
 
         bool is_open(u64 fd) const { return sr::find(m_open_fds, fd, &Entry::fd) != m_open_fds.end(); }
         bool has_open_fds() const { return not m_open_fds.empty(); }
@@ -70,11 +78,8 @@ namespace madbfs::tree::node
         void set_dirty(bool val) { m_dirty = val; }
 
     private:
-        Vec<Entry> m_open_fds     = {};
-        Opt<Mode>  m_current_mode = std::nullopt;
-        u64        m_writer       = 0;
-        u64        m_reader       = 0;
-        bool       m_dirty        = false;
+        Vec<Entry> m_open_fds = {};
+        bool       m_dirty    = false;
     };
 
     /**
