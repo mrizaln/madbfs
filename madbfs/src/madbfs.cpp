@@ -221,7 +221,7 @@ namespace madbfs
         , m_work_guard{ m_async_ctx.get_executor() }
         , m_work_thread{ [this] { work_thread_function(m_async_ctx); } }
         , m_connection{ prepare_connection(m_async_ctx, server, port, timeout) }
-        , m_cache{ *m_connection, page_size, max_pages }
+        , m_cache{ m_async_ctx, *m_connection, page_size, max_pages }
         , m_tree{ *m_connection, m_cache, ttl }
         , m_ipc{ create_ipc(m_async_ctx) }
         , m_signal{ m_async_ctx, SIGINT, SIGTERM }

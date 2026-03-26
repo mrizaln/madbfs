@@ -77,9 +77,9 @@ namespace madbfs::data
     public:
         struct LookupEntry;
 
-        using Lru    = std::list<Page>;
-        using Lookup = std::unordered_map<Id, LookupEntry>;
-        using Queue  = std::unordered_map<PageKey, saf::shared_future<Errc>>;
+        using Lru       = std::list<Page>;
+        using Lookup    = std::unordered_map<Id, LookupEntry>;
+        using ReadQueue = std::unordered_map<PageKey, saf::shared_future<Errc>>;
 
         /**
          * @class LookupEntry
@@ -91,23 +91,39 @@ namespace madbfs::data
         struct LookupEntry
         {
             std::map<usize, Lru::iterator> pages;
-            bool                           dirty = false;
-        };
+            path::PathBuf                  path;
 
-        struct FdEntry
-        {
-            u64            fd;
-            data::OpenMode mode;
+            u64 reader = 0;    // reader counts from FUSE
+            u64 writer = 0;    // writer counts from FUSE
+
+            Opt<u64> read_fd  = std::nullopt;    // real file descriptor for read (cache misses) on device
+            Opt<u64> write_fd = std::nullopt;    // real file descriptor for write (dirty flushes) on device
+
+            i64 read_inflight  = 0;    // read operation not completed yet on real fd
+            i64 write_inflight = 0;    // write operation not completed yet on real fd
+
+            bool dirty = false;
+
+            bool is_free()
+            {
+                return pages.empty()          //
+                   and reader == 0            //
+                   and writer == 0            //
+                   and read_inflight == 0     //
+                   and write_inflight == 0    //
+                   and not dirty;
+            }
         };
 
         /**
          * @brief Construct a new cache.
          *
+         * @param ctx Async context.
          * @param connection Connection to device.
          * @param page_size Page size.
          * @param max_pages Maximum number of pages cached.
          */
-        Cache(connection::Connection& connection, usize page_size, usize max_pages);
+        Cache(async::Context& ctx, connection::Connection& connection, usize page_size, usize max_pages);
 
         /**
          * @brief Hint the cache to open a real fd to a file in the device for further operations.
@@ -129,7 +145,7 @@ namespace madbfs::data
          *
          * Unlike `hint_open()` this function will immediately close the file descriptor to the real file.
          */
-        AExpect<void> hint_close(Id id);
+        AExpect<void> hint_close(Id id, data::OpenMode mode);
 
         /**
          * @brief Read bytes from file with desired id at an offset into buffer.
@@ -192,15 +208,13 @@ namespace madbfs::data
 
         /**
          * @brief Invalidate all entries.
-         *
-         * This function is equaivalent to `shutdown()` function.
          */
         Await<void> invalidate_all();
 
         /**
          * @brief Shut down the cache and invalidate all cache entries.
          *
-         * This function is equaivalent to `invalidate_all()` function.
+         * This function should be called before destruction to stop internal loop.
          */
         Await<void> shutdown();
 
@@ -212,42 +226,53 @@ namespace madbfs::data
         usize current_pages() const { return m_lru.size(); }
 
     private:
+        enum class FdKind
+        {
+            Read,
+            Write,
+        };
+
+        /**
+         * @brief Add new lookup entry for specified id if not exists already.
+         *
+         * @param id File identifier.
+         * @param path File path.
+         *
+         * @return A new lookup entry (empty pages).
+         */
+        Ref<LookupEntry> new_lookup(Id id, path::Path path);
+
         /**
          * @brief Look up for pages using its file id.
          *
          * @param id File identifier.
-         * @param add_entry If true add new entry if lookup failed.
          *
          * @return A lookup entry or none if not exists.
-         *
-         * The returned value will be `std::nullopt` only when lookup failed and `add_entry` is set to false.
-         * In the case of lookup failure and `add_entry` is set to true, the newly created entry is returned
-         * (zero page).
          */
-        Opt<Ref<LookupEntry>> lookup(Id id, bool add_entry);
+        Opt<Ref<LookupEntry>> lookup(Id id);
 
         /**
          * @brief Operation to do on cache miss.
          *
-         * @param id File id.
+         * @param fd Real read file descriptor on device.
          * @param out Output buffer.
          * @param offset Read offset.
          *
          * May be called on `read()` function call.
          */
-        AExpect<usize> on_miss(Id id, Span<char> out, off_t offset);
+        AExpect<usize> on_miss(u64 fd, Span<char> out, off_t offset);
 
         /**
          * @brief Operation to do on flush.
          *
-         * @param id File id.
+         * @param fd Real write file descriptor on device.
          * @param in Input buffer.
          * @param offset Write offset.
          *
          * May be called on `read()`, `write()`, `invalidate_one()`, `invalidate_all()`, and `shutdown()`.
          * Will be called on `flush()`.
          */
-        AExpect<usize> on_flush(Id id, Span<const char> in, off_t offset);
+        AExpect<usize> on_flush(u64 fd, Span<const char> in, off_t offset);
 
         /**
          * @brief Evict last entries in the LRU.
@@ -283,7 +308,7 @@ namespace madbfs::data
          * @brief Write file at page index.
          *
          * @param entry Lookup entry for the associated file.
-         * @param int Input buffer.
+         * @param in Input buffer.
          * @param id File id.
          * @param index Page index of the operation.
          * @param first First index of the page.
@@ -305,17 +330,25 @@ namespace madbfs::data
         /**
          * @brief Flush file at page index.
          *
+         * @param fd Real write file descriptor on device.
          * @param page Page to be flushed.
          * @param id Associated file id of the page.
          */
-        AExpect<void> flush_at(Page& page, Id id);
+        AExpect<void> flush_at(u64 fd, Page& page, Id id);
 
-        connection::Connection&         m_connection;
-        std::unordered_map<Id, FdEntry> m_fd_map;    // maps node Id to real fd on to a file on device
+        /**
+         * @brief Loop for clearing stale fds and free lookup entries.
+         */
+        Await<void> reaper();
 
-        Lru    m_lru;      // most recently used is at the front
-        Lookup m_table;    // lookup table for fast page access
-        Queue  m_queue;    // pages that are still pulling data, reader/writer should wait using this
+        connection::Connection& m_connection;
+
+        Lru       m_lru;           // most recently used is at the front
+        Lookup    m_table;         // lookup table for fast page access
+        ReadQueue m_read_queue;    // pages that are still pulling data
+
+        Vec<Tup<Id, FdKind>> m_stale_fds;
+        async::Timer         m_stale_fds_timer;
 
         usize m_page_size = 0;
         usize m_max_pages = 0;

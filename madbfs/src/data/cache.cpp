@@ -3,6 +3,18 @@
 #include "madbfs/connection/connection.hpp"
 
 #include <madbfs-common/log.hpp>
+#include <madbfs-common/util/defer.hpp>
+
+namespace
+{
+    auto scoped_increment(madbfs::i64& counter)
+    {
+        ++counter;
+        return madbfs::util::defer([&] { --counter; });
+    }
+}
+
+// TODO: implement lookup table erasing like stale fds; in the same place as it is also possible I think
 
 namespace madbfs::data
 {
@@ -65,73 +77,79 @@ namespace madbfs::data
 
 namespace madbfs::data
 {
-    Cache::Cache(connection::Connection& connection, usize page_size, usize max_pages)
+    Cache::Cache(async::Context& ctx, connection::Connection& connection, usize page_size, usize max_pages)
         : m_connection{ connection }
+        , m_stale_fds_timer{ ctx }
         , m_page_size{ std::bit_ceil(page_size) }
         , m_max_pages{ max_pages }
     {
+        async::spawn(ctx, reaper(), [](std::exception_ptr e) { log::log_exception(e, "stale_fds_cleaner"); });
     }
 
-    // TODO: do some recovery if open or upgrade errors out. do some recovery as well on the caller side
-    // TODO: what if defer the open to when `lookup()` performed?
     AExpect<void> Cache::hint_open(Id id, path::Path path, data::OpenMode mode)
     {
-        log_d("{}: start {:?}", __func__, path);
+        // only adding new entry, actual open will be performed on read/write
+        log_d("{}: [id={}|mode={}]", __func__, id.inner(), std::to_underlying(mode));
 
-        if (auto found = m_fd_map.find(id); found != m_fd_map.end()) {
-            auto& [cached_fd, cached_mode] = found->second;
-            if (mode != data::OpenMode::ReadWrite) {
-                co_return Expect<void>{};
-            }
+        auto& entry = new_lookup(id, path).get();
+        if (entry.path.str() != path.str()) {
+            log_e("{}: path differs: old={:?} | new={:?}", __func__, entry.path, path);
+            co_return Unexpect{ Errc::io_error };
+        }
 
-            // safe to upgrade
-            if (auto res = co_await m_connection.close(cached_fd); not res) {
-                co_return Unexpect{ res.error() };
-            }
+        const auto prev_reader = entry.reader;
+        const auto prev_writer = entry.writer;
 
-            auto fd = co_await m_connection.open(path, mode);
-            if (not fd) {
-                co_return Unexpect{ fd.error() };
-            }
+        entry.reader += mode == data::OpenMode::Read or mode == data::OpenMode::ReadWrite;
+        entry.writer += mode == data::OpenMode::Write or mode == data::OpenMode::ReadWrite;
 
-            log_d(
-                "{}: upgrade [mode={},fd={}] -> [mode={},fd={}]",
-                __func__,
-                std::to_underlying(cached_mode),
-                std::to_underlying(mode),
-                cached_fd,
-                *fd
-            );
+        // see note on stale_fds_cleaner() function body regarding m_stale_fds
 
-            cached_fd   = *fd;
-            cached_mode = mode;
-        } else {
-            auto fd = co_await m_connection.open(path, mode);
-            if (not fd) {
-                co_return Unexpect{ fd.error() };
-            }
-
-            log_d("{}: new [mode={},fd={},id={}]", __func__, std::to_underlying(mode), *fd, id.inner());
-
-            m_fd_map.emplace(id, FdEntry{ *fd, mode });
+        if (prev_reader == 0 and entry.reader > 0) {
+            log_t("{}: cancel stale [id={}|mode={}]", __func__, id.inner(), std::to_underlying(mode));
+            std::erase_if(m_stale_fds, [&](const auto& v) { return v == Tup{ id, FdKind::Read }; });
+        }
+        if (prev_writer == 0 and entry.writer > 0) {
+            log_t("{}: cancel stale [id={}|mode={}]", __func__, id.inner(), std::to_underlying(mode));
+            std::erase_if(m_stale_fds, [&](const auto& v) { return v == Tup{ id, FdKind::Write }; });
         }
 
         co_return Expect<void>{};
     }
 
-    AExpect<void> Cache::hint_close(Id id)
+    AExpect<void> Cache::hint_close(Id id, data::OpenMode mode)
     {
-        if (auto found = m_fd_map.find(id); found != m_fd_map.end()) {
-            auto fd = found->second.fd;
-            if (auto entry = lookup(id, false); entry and entry->get().dirty) {
-                co_await flush(id);
-            }
+        // only mark id's fd as stale on empty reader/writer, actual close performed on stale_fds_cleaner()
+        log_d("{}: [id={}|mode={}]", __func__, id.inner(), std::to_underlying(mode));
 
-            log_d("{}: [id={}|fd={}]", __func__, id.inner(), fd);
-            m_fd_map.erase(found);
+        auto may_entry = lookup(id);
+        if (not may_entry) {
+            log_e("{}: hint_close [{}] is requested but no entry (forgot to open?)", __func__, id.inner());
+            co_return Unexpect{ Errc::bad_file_descriptor };
+        }
 
-            // TODO: maybe add close queue just like page queue?
-            co_return co_await m_connection.close(found->second.fd);
+        auto& entry = may_entry->get();
+
+        auto reader_decr = mode == data::OpenMode::Read or mode == data::OpenMode::ReadWrite;
+        auto writer_decr = mode == data::OpenMode::Write or mode == data::OpenMode::ReadWrite;
+
+        if ((reader_decr and entry.reader == 0) or (writer_decr and entry.writer == 0)) {
+            log_e("{}: [{}] closed too many times", __func__, id.inner());
+            co_return Unexpect{ Errc::bad_file_descriptor };
+        }
+
+        entry.reader -= reader_decr;
+        entry.writer -= writer_decr;
+
+        // see note on stale_fds_cleaner() function body regarding m_stale_fds
+
+        if (entry.reader == 0 and entry.read_fd) {
+            log_t("{}: mark stale [id={}|mode={}]", __func__, id.inner(), std::to_underlying(mode));
+            m_stale_fds.emplace_back(id, FdKind::Read);
+        }
+        if (entry.writer == 0 and entry.write_fd) {
+            log_t("{}: mark stale [id={}|mode={}]", __func__, id.inner(), std::to_underlying(mode));
+            m_stale_fds.emplace_back(id, FdKind::Write);
         }
 
         co_return Expect<void>{};
@@ -144,9 +162,13 @@ namespace madbfs::data
 
         log_d("{}: start [id={}|idx={} - {}]", __func__, id.inner(), first, last);
 
-        auto& entry = lookup(id, true)->get();
+        auto entry = lookup(id);
+        if (not entry) {
+            log_e("{}: read [{}] is requested but no entry (forgot to open?)", __func__, id.inner());
+            co_return Unexpect{ Errc::bad_file_descriptor };
+        }
 
-        auto work = [&](usize idx) { return read_at(entry, out, id, idx, first, last, offset); };
+        auto work = [&](usize idx) { return read_at(entry->get(), out, id, idx, first, last, offset); };
         auto res  = co_await async::wait_all(sv::iota(first, last + 1) | sv::transform(work));
 
         auto read = 0uz;
@@ -168,10 +190,14 @@ namespace madbfs::data
 
         log_d("{}: start [id={}|idx={} - {}]", __func__, id.inner(), first, last);
 
-        auto& entry = lookup(id, true)->get();
-        entry.dirty = true;
+        auto entry = lookup(id);
+        if (not entry) {
+            log_e("{}: read [{}] is requested but no entry (forgot to open?)", __func__, id.inner());
+            co_return Unexpect{ Errc::bad_file_descriptor };
+        }
+        entry->get().dirty = true;
 
-        auto work = [&](usize idx) { return write_at(entry, in, id, idx, first, last, offset); };
+        auto work = [&](usize idx) { return write_at(entry->get(), in, id, idx, first, last, offset); };
         auto res  = co_await async::wait_all(sv::iota(first, last + 1) | sv::transform(work));
 
         auto written = 0uz;
@@ -188,33 +214,47 @@ namespace madbfs::data
 
     AExpect<void> Cache::flush(Id id)
     {
-        auto entry = lookup(id, false);
+        auto entry = lookup(id);
         if (not entry) {
             co_return Expect<void>{};
         }
 
-        if (not std::exchange(m_table[id].dirty, false)) {
+        if (not entry->get().dirty) {
             co_return Expect<void>{};
         }
 
-        const auto& [pages, _] = entry->get();
+        const auto& pages = entry->get().pages;
         log_d("flush: start [id={}|idx={}]", id.inner(), pages | sv::keys);
 
-        // TODO: redo parallel
+        if (auto& e = entry->get(); not e.write_fd) {
+            auto fd = co_await m_connection.open(e.path, data::OpenMode::Write);
+            if (not fd) {
+                co_return Unexpect{ fd.error() };
+            }
+            e.write_fd = *fd;
+        }
+
+        auto write_incr_lock = scoped_increment(entry->get().write_inflight);
+
         for (auto page : pages | sv::values) {
-            auto res = co_await flush_at(*page, id);
+            if (not page->is_dirty()) {
+                continue;
+            }
+            auto res = co_await flush_at(*entry->get().write_fd, *page, id);
             if (not res) {
                 log_e("{}: failed to flush [{}]: {}", __func__, id.inner(), err_msg(res.error()));
                 co_return Unexpect{ res.error() };
             }
         }
 
+        entry->get().dirty = false;
+
         co_return Expect<void>{};
     }
 
     AExpect<void> Cache::truncate(Id id, usize old_size, usize new_size)
     {
-        auto may_entry = lookup(id, false);
+        auto may_entry = lookup(id);
         if (not may_entry) {
             co_return Expect<void>{};
         }
@@ -279,23 +319,14 @@ namespace madbfs::data
         co_return Expect<void>{};
     }
 
-    Await<void> Cache::shutdown()
     {
-        for (auto id : m_table | sv::keys) {
-            if (auto res = co_await flush(id); not res) {
-                log_e("{}: failed to flush {}: {}", __func__, id.inner(), err_msg(res.error()));
-            }
         }
-
-        m_table.clear();
-        m_lru.clear();
-        m_queue.clear();
-
-        // TODO: close all files
     }
 
     Await<void> Cache::invalidate_one(Id id, bool should_flush)
     {
+        log_i("{}: invalidate one: {}", __func__, id.inner());
+
         if (should_flush) {
             if (auto res = co_await flush(id); not res) {
                 log_e("{}: failed to flush {}: {}", __func__, id.inner(), err_msg(res.error()));
@@ -303,8 +334,7 @@ namespace madbfs::data
         }
 
         if (auto entry = m_table.extract(id); not entry.empty()) {
-            auto& [pages, dirty] = entry.mapped();
-            if (dirty and not should_flush) {
+            if (entry.mapped().dirty and not should_flush) {
                 log_w("{}: [{}] is dirty but invalidated without flush!", __func__, id.inner());
             }
             for (auto page : entry.mapped().pages | sv::values) {
@@ -316,7 +346,45 @@ namespace madbfs::data
     Await<void> Cache::invalidate_all()
     {
         co_await shutdown();
+
+        auto exec = co_await async::current_executor();
+        async::spawn(exec, reaper(), [](std::exception_ptr e) {
+            log::log_exception(e, "stale_fds_cleaner");
+        });
+
         log_i("{}: cache invalidated", __func__);
+    }
+
+    Await<void> Cache::shutdown()
+    {
+        m_read_queue.clear();
+        m_stale_fds_timer.cancel();
+
+        for (auto id : m_table | sv::keys) {
+            if (auto res = co_await flush(id); not res) {
+                log_e("{}: failed to flush {}: {}", __func__, id.inner(), err_msg(res.error()));
+            }
+        }
+
+        for (auto& entry : m_table | sv::values) {
+            if (entry.read_fd) {
+                const auto fd = *entry.read_fd;
+                entry.read_fd.reset();
+                if (auto res = co_await m_connection.close(fd); not res) {
+                    log_w("{}: failure on closing fd [{}]: {}", __func__, fd, err_msg(res.error()));
+                }
+            }
+            if (entry.write_fd) {
+                const auto fd = *entry.write_fd;
+                entry.write_fd.reset();
+                if (auto res = co_await m_connection.close(fd); not res) {
+                    log_w("{}: failure on closing fd [{}]: {}", __func__, fd, err_msg(res.error()));
+                }
+            }
+        }
+
+        m_table.clear();
+        m_lru.clear();
     }
 
     Await<void> Cache::set_page_size(usize new_page_size)
@@ -333,44 +401,30 @@ namespace madbfs::data
         log_i("{}: max pages can be stored changed to: {}", __func__, new_max_pages);
     }
 
+    Ref<Cache::LookupEntry> Cache::new_lookup(Id id, path::Path path)
+    {
+        auto [it, _] = m_table.emplace(id, LookupEntry{ .pages = {}, .path = path.owned() });
+        return std::ref(it->second);
+    }
+
     // NOTE: std::unordered_map guarantees reference of its element valid even if new value inserted
     // (path parameter not nullopt)
-    Opt<Ref<Cache::LookupEntry>> Cache::lookup(Id id, bool add_entry)
+    Opt<Ref<Cache::LookupEntry>> Cache::lookup(Id id)
     {
-        auto entries = m_table.find(id);
-        if (entries == m_table.end()) {
-            if (add_entry) {
-                auto [p, _] = m_table.emplace(id, LookupEntry{ .pages = {}, .dirty = false });
-                entries     = p;
-            } else {
-                return std::nullopt;
-            }
+        if (auto entries = m_table.find(id); entries != m_table.end()) {
+            return entries->second;
         }
-        return entries->second;
+        return std::nullopt;
     }
 
-    AExpect<usize> Cache::on_miss(Id id, Span<char> out, off_t offset)
+    AExpect<usize> Cache::on_miss(u64 fd, Span<char> out, off_t offset)
     {
-        auto found = m_fd_map.find(id);
-        assert(found != m_fd_map.end());
-
-        auto fd  = found->second.fd;
-        auto idx = static_cast<usize>(offset) / m_page_size;
-
-        log_d("{}: [id={}|idx={}] cache miss, read from device...", __func__, id.inner(), idx, offset);
-        co_return co_await m_connection.read(fd, out, offset);
+        return m_connection.read(fd, out, offset);
     }
 
-    AExpect<usize> Cache::on_flush(Id id, Span<const char> in, off_t offset)
+    AExpect<usize> Cache::on_flush(u64 fd, Span<const char> in, off_t offset)
     {
-        auto found = m_fd_map.find(id);
-        assert(found != m_fd_map.end());
-
-        auto fd  = found->second.fd;
-        auto idx = static_cast<usize>(offset) / m_page_size;
-
-        log_d("{}: [id={}|idx={}] flush, write to device...", __func__, id.inner(), idx, offset);
-        co_return co_await m_connection.write(fd, in, offset);
+        return m_connection.write(fd, in, offset);
     }
 
     Await<void> Cache::evict(usize size)
@@ -381,21 +435,34 @@ namespace madbfs::data
 
             m_lru.pop_back();
 
+            auto entry = lookup(id);
+            if (not entry) {
+                log_c("{}: evict [id={}|idx={}] requested but no entry", __func__, id.inner(), idx);
+                continue;
+            }
+
             if (page.is_dirty()) {
                 log_i("{}: force push page [id={}|idx={}]", __func__, id.inner(), idx);
 
+                auto write_incr_lock = scoped_increment(entry->get().write_inflight);
+
+                if (auto& e = entry->get(); not e.write_fd) {
+                    auto fd = co_await m_connection.open(e.path, data::OpenMode::Write);
+                    if (not fd) {
+                        log_c("{}: force push [id={}|idx={}] can't open file", __func__, id.inner(), idx);
+                        continue;
+                    }
+                    e.write_fd = *fd;
+                }
+
                 auto offset = static_cast<off_t>(idx * m_page_size);
-                if (auto res = co_await on_flush(id, page.buf(), offset); not res) {
-                    log_c("{}: failed to force push page [id={}|idx={}", __func__, id.inner(), idx);
+                if (auto res = co_await on_flush(*entry->get().write_fd, page.buf(), offset); not res) {
+                    log_c("{}: failed to force push page [id={}|idx={}]", __func__, id.inner(), idx);
                 }
             }
 
             // this is done last since on_flush requires entry to still exists
-            auto& entry = lookup(id, false)->get();
-            entry.pages.erase(idx);
-            if (entry.pages.empty()) {
-                m_table.erase(id);
-            }
+            entry->get().pages.erase(idx);
         }
     }
 
@@ -409,11 +476,13 @@ namespace madbfs::data
         off_t        offset
     )
     {
+        auto read_incr_lock = scoped_increment(entry.read_inflight);
+
         log_t("read: [id={}|idx={}]", id.inner(), index);
 
         auto key = PageKey{ id, index };
 
-        if (auto queued = m_queue.find(key); queued != m_queue.end()) {
+        if (auto queued = m_read_queue.find(key); queued != m_read_queue.end()) {
             auto fut = queued->second;
             co_await fut.async_wait();
             if (auto err = fut.get(); static_cast<bool>(err)) {
@@ -423,18 +492,27 @@ namespace madbfs::data
 
         auto page_entry = entry.pages.find(index);
         if (page_entry == entry.pages.end()) {
+            // cache miss
+            if (not entry.read_fd) {
+                auto fd = co_await m_connection.open(entry.path, data::OpenMode::Read);
+                if (not fd) {
+                    co_return Unexpect{ fd.error() };
+                }
+                entry.read_fd = *fd;
+            }
+
             auto promise = saf::promise<Errc>{ co_await async::current_executor() };
             auto future  = promise.get_future().share();
-            m_queue.emplace(key, std::move(future));
+            m_read_queue.emplace(key, std::move(future));
 
             auto data    = std::make_unique<char[]>(m_page_size);
             auto span    = Span{ data.get(), m_page_size };
-            auto may_len = co_await on_miss(id, span, static_cast<off_t>(index * m_page_size));
+            auto may_len = co_await on_miss(*entry.read_fd, span, static_cast<off_t>(index * m_page_size));
             if (not may_len) {
                 promise.set_value(may_len.error());
-                m_queue.erase(key);
+                m_read_queue.erase(key);
                 co_return Unexpect{ may_len.error() };
-            } else if (not m_queue.contains(key)) {
+            } else if (not m_read_queue.contains(key)) {
                 promise.set_value(Errc::operation_canceled);
                 co_return Unexpect{ Errc::operation_canceled };
             }
@@ -444,7 +522,7 @@ namespace madbfs::data
             page_entry  = p;
 
             promise.set_value(Errc{});
-            m_queue.erase(key);
+            m_read_queue.erase(key);
 
             if (m_lru.size() > m_max_pages) {
                 co_await evict(m_lru.size() - m_max_pages);
@@ -496,7 +574,7 @@ namespace madbfs::data
 
         auto key = PageKey{ id, index };
 
-        if (auto queued = m_queue.find(key); queued != m_queue.end()) {
+        if (auto queued = m_read_queue.find(key); queued != m_read_queue.end()) {
             auto fut = queued->second;
             co_await fut.async_wait();
             if (auto err = fut.get(); static_cast<bool>(err)) {
@@ -548,11 +626,11 @@ namespace madbfs::data
         co_return written;
     }
 
-    AExpect<void> Cache::flush_at(Page& page, Id id)
+    AExpect<void> Cache::flush_at(u64 fd, Page& page, Id id)
     {
         log_t("flush: [id={}|idx={}]", id.inner(), page.key().index);
 
-        if (auto queued = m_queue.find(page.key()); queued != m_queue.end()) {
+        if (auto queued = m_read_queue.find(page.key()); queued != m_read_queue.end()) {
             auto fut = queued->second;
             co_await fut.async_wait();
             if (auto err = fut.get(); static_cast<bool>(err)) {
@@ -560,18 +638,87 @@ namespace madbfs::data
             }
         }
 
-        if (page.is_dirty()) {
-            auto data = std::make_unique<char[]>(m_page_size);
-            auto read = page.read({ data.get(), m_page_size }, 0);
-            page.set_dirty(false);
+        auto data = std::make_unique<char[]>(m_page_size);
+        auto read = page.read({ data.get(), m_page_size }, 0);
+        page.set_dirty(false);
 
-            auto span = Span{ data.get(), read };
-            auto res  = co_await on_flush(id, span, static_cast<off_t>(page.key().index * m_page_size));
-            if (not res.has_value()) {
-                co_return Unexpect{ res.error() };
-            }
+        auto span = Span{ data.get(), read };
+        auto res  = co_await on_flush(fd, span, static_cast<off_t>(page.key().index * m_page_size));
+        if (not res) {
+            co_return Unexpect{ res.error() };
         }
 
         co_return Expect<void>{};
+    }
+
+    Await<void> Cache::reaper()
+    {
+        using namespace std::chrono_literals;
+        constexpr auto interval = 10s;
+
+        auto finished_fds    = std::vector<u64>{};
+        auto stale_to_remove = std::vector<u64>{};
+
+        while (true) {
+            m_stale_fds_timer.expires_after(interval);
+            auto res = co_await m_stale_fds_timer.async_wait();
+            if (not res) {
+                co_return;
+            }
+
+            log_d("{}: start erasing stale fds [count={}]", __func__, m_stale_fds.size());
+
+            // NOTE: m_stale_fds must not be operated on between yielding points, else the data might be not
+            // synchronized
+
+            for (auto i : sv::iota(0uz, m_stale_fds.size())) {
+                auto [id, kind] = m_stale_fds[i];
+
+                auto lookup = m_table.find(id);
+                if (lookup == m_table.end()) {
+                    stale_to_remove.push_back(i);
+                    continue;
+                }
+
+                auto& entry = lookup->second;
+                auto  fd    = Opt<u64>{};
+
+                switch (kind) {
+                case FdKind::Read: entry.read_inflight == 0 ? entry.read_fd.swap(fd) : void(); break;
+                case FdKind::Write: entry.write_inflight == 0 ? entry.write_fd.swap(fd) : void(); break;
+                }
+
+                if (fd) {
+                    finished_fds.emplace_back(*fd);
+                    stale_to_remove.push_back(i);
+                }
+            }
+
+            for (auto i : stale_to_remove | sv::reverse) {
+                m_stale_fds.erase(m_stale_fds.begin() + static_cast<isize>(i));
+            }
+            stale_to_remove.clear();
+
+            // >> yielding point
+            for (auto fd : finished_fds) {
+                if (auto res = co_await m_connection.close(fd); not res) {
+                    log_w("{}: failure on closing fd [{}]: {}", __func__, fd, err_msg(res.error()));
+                }
+            }
+
+            finished_fds.clear();
+
+            log_d("{}: finish erasing stale fds [count={}]", __func__, stale_to_remove.size());
+
+            for (auto it = m_table.begin(); it != m_table.end();) {
+                if (it->second.is_free()) {
+                    const auto& [id, entry] = *it;
+                    log_t("{}: remove free entry for [{}] {:?}", __func__, id.inner(), entry.path);
+                    it = m_table.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
     }
 }
