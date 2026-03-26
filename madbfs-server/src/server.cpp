@@ -284,37 +284,54 @@ namespace madbfs::server
             auto out_off_ = out_off;    // must be mutable
 
             auto res = syscall(SYS_copy_file_range, in_fd, &in_off_, out_fd, &out_off_, size, 0);
+            if (res >= 0) {
+                return rpc::resp::CopyFileRange{ .size = static_cast<usize>(res) };
+            }
+
             if (res < 0 and errno == ENOSYS) {
                 m_copy_file_range_impl = false;
                 log_w("copy_file_range syscall is not implemented, proceeding into fallback");
+            } else if (res < 0 and errno == EXDEV) {
+                // should the fallback be here on the server or should it be on the client?
+                // if the fallback is here, the operation will take very long time and trigger timeout while
+                // also preventing any other operation to occur simulataneously since the server is busy
+                // dealing with just this operation
+                log_w("cross-filesystem copy, proceeding into fallback");
             } else if (res < 0) {
-                return status_from_errno(__func__, out, "failed to seek file");
-            } else {
-                return rpc::resp::CopyFileRange{ .size = static_cast<usize>(res) };
+                return status_from_errno(__func__, out, "failed to copy file range");
             }
         }
 
         auto buffer = Array<char, 64 * 1024>{};
         auto copied = 0_usize;
 
-        auto read    = 0_i64;
-        auto written = 0_i64;
+        auto last_read  = 0_i64;
+        auto last_write = 0_i64;
 
-        while (copied < size and written >= 0) {
-            if (read = ::read(in_fd, buffer.data(), buffer.size()); read <= 0) {
+        while (copied < size and last_write >= 0) {
+            const auto to_read = std::min(buffer.size(), size - copied);
+
+            last_read = ::read(in_fd, buffer.data(), to_read);
+            if (last_read <= 0) {
                 break;
             }
-            while (read > 0) {
-                if (written = ::write(out_fd, buffer.data(), static_cast<usize>(read)); written < 0) {
+
+            auto begin     = buffer.data();
+            auto remaining = last_read;
+
+            while (remaining > 0) {
+                if (last_write = ::write(out_fd, begin, static_cast<usize>(remaining)); last_write < 0) {
                     goto end_copy;
                 }
-                read   -= written;
-                copied += static_cast<usize>(written);
+
+                begin     += last_write;
+                remaining -= last_write;
+                copied    += static_cast<usize>(last_write);
             }
         }
     end_copy:
 
-        if (read < 0 or written < 0) {
+        if (last_read < 0 or last_write < 0) {
             return status_from_errno(__func__, out, "failed to copy file");
         }
 
