@@ -199,6 +199,14 @@ namespace madbfs::data
         AExpect<void> truncate(Id id, usize old_size, usize new_size);
 
         /**
+         * @brief Rename/relink path pointed by its id to a new path.
+         *
+         * @param id File id.
+         * @param new_name New path for the file.
+         */
+        Await<void> rename(Id id, path::Path new_name);
+
+        /**
          * @brief Invalidate entries for a file by its id.
          *
          * @param id File id.

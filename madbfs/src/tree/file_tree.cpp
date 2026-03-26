@@ -409,6 +409,8 @@ namespace madbfs::tree
         }
 
         auto node = from_node->get().parent()->extract(from.filename()).value();
+        co_await m_cache.rename(node->id(), to);
+
         node->set_name(to.filename());
         node->set_parent(&to_parent->get());
         auto overwritten = to_parent->get().insert(std::move(node), true).value();
@@ -418,6 +420,7 @@ namespace madbfs::tree
             auto parent = from_node->get().parent();
             auto node   = std::move(overwritten).second;
 
+            co_await m_cache.rename(node->id(), from);
             node->set_name(from.filename());
             node->set_parent(parent);
 

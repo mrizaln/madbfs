@@ -319,8 +319,12 @@ namespace madbfs::data
         co_return Expect<void>{};
     }
 
+    Await<void> Cache::rename(Id id, path::Path new_name)
     {
+        if (auto found = m_table.find(id); found != m_table.end()) {
+            found->second.path = new_name.owned();
         }
+        co_return;
     }
 
     Await<void> Cache::invalidate_one(Id id, bool should_flush)
