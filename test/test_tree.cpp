@@ -195,8 +195,6 @@ int main()
     using namespace ut::literals;
     using ut::expect, ut::that;
 
-    auto _ = std::ignore;
-
     "constructed tree from raw node have same shape"_test = [&] {
         using namespace madbfs::tree;
 
@@ -204,8 +202,9 @@ int main()
 
         using madbfs::path::operator""_path;
 
+        auto io_context = madbfs::async::Context{};
         auto connection = mock::DummyConnection{};
-        auto cache      = madbfs::data::Cache{ connection, 64 * 1024, 1024 };
+        auto cache      = madbfs::data::Cache{ io_context, connection, 64 * 1024, 1024 };
         auto counter    = std::atomic<u64>{};
 
         // NOTE: operations like mknod and mkdir only considers filename
@@ -219,51 +218,49 @@ int main()
             return Node::Context{ connection, cache, counter, path };
         };
 
-        auto io_context = madbfs::async::Context{};
-
         auto coro = [&] -> madbfs::Await<void> {
             auto root = Node{ "/", nullptr, {}, node::Directory{} };
 
             Node& hello = (co_await root.mkdir(make_context("hello"), 0)).unwrap();
 
-            _ = (co_await hello.mknod(make_context("world.txt"), 0, 0)).unwrap();
-            _ = (co_await hello.mknod(make_context("foo.txt"), 0, 0)).unwrap();
-            _ = (co_await hello.mknod(make_context("movie.mp4"), 0, 0)).unwrap();
+            std::ignore = (co_await hello.mknod(make_context("world.txt"), 0, 0)).unwrap();
+            std::ignore = (co_await hello.mknod(make_context("foo.txt"), 0, 0)).unwrap();
+            std::ignore = (co_await hello.mknod(make_context("movie.mp4"), 0, 0)).unwrap();
 
             Node& bar = (co_await hello.mkdir(make_context("bar"), 0)).unwrap();
 
-            _ = (co_await bar.mknod(make_context("baz.txt"), 0, 0)).unwrap();
-            _ = (co_await bar.mknod(make_context("qux.txt"), 0, 0)).unwrap();
-            _ = (co_await bar.mknod(make_context("quux.txt"), 0, 0)).unwrap();
+            std::ignore = (co_await bar.mknod(make_context("baz.txt"), 0, 0)).unwrap();
+            std::ignore = (co_await bar.mknod(make_context("qux.txt"), 0, 0)).unwrap();
+            std::ignore = (co_await bar.mknod(make_context("quux.txt"), 0, 0)).unwrap();
 
             Node& bye = (co_await root.mkdir(make_context("bye"), 0)).unwrap();
 
-            _ = (co_await bye.mknod(make_context("world.txt"), 0, 0)).unwrap();
-            _ = (co_await bye.mknod(make_context("movie.mp4"), 0, 0)).unwrap();
-            _ = (co_await bye.mknod(make_context("music.mp3"), 0, 0)).unwrap();
+            std::ignore = (co_await bye.mknod(make_context("world.txt"), 0, 0)).unwrap();
+            std::ignore = (co_await bye.mknod(make_context("movie.mp4"), 0, 0)).unwrap();
+            std::ignore = (co_await bye.mknod(make_context("music.mp3"), 0, 0)).unwrap();
 
             Node& family = (co_await bye.mkdir(make_context("family"), 0)).unwrap();
 
-            _ = (co_await family.mknod(make_context("dad.txt"), 0, 0)).unwrap();
-            _ = (co_await family.mknod(make_context("mom.txt"), 0, 0)).unwrap();
+            std::ignore = (co_await family.mknod(make_context("dad.txt"), 0, 0)).unwrap();
+            std::ignore = (co_await family.mknod(make_context("mom.txt"), 0, 0)).unwrap();
 
             Node& friends = (co_await bye.mkdir(make_context("friends"), 0)).unwrap();
 
-            _ = (co_await friends.mknod(make_context("bob.txt"), 0, 0)).unwrap();
+            std::ignore = (co_await friends.mknod(make_context("bob.txt"), 0, 0)).unwrap();
 
             Node& school = (co_await friends.mkdir(make_context("school"), 0)).unwrap();
 
-            _ = (co_await school.mknod(make_context("kal'tsit.txt"), 0, 0)).unwrap();
-            _ = (co_await school.mknod(make_context("closure.txt"), 0, 0)).unwrap();
+            std::ignore = (co_await school.mknod(make_context("kal'tsit.txt"), 0, 0)).unwrap();
+            std::ignore = (co_await school.mknod(make_context("closure.txt"), 0, 0)).unwrap();
 
             Node& work = (co_await friends.mkdir(make_context("work"), 0)).unwrap();
 
             Node& wife = (co_await work.mknod(make_context("loughshinny <3.txt"), 0, 0)).unwrap();
 
-            _ = (co_await work.mknod(make_context("eblana?.mp4"), 0, 0)).unwrap();
-            _ = school.symlink("hehe", work.build_path().str()).unwrap();
-            _ = hello.symlink("wife", wife.build_path().str()).unwrap();
-            _ = (co_await bye.mknod(make_context("theresa.txt"), 0, 0)).unwrap();
+            std::ignore = (co_await work.mknod(make_context("eblana?.mp4"), 0, 0)).unwrap();
+            std::ignore = school.symlink("hehe", work.build_path().str()).unwrap();
+            std::ignore = hello.symlink("wife", wife.build_path().str()).unwrap();
+            std::ignore = (co_await bye.mknod(make_context("theresa.txt"), 0, 0)).unwrap();
 
             auto tree_str = std::format("\n{}", root);
             expect(expected == tree_str) << diff_str(expected, tree_str);
@@ -278,11 +275,10 @@ int main()
     "constructed FileTree have same shape"_test = [&] {
         using namespace madbfs::tree;
 
-        auto connection = mock::DummyConnection{};
-        auto cache      = madbfs::data::Cache{ connection, 64 * 1024, 1024 };
-        auto tree       = FileTree{ connection, cache, std::nullopt };
-
         auto io_context = madbfs::async::Context{};
+        auto connection = mock::DummyConnection{};
+        auto cache      = madbfs::data::Cache{ io_context, connection, 64 * 1024, 1024 };
+        auto tree       = FileTree{ connection, cache, std::nullopt };
 
 #define unwrap(T) transform_error([](auto e) { return raise_expect_error<T>(e); }).value()
 
