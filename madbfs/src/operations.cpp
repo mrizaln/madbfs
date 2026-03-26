@@ -139,8 +139,7 @@ namespace madbfs::operations
         assert(data != nullptr and "data should not be empty!");
         delete data;
 
-        auto serial = ::getenv("ANDROID_SERIAL");
-        if (serial != nullptr) {
+        if (const auto* serial = ::getenv("ANDROID_SERIAL"); serial != nullptr) {
             log_i("madbfs for device {} successfully terminated", serial);
         } else [[unlikely]] {
             log_i("madbfs successfully terminated");

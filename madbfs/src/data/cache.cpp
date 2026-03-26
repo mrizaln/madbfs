@@ -14,8 +14,6 @@ namespace
     }
 }
 
-// TODO: implement lookup table erasing like stale fds; in the same place as it is also possible I think
-
 namespace madbfs::data
 {
     Page::Page(PageKey key, Uniq<char[]> buf, u32 size, u32 page_size)
@@ -83,7 +81,7 @@ namespace madbfs::data
         , m_page_size{ std::bit_ceil(page_size) }
         , m_max_pages{ max_pages }
     {
-        async::spawn(ctx, reaper(), [](std::exception_ptr e) { log::log_exception(e, "stale_fds_cleaner"); });
+        async::spawn(ctx, reaper(), [](std::exception_ptr e) { log::log_exception(e, "reaper"); });
     }
 
     AExpect<void> Cache::hint_open(Id id, path::Path path, data::OpenMode mode)
@@ -103,7 +101,7 @@ namespace madbfs::data
         entry.reader += mode == data::OpenMode::Read or mode == data::OpenMode::ReadWrite;
         entry.writer += mode == data::OpenMode::Write or mode == data::OpenMode::ReadWrite;
 
-        // see note on stale_fds_cleaner() function body regarding m_stale_fds
+        // see note on reaper() function body regarding m_stale_fds
 
         if (prev_reader == 0 and entry.reader > 0) {
             log_t("{}: cancel stale [id={}|mode={}]", __func__, id.inner(), std::to_underlying(mode));
@@ -119,7 +117,7 @@ namespace madbfs::data
 
     AExpect<void> Cache::hint_close(Id id, data::OpenMode mode)
     {
-        // only mark id's fd as stale on empty reader/writer, actual close performed on stale_fds_cleaner()
+        // only mark id's fd as stale on empty reader/writer, actual close performed on reaper()
         log_d("{}: [id={}|mode={}]", __func__, id.inner(), std::to_underlying(mode));
 
         auto may_entry = lookup(id);
@@ -141,7 +139,7 @@ namespace madbfs::data
         entry.reader -= reader_decr;
         entry.writer -= writer_decr;
 
-        // see note on stale_fds_cleaner() function body regarding m_stale_fds
+        // see note on reaper() function body regarding m_stale_fds
 
         if (entry.reader == 0 and entry.read_fd) {
             log_t("{}: mark stale [id={}|mode={}]", __func__, id.inner(), std::to_underlying(mode));
@@ -352,9 +350,7 @@ namespace madbfs::data
         co_await shutdown();
 
         auto exec = co_await async::current_executor();
-        async::spawn(exec, reaper(), [](std::exception_ptr e) {
-            log::log_exception(e, "stale_fds_cleaner");
-        });
+        async::spawn(exec, reaper(), [](std::exception_ptr e) { log::log_exception(e, "reaper"); });
 
         log_i("{}: cache invalidated", __func__);
     }
