@@ -16,7 +16,7 @@ namespace madbfs::rpc
 
     static_assert(sizeof(Status) == 4, "huh, unusual system. usually enums without base (int) are 4 bytes.");
 
-    // NOTE: if you decided to add/remove one or more entries, do update domain check in read_procedure
+    // NOTE: if you decide to add/remove one or more entries, do update domain check in read_procedure
     enum class Procedure : u8
     {
         Stat,
@@ -34,6 +34,9 @@ namespace madbfs::rpc
         Close,
         Read,
         Write,
+
+        // special procedure for checking aliveness
+        Ping = std::numeric_limits<u8>::max(),
     };
 
     enum class OpenMode : u8
@@ -55,19 +58,19 @@ namespace madbfs::rpc
 
         struct Hash
         {
-            usize operator()(Id id) const { return std::hash<Inner>{}(id.inner()); }
+            constexpr usize operator()(Id id) const { return std::hash<Inner>{}(id.inner()); }
         };
 
-        Id() = default;
+        constexpr Id() = default;
 
-        Id(Inner inner)
+        constexpr Id(Inner inner)
             : m_inner{ inner }
         {
         }
 
-        Inner inner() const { return m_inner; }
+        constexpr Inner inner() const { return m_inner; }
 
-        auto operator<=>(const Id&) const = default;
+        constexpr auto operator<=>(const Id&) const = default;
 
     private:
         Inner m_inner = 0;
@@ -201,7 +204,18 @@ namespace madbfs::rpc
         {
         }
 
+        Client(Client&&)            = default;
+        Client& operator=(Client&&) = default;
+
+        Client(const Client&)            = delete;
+        Client& operator=(const Client&) = delete;
+
         ~Client() { stop(); }
+
+        /**
+         * @brief Generate next id.
+         */
+        Id next_id() { return ++m_counter; }    // starts from 1
 
         /**
          * @brief Check whether the client sender/receiver channel is open.
@@ -217,17 +231,25 @@ namespace madbfs::rpc
         Await<void> start();
 
         /**
+         * @brief Check if server is alive.
+         *
+         * @param timeout Operation timeout.
+         *
+         * @return Returned an error if server is not alive.
+         */
+        AExpect<void> ping(Opt<Milliseconds> timeout);
+
+        /**
          * @brief Send request through the channel.
          *
          * @param buffer Buffer used by `req`.
          * @param req The requested procedure.
-         * @param timeout Operation timeout.
          *
          * @return The returned response or error.
          *
          * THe Buffer will be reused for the response returned by this function.
          */
-        AExpect<Response> send_req(Vec<u8>& buffer, Request req, Opt<Milliseconds> timeout);
+        AExpect<Response> send_req(Vec<u8>& buffer, Request req);
 
         /**
          * @brief Stop and close the client sender/receiver channel and the socket.
@@ -241,6 +263,12 @@ namespace madbfs::rpc
             saf::promise<Expect<Response>> promise;
         };
 
+        struct Pings
+        {
+            Id                   id;
+            saf::promise<Status> promise;
+        };
+
         using Inflight = std::unordered_map<Id, Promise, Id::Hash>;
         using Channel  = async::Channel<Tup<Id, Span<const u8>>>;
 
@@ -250,7 +278,9 @@ namespace madbfs::rpc
         Socket  m_socket;
         Channel m_channel;
 
-        Inflight  m_requests;
+        Inflight   m_requests;
+        Opt<Pings> m_pings;
+
         Id::Inner m_counter = 0;
         bool      m_running = false;
     };
@@ -258,16 +288,8 @@ namespace madbfs::rpc
     class Server
     {
     public:
-        struct Promise
-        {
-            Vec<u8>   buffer;
-            Procedure procedure;
-        };
-
         using HandlerSig = Await<Var<Status, Response>>(Vec<u8>& buffer, Request request);
         using Handler    = std::function<HandlerSig>;
-        using Inflight   = std::unordered_map<Id, Promise, Id::Hash>;
-        using Channel    = async::Channel<Tup<Id, Var<Status, Response>>>;
 
         Server(Socket socket)
             : m_socket{ std::move(socket) }
@@ -275,6 +297,12 @@ namespace madbfs::rpc
             , m_pool{ 1 }
         {
         }
+
+        Server(Server&&)            = delete;
+        Server& operator=(Server&&) = delete;
+
+        Server(const Server&)            = delete;
+        Server& operator=(const Server&) = delete;
 
         ~Server() { stop(); }
 
@@ -291,15 +319,32 @@ namespace madbfs::rpc
         void stop();
 
     private:
+        struct Promise
+        {
+            Vec<u8>   buffer;
+            Procedure procedure;
+        };
+
+        struct Pings
+        {
+            Id id;
+        };
+
+        using Inflight = std::unordered_map<Id, Promise, Id::Hash>;
+        using Channel  = async::Channel<Tup<Id, Var<Status, Response>>>;
+
         AExpect<void> send();
         AExpect<void> send_resp(Id id, Procedure proc, Var<Status, Response> response);
 
-        Socket m_socket;
-        bool   m_running;
+        Socket  m_socket;
+        Channel m_channel;
 
-        Channel          m_channel;
-        Inflight         m_requests;
+        Inflight   m_requests;
+        Opt<Pings> m_pings;
+
         net::thread_pool m_pool;
+
+        bool m_running;
     };
 
     static constexpr Str server_ready_string = "SERVER_IS_READY";

@@ -195,7 +195,8 @@ namespace madbfs::rpc
                 case Procedure::Open:
                 case Procedure::Close:
                 case Procedure::Read:
-                case Procedure::Write: return proc;
+                case Procedure::Write:
+                case Procedure::Ping: return proc;
                 }
                 return std::nullopt;
             });
@@ -256,6 +257,8 @@ namespace madbfs::rpc
         using PayloadBuilder::write_int;
         using PayloadBuilder::write_path;
 
+        static constexpr auto header_size = sizeof(Id) + sizeof(Procedure) + sizeof(u64);
+
         RequestBuilder(Vec<u8>& buffer, Id id, Procedure proc)
             : PayloadBuilder{ buffer }
         {
@@ -265,12 +268,10 @@ namespace madbfs::rpc
 
         Span<const u8> build()
         {
-            constexpr auto header_len = sizeof(Id) + sizeof(Procedure) + sizeof(u64);
-
             auto& buf  = m_buffer;
-            auto  size = buf.size() - header_len;
+            auto  size = buf.size() - header_size;
             auto  arr  = to_net_bytes(static_cast<u64>(size));
-            sr::copy_n(arr.begin(), arr.size(), buf.begin() + header_len - sizeof(u64));
+            sr::copy_n(arr.begin(), arr.size(), buf.begin() + header_size - sizeof(u64));
 
             // auto str = Str{ reinterpret_cast<const char*>(buf.data()), buf.size() };
             // log_d("{}: request built: {:?}", __func__, str);
@@ -290,6 +291,8 @@ namespace madbfs::rpc
         using PayloadBuilder::write_int;
         using PayloadBuilder::write_path;
 
+        static constexpr auto header_size = sizeof(Id) + sizeof(Procedure) + sizeof(Status) + sizeof(u64);
+
         ResponseBuilder(Vec<u8>& buffer, Id id, Procedure proc, Status status)
             : PayloadBuilder{ buffer }
         {
@@ -299,12 +302,11 @@ namespace madbfs::rpc
 
         Span<const u8> build()
         {
-            constexpr auto header_len = sizeof(Id) + sizeof(Procedure) + sizeof(Status) + sizeof(u64);
 
             auto& buf  = m_buffer;
-            auto  size = buf.size() - header_len;
+            auto  size = buf.size() - header_size;
             auto  arr  = to_net_bytes(static_cast<u64>(size));
-            sr::copy_n(arr.begin(), arr.size(), buf.begin() + header_len - sizeof(u64));
+            sr::copy_n(arr.begin(), arr.size(), buf.begin() + header_size - sizeof(u64));
 
             // auto str = Str{ reinterpret_cast<const char*>(buf.data()), buf.size() };
             // log_d("{}: response built: {:?}", __func__, str);
@@ -324,6 +326,9 @@ namespace madbfs::rpc
      *
      * @return The response on success or `std::nullopt` if the buffer is not a payload for desired procedure,
      * the payload is incomplete, or the payload not containing the correct values for the procedure.
+     *
+     * This function must only be used for non-Ping procedures. If Ping is provided, the function will return
+     * std::nullopt.
      */
     Opt<Response> parse_response(Span<const u8> buffer, Procedure proc)
     {
@@ -427,6 +432,7 @@ namespace madbfs::rpc
             TRY(size, reader.read_int<u64>());
             return resp::Write{ .size = static_cast<usize>(*size) };
         }
+        case Procedure::Ping: break;
         }
 
         return std::nullopt;
@@ -452,6 +458,9 @@ namespace madbfs::rpc
             }
 
             m_requests.clear();
+            if (m_pings) {
+                m_pings->promise.set_value(Errc::not_connected);
+            }
         });
 
         async::spawn(exec, send(), [&](std::exception_ptr e, Expect<void> res) {
@@ -487,6 +496,16 @@ namespace madbfs::rpc
             }
 
             log_d("{}: RESP RECV  {} [{}]", __func__, id.inner(), to_string(*proc));
+
+            if (proc == Procedure::Ping) {
+                if (m_pings) {
+                    m_pings->promise.set_value(Errc{});
+                    m_pings.reset();
+                } else {
+                    log_e("{}: ping response for id {} but no promise registered", __func__, id.inner());
+                }
+                continue;
+            }
 
             auto req = m_requests.extract(id);
             if (req.empty()) {
@@ -550,7 +569,50 @@ namespace madbfs::rpc
         }
     }
 
-    AExpect<Response> Client::send_req(Vec<u8>& buffer, Request req, Opt<Milliseconds> timeout)
+    AExpect<void> Client::ping(Opt<Milliseconds> timeout)
+    {
+        if (not m_running) {
+            co_return Unexpect{ Errc::not_connected };
+        } else if (m_pings) {
+            co_return Unexpect{ Errc::operation_in_progress };
+        }
+
+        auto id      = next_id();
+        auto buffer  = Vec<u8>{};
+        auto payload = RequestBuilder{ buffer, id, Procedure::Ping }.build();
+        auto promise = saf::promise<Status>{ co_await async::current_executor() };
+        auto future  = promise.get_future();
+
+        m_pings.emplace(id, std::move(promise));
+
+        if (auto res = co_await m_channel.async_send({}, { id, payload }); not res) {
+            log_e("{}: failed to send payload to channel: {}", __func__, res.error().message());
+            m_pings.reset();
+            co_return Unexpect{ async::to_generic_err(res.error(), Errc::broken_pipe) };
+        }
+
+        log_d("{}: PING QUEUED {}", __func__, id.inner());
+
+        if (timeout) {
+            co_await async::timeout(future.async_wait(async::use_awaitable), *timeout, [&] {
+                if (m_pings) {
+                    m_pings->promise.set_value(Status::timed_out);
+                    m_pings.reset();
+                }
+            });
+        } else {
+            co_await future.async_wait(async::use_awaitable);
+        }
+
+        if (future.is_ready()) {
+            auto status = future.extract();
+            co_return status == Status{} ? Expect<void>{} : Unexpect{ status };
+        }
+
+        co_return Unexpect{ Errc::timed_out };
+    }
+
+    AExpect<Response> Client::send_req(Vec<u8>& buffer, Request req)
     {
         if (not m_running) {
             co_return Unexpect{ Errc::not_connected };
@@ -558,7 +620,7 @@ namespace madbfs::rpc
 
         buffer.clear();
 
-        auto id      = Id{ ++m_counter };
+        auto id      = next_id();
         auto proc    = req.proc();
         auto builder = RequestBuilder{ buffer, id, proc };
 
@@ -650,30 +712,23 @@ namespace madbfs::rpc
         m_requests.emplace(id, Promise{ buffer, std::move(promise) });
         log_d("{}: REQ QUEUED {} [{}]", __func__, id.inner(), to_string(proc));
 
-        if (timeout) {
-            co_await async::timeout(future.async_wait(async::use_awaitable), *timeout, [&] {
-                if (auto entry = m_requests.extract(id); not entry.empty()) {
-                    entry.mapped().promise.set_value(Unexpect{ Errc::timed_out });
-                }
-            });
-        } else {
-            co_await future.async_wait(async::use_awaitable);
-        }
-
-        co_return future.is_ready() ? future.extract() : Unexpect{ Errc::timed_out };
+        co_return co_await future.async_extract();
     }
 }
 
 namespace madbfs::rpc
 {
     /**
-     * @brief Parse raw buffer info request of desired procedure.
+     * @brief Parse raw buffer into request of desired procedure.
      *
      * @param buffer Input buffer.
      * @param proc Desired buffer.
      *
      * @return The request on success or `std::nullopt` if the buffer is not a payload for desired procedure,
      * the payload is incomplete, or the payload not containing the correct values for the procedure.
+     *
+     * This function must only be used for non-Ping procedures. If Ping is provided, the function will return
+     * std::nullopt.
      */
     Opt<Request> parse_request(Span<const u8> buffer, Procedure proc)
     {
@@ -791,6 +846,8 @@ namespace madbfs::rpc
             TRY(bytes, reader.read_bytes());
             return req::Write{ .fd = *fd, .offset = static_cast<off_t>(*offset), .in = *bytes };
         }
+
+        case Procedure::Ping: break;
         }
 
         return std::nullopt;
@@ -833,6 +890,15 @@ namespace madbfs::rpc
             }
 
             log_d("{}: recv req id={} | proc={} | size={}", __func__, id.inner(), to_string(*proc), size);
+
+            if (proc == Procedure::Ping) {
+                // only handle if no other ping being processed
+                if (not m_pings) {
+                    m_pings.emplace(id);
+                    std::ignore = co_await m_channel.async_send({}, { id, Status{} });
+                }
+                continue;
+            }
 
             auto buffer = Vec<u8>(size);
             auto n1     = co_await async::read_exact<u8>(m_socket, buffer);
@@ -896,14 +962,15 @@ namespace madbfs::rpc
             auto [id, response] = std::move(*id_resp);
             log_d("{}: new response: {}", __func__, id.inner());
 
-            auto req = m_requests.extract(id);
-            if (req.empty()) {
+            if (m_pings and m_pings->id == id) {
+                m_pings.reset();
+                std::ignore = co_await send_resp(id, Procedure::Ping, std::move(response));
+            } else if (auto req = m_requests.extract(id); not req.empty()) {
+                auto& [buf, proc] = req.mapped();
+                std::ignore       = co_await send_resp(id, proc, std::move(response));
+            } else {
                 log_e("{}: response incoming for id {} but no promise registered", __func__, id.inner());
-                continue;
             }
-
-            auto& [buf, proc] = req.mapped();
-            std::ignore       = co_await send_resp(id, proc, std::move(response));
         }
 
         co_return Expect<void>{};
@@ -911,6 +978,15 @@ namespace madbfs::rpc
 
     AExpect<void> Server::send_resp(Id id, Procedure proc, Var<Status, Response> response)
     {
+        if (proc == Procedure::Ping) {
+            auto status  = std::get_if<Status>(&response);
+            auto buffer  = Vec<u8>{};
+            auto payload = ResponseBuilder{ buffer, id, proc, status ? *status : Errc::bad_message }.build();
+            auto n       = co_await async::write_exact(m_socket, payload);
+            HANDLE_ERROR(n, payload.size(), "failed to send response payload");
+            co_return Expect<void>{};
+        }
+
         auto status = Status{};
         if (auto err = std::get_if<Status>(&response); err) {
             status = *err;
@@ -1010,6 +1086,7 @@ namespace madbfs::rpc
         case Procedure::Close: return "Close";
         case Procedure::Read: return "Read";
         case Procedure::Write: return "Write";
+        case Procedure::Ping: return "Ping";
         }
 
         return "Unknown";
