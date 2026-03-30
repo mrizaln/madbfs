@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 project(
     madbfs-server
-    VERSION 0.9.0
+    VERSION 0.10.0
     LANGUAGES CXX
     DESCRIPTION "Userspace filesystem for Android via adb using FUSE (proxy component)"
 )
@@ -24,7 +24,7 @@ add_subdirectory(
     ${CMAKE_CURRENT_BINARY_DIR}/madbfs-common
 )
 
-add_library(madbfs-server-lib STATIC src/server.cpp)
+add_library(madbfs-server-lib STATIC src/server.cpp src/request_handler.cpp)
 target_include_directories(madbfs-server-lib PUBLIC include)
 target_link_libraries(madbfs-server-lib PUBLIC madbfs-common)
 
