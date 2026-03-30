@@ -34,9 +34,7 @@ namespace madbfs::rpc
         Close,
         Read,
         Write,
-
-        // special procedure for checking aliveness
-        Ping = std::numeric_limits<u8>::max(),
+        Ping,    // special procedure for checking aliveness
     };
 
     enum class OpenMode : u8
@@ -94,6 +92,7 @@ namespace madbfs::rpc
         struct Close         { u64 fd; };
         struct Read          { u64 fd; off_t offset; usize size; };
         struct Write         { u64 fd; off_t offset; Span<const u8> in; };
+        struct Ping          { };
         // clang-format on
     }
 
@@ -113,12 +112,19 @@ namespace madbfs::rpc
               req::Open,
               req::Close,
               req::Read,
-              req::Write>
+              req::Write,
+              req::Ping>
     {
         // make the base constructor visible
         using VarWrapper::VarWrapper;
 
-        Procedure proc() { return static_cast<Procedure>(index()); }
+        Procedure proc() const { return static_cast<Procedure>(index()); }
+    };
+
+    struct NamedRequest
+    {
+        Id      id;
+        Request req;
     };
 
     namespace resp
@@ -139,6 +145,7 @@ namespace madbfs::rpc
         struct Close         { };
         struct Read          { Span<const u8> read; };
         struct Write         { usize size; };
+        struct Ping          { };
         // clang-format on
 
         struct Stat
@@ -170,12 +177,19 @@ namespace madbfs::rpc
               resp::Open,
               resp::Close,
               resp::Read,
-              resp::Write>
+              resp::Write,
+              resp::Ping>
     {
         // make the base constructor visible
         using VarWrapper::VarWrapper;
 
-        Procedure proc() { return static_cast<Procedure>(index()); }
+        Procedure proc() const { return static_cast<Procedure>(index()); }
+    };
+
+    struct ParsedResponse
+    {
+        Id               id;
+        Expect<Response> resp;
     };
 
     template <typename T>
@@ -189,163 +203,6 @@ namespace madbfs::rpc
 
     template <IsResponse Resp>
     using ToReq = util::VarTraits<Response::Var>::Swap<Resp, rpc::Request::Var>;
-
-    /**
-     * @class Client
-     *
-     * @brief RPC Client.
-     */
-    class Client
-    {
-    public:
-        Client(Socket socket)
-            : m_socket{ std::move(socket) }
-            , m_channel{ socket.get_executor() }
-        {
-        }
-
-        Client(Client&&)            = default;
-        Client& operator=(Client&&) = default;
-
-        Client(const Client&)            = delete;
-        Client& operator=(const Client&) = delete;
-
-        ~Client() { stop(); }
-
-        /**
-         * @brief Generate next id.
-         */
-        Id next_id() { return ++m_counter; }    // starts from 1
-
-        /**
-         * @brief Check whether the client sender/receiver channel is open.
-         */
-        bool running() const { return m_running; }
-
-        /**
-         * @brief Start the client sender/receiver channel with the server.
-         *
-         * The function will return immediately when awaited, spawning a new coroutine detached from caller.
-         * The client manages the lifetime.
-         */
-        Await<void> start();
-
-        /**
-         * @brief Check if server is alive.
-         *
-         * @param timeout Operation timeout.
-         *
-         * @return Returned an error if server is not alive.
-         */
-        AExpect<void> ping(Opt<Milliseconds> timeout);
-
-        /**
-         * @brief Send request through the channel.
-         *
-         * @param buffer Buffer used by `req`.
-         * @param req The requested procedure.
-         *
-         * @return The returned response or error.
-         *
-         * THe Buffer will be reused for the response returned by this function.
-         */
-        AExpect<Response> send_req(Vec<u8>& buffer, Request req);
-
-        /**
-         * @brief Stop and close the client sender/receiver channel and the socket.
-         */
-        void stop();
-
-    private:
-        struct Promise
-        {
-            Vec<u8>&                       buffer;
-            saf::promise<Expect<Response>> promise;
-        };
-
-        struct Pings
-        {
-            Id                   id;
-            saf::promise<Status> promise;
-        };
-
-        using Inflight = std::unordered_map<Id, Promise, Id::Hash>;
-        using Channel  = async::Channel<Tup<Id, Span<const u8>>>;
-
-        AExpect<void> receive();
-        AExpect<void> send();
-
-        Socket  m_socket;
-        Channel m_channel;
-
-        Inflight   m_requests;
-        Opt<Pings> m_pings;
-
-        Id::Inner m_counter = 0;
-        bool      m_running = false;
-    };
-
-    class Server
-    {
-    public:
-        using HandlerSig = Await<Var<Status, Response>>(Vec<u8>& buffer, Request request);
-        using Handler    = std::function<HandlerSig>;
-
-        Server(Socket socket)
-            : m_socket{ std::move(socket) }
-            , m_channel{ socket.get_executor() }
-            , m_pool{ 1 }
-        {
-        }
-
-        Server(Server&&)            = delete;
-        Server& operator=(Server&&) = delete;
-
-        Server(const Server&)            = delete;
-        Server& operator=(const Server&) = delete;
-
-        ~Server() { stop(); }
-
-        /**
-         * @brief Start listening for RPC requests.
-         *
-         * @param handler The procedure handler.
-         */
-        AExpect<void> listen(Handler handler);
-
-        /**
-         * @brief Stop listening for requests.
-         */
-        void stop();
-
-    private:
-        struct Promise
-        {
-            Vec<u8>   buffer;
-            Procedure procedure;
-        };
-
-        struct Pings
-        {
-            Id id;
-        };
-
-        using Inflight = std::unordered_map<Id, Promise, Id::Hash>;
-        using Channel  = async::Channel<Tup<Id, Var<Status, Response>>>;
-
-        AExpect<void> send();
-        AExpect<void> send_resp(Id id, Procedure proc, Var<Status, Response> response);
-
-        Socket  m_socket;
-        Channel m_channel;
-
-        Inflight   m_requests;
-        Opt<Pings> m_pings;
-
-        net::thread_pool m_pool;
-
-        bool m_running;
-    };
 
     static constexpr Str server_ready_string = "SERVER_IS_READY";
 
@@ -374,4 +231,17 @@ namespace madbfs::rpc
      * @brief Do a handshake with remote connection.
      */
     AExpect<void> handshake(Socket& sock);
+
+    // TODO: comments
+
+    AExpect<void> send_request(Socket& socket, Vec<u8>& buffer, Request request, Id id);
+    AExpect<void> send_response(
+        Socket&                               socket,
+        Vec<u8>&                              buffer,
+        Var<Tup<Procedure, Status>, Response> response,
+        Id                                    id
+    );
+
+    AExpect<NamedRequest>   receive_request(Socket& socket, Vec<u8>& buffer);
+    AExpect<ParsedResponse> receive_response(Socket& socket, Vec<u8>& buffer);
 }
