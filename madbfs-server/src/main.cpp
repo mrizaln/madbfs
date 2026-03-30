@@ -84,6 +84,9 @@ try {
     std::println(madbfs::rpc::server_ready_string);
     std::fflush(stdout);    // ensure the message is sent
 
+    madbfs::log_i("{}: madbfs-server version {}", __func__, MADBFS_VERSION_STRING);
+    madbfs::log_i("{}: launching tcp server on port: {}", __func__, args.port);
+
     auto res = madbfs::async::once(context, task());
 
     madbfs::log_i("server exited normally: {}", madbfs::err_msg(res.error_or({})));
