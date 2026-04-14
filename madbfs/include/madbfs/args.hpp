@@ -34,7 +34,7 @@ namespace madbfs::args
         int         cache_size = 256;    // in MiB
         int         page_size  = 128;    // in KiB
         int         ttl        = 30;     // in seconds
-        int         timeout    = 10;     // in seconds
+        int         timeout    = 2;      // in seconds
         int         port       = 12345;
         int         no_server  = false;
 
@@ -144,7 +144,7 @@ namespace madbfs::args
             "                             (default: 30)\n"
             "                             (set to 0 to disable it)\n"
             "    --timeout=<int>        set the timeout of every remote operation\n"
-            "                             (default: 10)\n"
+            "                             (default: 2)\n"
             "                             (set to 0 to disable it)\n"
             "    --port=<int>           set the port number the server will listen on\n"
             "                             (default: 12345)\n"
