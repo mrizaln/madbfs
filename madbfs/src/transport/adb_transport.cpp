@@ -424,6 +424,11 @@ namespace madbfs
 
 namespace madbfs::transport
 {
+    AdbTransport::~AdbTransport()
+    {
+        stop(Errc::operation_canceled);
+    }
+
     void AdbTransport::stop(rpc::Status status)
     {
         if (m_running) {
@@ -434,14 +439,14 @@ namespace madbfs::transport
             }
             m_requests.clear();
 
-            m_pool.stop();
-            m_pool.wait();
-
             m_in_channel.cancel();
             m_in_channel.close();
             m_out_channel.cancel();
             m_out_channel.close();
         }
+
+        m_pool.stop();
+        m_pool.wait();
     }
 
     Await<void> AdbTransport::start()
@@ -456,12 +461,15 @@ namespace madbfs::transport
 
             log::log_exception(e, "response_receive");
             if (not res) {
-                log_e("response_receive: finished with error: {}", err_msg(res.error()));
+                log_w("response_receive: finished with error: {}", err_msg(res.error()));
             }
 
-            log_e("response_receive: there are {} promises unhandled", m_requests.size());
-            for (auto& [id, p] : m_requests) {
-                p.result.set_value(Unexpect{ e ? Errc::state_not_recoverable : Errc::operation_canceled });
+            if (not m_requests.empty()) {
+                log_e("response_receive: there are {} promises unhandled", m_requests.size());
+                for (auto& [id, p] : m_requests) {
+                    p.result.set_value(Unexpect{ e ? Errc::state_not_recoverable : Errc::operation_canceled }
+                    );
+                }
             }
 
             m_requests.clear();
@@ -474,7 +482,7 @@ namespace madbfs::transport
         async::spawn(exec, request_dispatch(), [&](std::exception_ptr e, Expect<void> res) {
             log::log_exception(e, "request_send");
             if (not res) {
-                log_e("response_receive: finished with error: {}", err_msg(res.error()));
+                log_e("request_dispatch: finished with error: {}", err_msg(res.error()));
             }
             log_e("request_dispatch: stopped sending requests");
         });
@@ -483,7 +491,7 @@ namespace madbfs::transport
     AExpect<rpc::Response> AdbTransport::send(Vec<u8>& buffer, rpc::Request req)
     {
         if (not m_running) {
-            co_return Unexpect{ Errc::not_connected };
+            co_return Unexpect{ Errc::resource_unavailable_try_again };
         }
 
         auto id      = next_id();
@@ -505,7 +513,7 @@ namespace madbfs::transport
     AExpect<rpc::Response> AdbTransport::send(Vec<u8>& buffer, rpc::Request req, Milliseconds timeout)
     {
         if (not m_running) {
-            co_return Unexpect{ Errc::not_connected };
+            co_return Unexpect{ Errc::resource_unavailable_try_again };
         }
 
         auto id      = next_id();

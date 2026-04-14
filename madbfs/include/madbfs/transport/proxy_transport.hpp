@@ -19,7 +19,7 @@ namespace madbfs::transport
         ~ProxyTransport();
 
         /**
-         * @brief Create a new transport using proxy.
+         * @brief Create a new proxy transport.
          *
          * @param server Server path.
          * @param port The port the server will run on.

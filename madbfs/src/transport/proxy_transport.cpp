@@ -129,7 +129,6 @@ namespace madbfs::transport
     ProxyTransport::~ProxyTransport()
     {
         stop(Errc::operation_canceled);
-        log_d("{}: destructed", __func__);
     }
 
     AExpect<Uniq<ProxyTransport>> ProxyTransport::create(Opt<path::Path> server, u16 port)
@@ -165,7 +164,9 @@ namespace madbfs::transport
 
             m_channel.cancel();
             m_channel.close();
+        }
 
+        if (m_socket.is_open()) {
             m_socket.cancel();
             m_socket.close();
         }
@@ -201,12 +202,14 @@ namespace madbfs::transport
 
             log::log_exception(e, "response_receive");
             if (not res) {
-                log_e("response_receive: finished with error: {}", err_msg(res.error()));
+                log_w("response_receive: finished with error: {}", err_msg(res.error()));
             }
 
-            log_e("response_receive: there are {} promises unhandled", m_requests.size());
-            for (auto& [id, p] : m_requests) {
-                p.result.set_value(Unexpect{ Errc::operation_canceled });
+            if (not m_requests.empty()) {
+                log_e("response_receive: there are {} promises unhandled", m_requests.size());
+                for (auto& [id, p] : m_requests) {
+                    p.result.set_value(Unexpect{ Errc::operation_canceled });
+                }
             }
 
             m_requests.clear();
@@ -217,16 +220,15 @@ namespace madbfs::transport
         async::spawn(exec, request_send(), [&](std::exception_ptr e, Expect<void> res) {
             log::log_exception(e, "request_send");
             if (not res) {
-                log_e("response_receive: finished with error: {}", err_msg(res.error()));
+                log_w("request_send: finished with error: {}", err_msg(res.error()));
             }
-            log_e("request_send: stopped sending requests");
         });
     }
 
     AExpect<rpc::Response> ProxyTransport::send(Vec<u8>& buffer, rpc::Request req)
     {
         if (not m_running) {
-            co_return Unexpect{ Errc::not_connected };
+            co_return Unexpect{ Errc::resource_unavailable_try_again };
         }
 
         auto id      = next_id();
@@ -248,7 +250,7 @@ namespace madbfs::transport
     AExpect<rpc::Response> ProxyTransport::send(Vec<u8>& buffer, rpc::Request req, Milliseconds timeout)
     {
         if (not m_running) {
-            co_return Unexpect{ Errc::not_connected };
+            co_return Unexpect{ Errc::resource_unavailable_try_again };
         }
 
         auto id      = next_id();

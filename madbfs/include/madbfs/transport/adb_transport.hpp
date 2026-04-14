@@ -7,12 +7,25 @@ namespace madbfs::transport
     class AdbTransport final : public Transport
     {
     public:
+        /**
+         * @brief Create a new adb transport.
+         *
+         * @param exec Async io excecutor.
+         */
         AdbTransport(net::any_io_executor exec)
             : m_in_channel{ exec }
             , m_out_channel{ exec }
             , m_pool{ 1 }
         {
         }
+
+        AdbTransport(AdbTransport&&)            = delete;
+        AdbTransport& operator=(AdbTransport&&) = delete;
+
+        AdbTransport(const AdbTransport&)            = delete;
+        AdbTransport& operator=(const AdbTransport&) = delete;
+
+        ~AdbTransport();
 
         // overrides
         // ---------
