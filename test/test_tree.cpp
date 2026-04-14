@@ -1,4 +1,5 @@
 #include <madbfs-common/util/split.hpp>
+#include <madbfs/connection.hpp>
 #include <madbfs/path.hpp>
 #include <madbfs/tree/file_tree.hpp>
 #include <madbfs/tree/node.hpp>
@@ -154,42 +155,6 @@ String diff_str(Str str1, Str str2)
     return buf;
 }
 
-namespace mock
-{
-    using namespace madbfs;
-    using namespace madbfs::connection;
-    using data::OpenMode;
-    using data::Stat;
-    using path::Path;
-    using path::PathBuf;
-
-    class DummyConnection final : public Connection
-    {
-    public:
-        using Stats = Gen<ParsedStat>;
-
-        Str          name() const override { return "dummy"; }
-        Opt<Seconds> timeout() const override { return std::nullopt; }
-        Opt<Seconds> set_timeout(Opt<Seconds>) override { return std::nullopt; }
-
-        AExpect<Stats>  statdir(Path) override { co_return Unexpect{ {} }; }
-        AExpect<Stat>   stat(Path) override { co_return Stat{}; }
-        AExpect<String> readlink(Path path) override { co_return path.str(); };
-        AExpect<void>   mknod(Path, mode_t, dev_t) override { co_return Expect<void>{}; }
-        AExpect<void>   mkdir(Path, mode_t) override { co_return Expect<void>{}; }
-        AExpect<void>   unlink(Path) override { co_return Expect<void>{}; }
-        AExpect<void>   rmdir(Path) override { co_return Expect<void>{}; }
-        AExpect<void>   rename(Path, path::Path, u32) override { co_return Expect<void>{}; }
-        AExpect<void>   truncate(Path, off_t) override { co_return Expect<void>{}; }
-        AExpect<void>   utimens(Path, timespec, timespec) override { co_return Expect<void>{}; }
-        AExpect<usize>  copy_file_range(Path, off_t, Path, off_t, usize size) override { co_return size; }
-        AExpect<u64>    open(Path, OpenMode) override { co_return Expect<u64>{}; }
-        AExpect<void>   close(u64) override { co_return Expect<void>{}; }
-        AExpect<usize>  read(u64, Span<char>, off_t) override { co_return Expect<usize>{}; }
-        AExpect<usize>  write(u64, Span<const char>, off_t) override { co_return Expect<usize>{}; }
-    };
-}
-
 int main()
 {
     using namespace ut::literals;
@@ -203,7 +168,7 @@ int main()
         using madbfs::path::operator""_path;
 
         auto io_context = madbfs::async::Context{};
-        auto connection = mock::DummyConnection{};
+        auto connection = madbfs::Connection{ io_context, madbfs::connection_strategy::Null{} };
         auto cache      = madbfs::data::Cache{ io_context, connection, 64 * 1024, 1024 };
         auto counter    = std::atomic<u64>{};
 
@@ -276,7 +241,7 @@ int main()
         using namespace madbfs::tree;
 
         auto io_context = madbfs::async::Context{};
-        auto connection = mock::DummyConnection{};
+        auto connection = madbfs::Connection{ io_context, madbfs::connection_strategy::Null{} };
         auto cache      = madbfs::data::Cache{ io_context, connection, 64 * 1024, 1024 };
         auto tree       = FileTree{ connection, cache, std::nullopt };
 
