@@ -127,6 +127,13 @@ namespace madbfs::rpc
         Request req;
     };
 
+    struct RequestHeader
+    {
+        Id        id;
+        Procedure proc;
+        u64       size;
+    };
+
     namespace resp
     {
         // clang-format off
@@ -186,10 +193,12 @@ namespace madbfs::rpc
         Procedure proc() const { return static_cast<Procedure>(index()); }
     };
 
-    struct ParsedResponse
+    struct ResponseHeader
     {
-        Id               id;
-        Expect<Response> resp;
+        Id        id;
+        Procedure proc;
+        Status    status;
+        u64       size;
     };
 
     template <typename T>
@@ -236,12 +245,16 @@ namespace madbfs::rpc
 
     AExpect<void> send_request(Socket& socket, Vec<u8>& buffer, Request request, Id id);
     AExpect<void> send_response(
-        Socket&                               socket,
-        Vec<u8>&                              buffer,
-        Var<Tup<Procedure, Status>, Response> response,
-        Id                                    id
+        Socket&               socket,
+        Vec<u8>&              buffer,
+        Procedure             proc,
+        Var<Status, Response> response,
+        Id                    id
     );
 
-    AExpect<NamedRequest>   receive_request(Socket& socket, Vec<u8>& buffer);
-    AExpect<ParsedResponse> receive_response(Socket& socket, Vec<u8>& buffer);
+    AExpect<RequestHeader>  receive_request_header(Socket& socket);
+    AExpect<ResponseHeader> receive_response_header(Socket& socket);
+
+    AExpect<Request>  receive_request(Socket& socket, Vec<u8>& buffer, RequestHeader header);
+    AExpect<Response> receive_response(Socket& socket, Vec<u8>& buffer, ResponseHeader header);
 }

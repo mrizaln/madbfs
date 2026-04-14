@@ -376,6 +376,8 @@ namespace madbfs::rpc
 
     Span<const u8> build_request(Vec<u8>& buffer, const Request& req, Id id)
     {
+        buffer.clear();
+
         auto builder = RequestBuilder{ buffer, id, req.proc() };
 
         return req.visit(Overload{
@@ -480,17 +482,17 @@ namespace madbfs::rpc
         });
     }
 
-    Span<const u8> build_response(Vec<u8>& buffer, Var<Tup<Procedure, Status>, Response> response, Id id)
+    Span<const u8> build_response(Vec<u8>& buffer, Procedure proc, Var<Status, Response> response, Id id)
     {
+        buffer.clear();
+
         if (auto err = std::get_if<0>(&response); err) {
-            auto [proc, status] = *err;
-            return ResponseBuilder{ buffer, id, proc, status }.build();
+            return ResponseBuilder{ buffer, id, proc, *err }.build();
         }
 
-        const auto& resp = *std::get_if<1>(&response);
-
-        auto proc    = resp.proc();
         auto builder = ResponseBuilder{ buffer, id, proc, Status{} };
+
+        const auto& resp = *std::get_if<1>(&response);
 
         return resp.visit(Overload{
             [&](const resp::Stat& resp) {
@@ -811,19 +813,20 @@ namespace madbfs::rpc
     }
 
     AExpect<void> send_response(
-        Socket&                               socket,
-        Vec<u8>&                              buffer,
-        Var<Tup<Procedure, Status>, Response> response,
-        Id                                    id
+        Socket&               socket,
+        Vec<u8>&              buffer,
+        Procedure             proc,
+        Var<Status, Response> response,
+        Id                    id
     )
     {
-        auto payload = build_response(buffer, response, id);
+        auto payload = build_response(buffer, proc, response, id);
         auto n       = co_await async::write_exact(socket, payload);
         HANDLE_ERROR(n, payload.size(), "failed to send response payload");
         co_return Expect<void>{};
     }
 
-    AExpect<NamedRequest> receive_request(Socket& socket, Vec<u8>& buffer)
+    AExpect<RequestHeader> receive_request_header(Socket& socket)
     {
         constexpr auto header_len = sizeof(Id) + sizeof(Procedure) + sizeof(u64);
 
@@ -838,19 +841,13 @@ namespace madbfs::rpc
 
         if (not proc) {
             log_e("{}: received response for [{}] but it's an [invalid procedure]", __func__, id.inner());
-            co_await async::discard(socket, size);    // do I need to do this?
             co_return Unexpect{ Status::bad_message };
         }
 
-        auto n1 = co_await async::read_exact<u8>(socket, buffer);
-        HANDLE_ERROR(n1, buffer.size(), "failed to read request payload");
-
-        auto req = parse_request(buffer, *proc);
-        co_return req ? Expect<NamedRequest>{ std::in_place, id, std::move(*req) }
-                      : Unexpect{ Status::bad_message };
+        co_return RequestHeader{ .id = id, .proc = *proc, .size = size };
     }
 
-    AExpect<ParsedResponse> receive_response(Socket& socket, Vec<u8>& buffer)
+    AExpect<ResponseHeader> receive_response_header(Socket& socket)
     {
         constexpr auto header_len = sizeof(Id) + sizeof(Procedure) + sizeof(Status) + sizeof(u64);
 
@@ -866,17 +863,35 @@ namespace madbfs::rpc
 
         if (not proc) {
             log_e("{}: received response for [{}] but it's an [invalid procedure]", __func__, id.inner());
-            co_await async::discard(socket, size);
             co_return Unexpect{ Status::bad_message };
-        } else if (status != Status{}) {
-            co_return ParsedResponse{ id, Unexpect{ status } };
         }
 
-        buffer.resize(size);
+        co_return ResponseHeader{ .id = id, .proc = *proc, .status = status, .size = size };
+    }
+
+    AExpect<Request> receive_request(Socket& socket, Vec<u8>& buffer, RequestHeader header)
+    {
+        buffer.resize(header.size);
+
+        auto n1 = co_await async::read_exact<u8>(socket, buffer);
+        HANDLE_ERROR(n1, buffer.size(), "failed to read request payload");
+
+        auto req = parse_request(buffer, header.proc);
+        co_return req ? Expect<Request>{ std::move(*req) } : Unexpect{ Status::bad_message };
+    }
+
+    AExpect<Response> receive_response(Socket& socket, Vec<u8>& buffer, ResponseHeader header)
+    {
+        if (header.status != Status{}) {
+            co_return Unexpect{ header.status };
+        }
+
+        buffer.resize(header.size);
+
         auto n1 = co_await async::read_exact<u8>(socket, buffer);
         HANDLE_ERROR(n1, buffer.size(), "failed to read response payload");
 
-        auto resp = parse_response(buffer, *proc);
-        co_return ParsedResponse{ id, resp ? Expect<Response>{ *resp } : Unexpect{ Status::bad_message } };
+        auto resp = parse_response(buffer, header.proc);
+        co_return resp ? Expect<Response>{ *resp } : Unexpect{ Status::bad_message };
     }
 }
