@@ -112,7 +112,11 @@ namespace madbfs
         auto transport = co_await create_optimized_transport(m_strategy);
         if (not transport) {
             co_return Unexpect{ transport.error() };
+        } else if ((**transport).name() == m_transport->name()) {
+            co_return Expect<void>{};    // well, do nothing
         }
+
+        log_i("{}: new {} transport created", __func__, (**transport).name());
 
         if (m_reconnection) {
             co_return Unexpect{ Errc::operation_in_progress };
@@ -122,7 +126,11 @@ namespace madbfs
         m_reconnection = promise.get_future().share();
 
         m_transport->stop(Errc::resource_unavailable_try_again);
-        m_transport = std::move(*transport);
+
+        const auto old = m_transport->name();
+        m_transport    = std::move(*transport);
+
+        log_i("{}: {} transport replaced with {} transport", __func__, old, m_transport->name());
 
         promise.set_value(Errc{});
         m_reconnection.reset();
@@ -140,9 +148,11 @@ namespace madbfs
         m_reconnection = promise.get_future().share();
 
         m_transport->stop(Errc::resource_unavailable_try_again);
-        m_transport.reset();
 
-        m_transport = co_await create_transport(m_strategy);
+        const auto old = m_transport->name();
+        m_transport    = co_await create_transport(m_strategy);
+
+        log_i("{}: {} transport replaced with {} transport", __func__, old, m_transport->name());
 
         promise.set_value(Errc{});
         m_reconnection.reset();

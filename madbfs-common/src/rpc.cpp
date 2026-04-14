@@ -364,6 +364,7 @@ namespace madbfs::rpc
 
         auto buffer = String(message.size(), '\0');
         auto n1     = co_await async::read_lv<char>(sock, buffer);
+        log_d("{}: received: {:?}", __func__, Str{ buffer.data(), n1.value_or(0) });
         HANDLE_ERROR(n1, buffer.size(), "failed to read handshake from server");
 
         if (not sr::equal(buffer, message)) {
