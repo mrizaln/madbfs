@@ -118,12 +118,11 @@ namespace madbfs::data
         /**
          * @brief Construct a new cache.
          *
-         * @param ctx Async context.
          * @param connection Connection to device.
          * @param page_size Page size.
          * @param max_pages Maximum number of pages cached.
          */
-        Cache(async::Context& ctx, Connection& connection, usize page_size, usize max_pages);
+        Cache(Connection& connection, usize page_size, usize max_pages);
 
         /**
          * @brief Hint the cache to open a real fd to a file in the device for further operations.
@@ -216,15 +215,22 @@ namespace madbfs::data
 
         /**
          * @brief Invalidate all entries.
+         *
+         * Calling this function is the same as calling `shutdown()`
          */
         Await<void> invalidate_all();
 
         /**
          * @brief Shut down the cache and invalidate all cache entries.
          *
-         * This function should be called before destruction to stop internal loop.
+         * Calling this function is the same as calling `shutdown()`
          */
         Await<void> shutdown();
+
+        /**
+         * @brief Remove unused fds.
+         */
+        Await<void> clean_stale_fds();
 
         Await<void> set_page_size(usize new_page_size);
         Await<void> set_max_pages(usize new_max_pages);
@@ -356,7 +362,6 @@ namespace madbfs::data
         ReadQueue m_read_queue;    // pages that are still pulling data
 
         Vec<Tup<Id, FdKind>> m_stale_fds;
-        async::Timer         m_stale_fds_timer;
 
         usize m_page_size = 0;
         usize m_max_pages = 0;

@@ -90,6 +90,8 @@ namespace madbfs
 
         Await<void> watchdog();
 
+        Await<void> reaper();
+
         struct fuse* m_fuse;
 
         async::Context   m_async_ctx;
@@ -102,6 +104,7 @@ namespace madbfs
         Opt<ipc::Server> m_ipc;
 
         async::Timer    m_watchdog_timer;
+        async::Timer    m_reaper_timer;
         net::signal_set m_signal;
 
         String          m_mountpoint;

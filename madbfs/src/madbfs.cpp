@@ -208,10 +208,11 @@ namespace madbfs
         , m_work_guard{ m_async_ctx.get_executor() }
         , m_work_thread{ [this] { work_thread_function(m_async_ctx); } }
         , m_connection{ prepare_connection(m_async_ctx, server, port) }
-        , m_cache{ m_async_ctx, m_connection, page_size, max_pages }
+        , m_cache{ m_connection, page_size, max_pages }
         , m_tree{ m_connection, m_cache, ttl }
         , m_ipc{ create_ipc(m_async_ctx) }
         , m_watchdog_timer{ m_async_ctx }
+        , m_reaper_timer{ m_async_ctx }
         , m_signal{ m_async_ctx, SIGINT, SIGTERM }
         , m_mountpoint{ mountpoint }
         , m_server_path{ server }
@@ -225,9 +226,8 @@ namespace madbfs
             });
         }
 
-        async::spawn(m_async_ctx, watchdog(), [](std::exception_ptr e) {    //
-            log::log_exception(e, "Madbfs");
-        });
+        async::spawn(m_async_ctx, watchdog(), [](std::exception_ptr e) { log::log_exception(e, "Madbfs"); });
+        async::spawn(m_async_ctx, reaper(), [](std::exception_ptr e) { log::log_exception(e, "Madbfs"); });
 
         async::spawn(m_async_ctx, m_connection.start(), [](std::exception_ptr e) {
             log::log_exception(e, "Madbfs");
@@ -247,14 +247,15 @@ namespace madbfs
     {
         m_signal.cancel();
 
-        m_connection.cancel(Errc::operation_canceled);
-        m_watchdog_timer.cancel();
-
         if (m_ipc) {
             m_ipc->stop();
         }
 
+        m_watchdog_timer.cancel();
+        m_reaper_timer.cancel();
+
         async::block(m_async_ctx, m_cache.shutdown());
+        m_connection.cancel(Errc::operation_canceled);
 
         m_work_guard.reset();
         m_async_ctx.stop();
@@ -270,14 +271,11 @@ namespace madbfs
     Await<void> Madbfs::watchdog()
     {
         using namespace std::chrono_literals;
-        constexpr auto default_timeout = 120s;
+        constexpr auto interval = 10s;
 
-        while (m_work_guard.owns_work()) {
-            m_watchdog_timer.expires_after(m_timeout.value_or(default_timeout));
+        while (true) {
+            m_watchdog_timer.expires_after(interval);
             if (auto res = co_await m_watchdog_timer.async_wait(); not res) {
-                if (res.error() == net::error::operation_aborted) {
-                    continue;
-                }
                 break;
             }
 
@@ -285,7 +283,7 @@ namespace madbfs
 
             // FIXME: the cache should close/remove all file descriptor on reconnection/optimization
 
-            auto ok = co_await m_connection.ping(m_timeout.value_or(default_timeout));
+            auto ok = co_await m_connection.ping(m_timeout.value_or(Seconds::max()));
 
             if (not ok) {
                 log_i("{}: connection is timed out", __func__);
@@ -293,13 +291,28 @@ namespace madbfs
                     co_await m_connection.start();
                 }
             } else if (not m_connection.is_optimal()) {
-                log_i("{}: connection is not optimized, trying to optimize", __func__);
+                log_i("{}: connection is ok but not optimized. trying to optimize...", __func__);
                 if (auto res = co_await m_connection.optimize(); res) {
                     co_await m_connection.start();
                 }
             } else {
                 log_d("{}: connection is ok", __func__);
             }
+        }
+    }
+
+    Await<void> Madbfs::reaper()
+    {
+        using namespace std::chrono_literals;
+        constexpr auto interval = 10s;
+
+        while (true) {
+            m_reaper_timer.expires_after(interval);
+            if (auto res = co_await m_reaper_timer.async_wait(); not res) {
+                break;
+            }
+
+            co_await m_cache.clean_stale_fds();
         }
     }
 }
