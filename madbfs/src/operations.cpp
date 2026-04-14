@@ -119,9 +119,8 @@ namespace madbfs::operations
             args->server.reset();
         }
 
-        auto server = args->server.and_then([](const auto& f) {
-            return path::create(f.c_str()).transform(proj(&path::SemiPath::path));
-        });
+        auto server_semi = args->server.and_then([](const auto& f) { return path::create(f.c_str()); });
+        auto server      = server_semi.transform(proj(&path::SemiPath::path));
 
         auto cache_size = args->cachesize * 1024 * 1024;
         auto page_size  = args->pagesize * 1024;
