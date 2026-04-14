@@ -300,9 +300,9 @@ namespace madbfs::ipc
     void Server::stop()
     {
         m_running = false;
+        m_logcat_timer.cancel();
         m_socket.cancel();
         m_socket.close();
-        m_logcat_timer.cancel();
     }
 
     Await<void> Server::run()
@@ -389,7 +389,9 @@ namespace madbfs::ipc
 
         while (m_running) {
             m_logcat_timer.expires_after(100ms);
-            co_await m_logcat_timer.async_wait();
+            if (auto res = co_await m_logcat_timer.async_wait(); not res) {
+                break;
+            }
 
             if (m_logcat_subscribers.empty()) {
                 if (not prev_empty) {
