@@ -280,19 +280,18 @@ namespace madbfs
             }
 
             log_d("{}: checking connection", __func__);
-
-            // FIXME: the cache should close/remove all file descriptor on reconnection/optimization
-
             auto ok = co_await m_connection.ping(m_timeout.value_or(Seconds::max()));
 
             if (not ok) {
                 log_i("{}: connection is timed out", __func__);
                 if (auto res = co_await m_connection.reconnect(); res) {
+                    co_await m_cache.invalidate_fds(false);
                     co_await m_connection.start();
                 }
             } else if (not m_connection.is_optimal()) {
                 log_i("{}: connection is ok but not optimized. trying to optimize...", __func__);
                 if (auto res = co_await m_connection.optimize(); res) {
+                    co_await m_cache.invalidate_fds(false);
                     co_await m_connection.start();
                 }
             } else {

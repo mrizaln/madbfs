@@ -232,6 +232,16 @@ namespace madbfs::data
          */
         Await<void> clean_stale_fds();
 
+        /**
+         * @brief Remove all fds.
+         *
+         * @param close Whether to close the fds on remove.
+         *
+         * If you already know that the connection to the device is not available, you can set the `close`
+         * parameter to `false` to not bother trying closing the fds from the device.
+         */
+        Await<void> invalidate_fds(bool close);
+
         Await<void> set_page_size(usize new_page_size);
         Await<void> set_max_pages(usize new_max_pages);
 

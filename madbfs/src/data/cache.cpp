@@ -359,6 +359,12 @@ namespace madbfs::data
             }
         }
 
+        co_await invalidate_fds(true);
+
+        m_table.clear();
+        m_lru.clear();
+    }
+
     Await<void> Cache::clean_stale_fds()
     {
         using namespace std::chrono_literals;
@@ -431,25 +437,28 @@ namespace madbfs::data
         }
     }
 
+    Await<void> Cache::invalidate_fds(bool close)
+    {
+        auto to_close = Vec<u64>{};
+
         for (auto& entry : m_table | sv::values) {
             if (entry.read_fd) {
-                const auto fd = *entry.read_fd;
+                to_close.emplace_back(*entry.read_fd);
                 entry.read_fd.reset();
-                if (auto res = co_await m_connection.close(fd); not res) {
-                    log_w("{}: failure on closing fd [{}]: {}", __func__, fd, err_msg(res.error()));
-                }
             }
             if (entry.write_fd) {
-                const auto fd = *entry.write_fd;
+                to_close.emplace_back(*entry.write_fd);
                 entry.write_fd.reset();
-                if (auto res = co_await m_connection.close(fd); not res) {
-                    log_w("{}: failure on closing fd [{}]: {}", __func__, fd, err_msg(res.error()));
-                }
             }
         }
 
-        m_table.clear();
-        m_lru.clear();
+        if (close) {
+            for (auto fd : to_close) {
+                if (auto res = co_await m_connection.close(fd); not res) {
+                    log_e("{}: failure on closing fd [{}]: {}", __func__, fd, err_msg(res.error()));
+                }
+            }
+        }
     }
 
     Await<void> Cache::set_page_size(usize new_page_size)
