@@ -1,4 +1,7 @@
 #include "madbfs/tree/node.hpp"
+
+#include "madbfs/connection.hpp"
+
 #include "madbfs-common/log.hpp"
 
 namespace madbfs::tree::node

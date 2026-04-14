@@ -1,6 +1,6 @@
 #include "madbfs/data/cache.hpp"
 
-#include "madbfs/connection/connection.hpp"
+#include "madbfs/connection.hpp"
 
 #include <madbfs-common/log.hpp>
 #include <madbfs-common/util/defer.hpp>
@@ -75,7 +75,7 @@ namespace madbfs::data
 
 namespace madbfs::data
 {
-    Cache::Cache(async::Context& ctx, connection::Connection& connection, usize page_size, usize max_pages)
+    Cache::Cache(async::Context& ctx, Connection& connection, usize page_size, usize max_pages)
         : m_connection{ connection }
         , m_stale_fds_timer{ ctx }
         , m_page_size{ std::bit_ceil(page_size) }
@@ -661,8 +661,7 @@ namespace madbfs::data
 
         while (true) {
             m_stale_fds_timer.expires_after(interval);
-            auto res = co_await m_stale_fds_timer.async_wait();
-            if (not res) {
+            if (auto res = co_await m_stale_fds_timer.async_wait(); not res) {
                 co_return;
             }
 
@@ -691,6 +690,15 @@ namespace madbfs::data
                 if (fd) {
                     finished_fds.emplace_back(*fd);
                     stale_to_remove.push_back(i);
+                } else {
+                    log_d(
+                        "{}: stale but has reader/writer? [reader={}|writer={}] [read_in={}|write_in={}]",
+                        __func__,
+                        entry.reader,
+                        entry.writer,
+                        entry.read_inflight,
+                        entry.write_inflight
+                    );
                 }
             }
 
@@ -713,7 +721,7 @@ namespace madbfs::data
             for (auto it = m_table.begin(); it != m_table.end();) {
                 if (it->second.is_free()) {
                     const auto& [id, entry] = *it;
-                    log_t("{}: remove free entry for [{}] {:?}", __func__, id.inner(), entry.path);
+                    log_d("{}: remove free entry for [{}] {:?}", __func__, id.inner(), entry.path);
                     it = m_table.erase(it);
                 } else {
                     ++it;

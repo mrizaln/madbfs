@@ -12,7 +12,7 @@
 #include <map>
 #include <unordered_map>
 
-namespace madbfs::connection
+namespace madbfs
 {
     class Connection;
 }
@@ -123,7 +123,7 @@ namespace madbfs::data
          * @param page_size Page size.
          * @param max_pages Maximum number of pages cached.
          */
-        Cache(async::Context& ctx, connection::Connection& connection, usize page_size, usize max_pages);
+        Cache(async::Context& ctx, Connection& connection, usize page_size, usize max_pages);
 
         /**
          * @brief Hint the cache to open a real fd to a file in the device for further operations.
@@ -349,7 +349,7 @@ namespace madbfs::data
          */
         Await<void> reaper();
 
-        connection::Connection& m_connection;
+        Connection& m_connection;
 
         Lru       m_lru;           // most recently used is at the front
         Lookup    m_table;         // lookup table for fast page access

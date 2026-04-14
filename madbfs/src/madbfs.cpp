@@ -1,8 +1,5 @@
 #include "madbfs/madbfs.hpp"
 
-#include "madbfs/connection/adb_connection.hpp"
-#include "madbfs/connection/server_connection.hpp"
-
 #include <madbfs-common/log.hpp>
 
 #define FUSE_USE_VERSION 31
@@ -30,10 +27,10 @@ namespace madbfs
             const auto max_pages     = madbfs.m_cache.max_pages();
             const auto current_pages = madbfs.m_cache.current_pages();
             const auto ttl_sec       = madbfs.m_tree.ttl().transform(&Seconds::count);
-            const auto timeout_sec   = madbfs.m_connection->timeout().transform(&Seconds::count);
+            const auto timeout_sec   = madbfs.m_timeout.transform(&Seconds::count);
 
             co_return json::value{
-                { "connection", madbfs.m_connection->name() },
+                { "connection", madbfs.m_connection.name() },
                 { "log_level", log::level_to_str(log::get_level()) },
                 { "ttl", ttl_sec.value_or(0) },
                 { "timeout", timeout_sec.value_or(0) },
@@ -109,13 +106,11 @@ namespace madbfs
 
         Await<json::value> handle(ipc::op::SetTimeout ttl)
         {
-            const auto new_timeout = ttl.sec < 1 ? std::nullopt : Opt<Seconds>{ ttl.sec };
-            const auto old_timeout = madbfs.m_connection->set_timeout(new_timeout);
-
+            auto old = std::exchange(madbfs.m_timeout, ttl.sec < 1 ? std::nullopt : Opt<Seconds>{ ttl.sec });
             co_return json::value{
                 { "timeout",
-                  { { "old", old_timeout.transform(&Seconds::count).value_or(0) },    //
-                    { "new", new_timeout.transform(&Seconds::count).value_or(0) } } },
+                  { { "old", old.transform(&Seconds::count).value_or(0) },    //
+                    { "new", madbfs.m_timeout.transform(&Seconds::count).value_or(0) } } },
             };
         }
 
@@ -145,25 +140,17 @@ namespace madbfs
 
 namespace madbfs
 {
-    Uniq<connection::Connection> Madbfs::prepare_connection(
-        async::Context& ctx,
-        Opt<path::Path> server,
-        u16             port,
-        Opt<Seconds>    timeout
-    )
+    Connection Madbfs::prepare_connection(async::Context& ctx, Opt<path::Path> server, u16 port)
     {
-        auto coro = [=] noexcept -> Await<Uniq<connection::Connection>> {
-            auto res = co_await connection::ServerConnection::prepare_and_create(server, port, timeout);
-            if (not res) {
-                log_c("prepare_connection: failed to construct ServerConnection: {}", err_msg(res.error()));
-                log_c("prepare_connection: falling back to AdbConnection");
-                co_return std::make_unique<connection::AdbConnection>();
-            }
-            log_d("prepare_connection: successfully created ServerConnection");
-            co_return std::move(*res);
-        };
+        // if (server) {
+        //     return Connection{ ctx, connection_strategy::Proxy{ server->owned(), port } };
+        // } else {
+        //     return Connection{ ctx, connection_strategy::Adb{} };
+        // }
 
-        return async::block(ctx, coro());
+        return Connection{
+            ctx, connection_strategy::Proxy{ server ? Opt{ server->owned() } : std::nullopt, port }
+        };
     }
 
     Opt<ipc::Server> Madbfs::create_ipc(async::Context& ctx)
@@ -220,12 +207,16 @@ namespace madbfs
         , m_async_ctx{}
         , m_work_guard{ m_async_ctx.get_executor() }
         , m_work_thread{ [this] { work_thread_function(m_async_ctx); } }
-        , m_connection{ prepare_connection(m_async_ctx, server, port, timeout) }
-        , m_cache{ m_async_ctx, *m_connection, page_size, max_pages }
-        , m_tree{ *m_connection, m_cache, ttl }
+        , m_connection{ prepare_connection(m_async_ctx, server, port) }
+        , m_cache{ m_async_ctx, m_connection, page_size, max_pages }
+        , m_tree{ m_connection, m_cache, ttl }
         , m_ipc{ create_ipc(m_async_ctx) }
+        , m_watchdog_timer{ m_async_ctx }
         , m_signal{ m_async_ctx, SIGINT, SIGTERM }
         , m_mountpoint{ mountpoint }
+        , m_server_path{ server }
+        , m_server_port{ port }
+        , m_timeout{ timeout }
     {
         if (m_ipc) {
             auto coro = m_ipc->launch([this](ipc::FsOp op) { return ipc_handler(op); });
@@ -233,6 +224,14 @@ namespace madbfs
                 log::log_exception(e, "Madbfs");
             });
         }
+
+        async::spawn(m_async_ctx, watchdog(), [](std::exception_ptr e) {    //
+            log::log_exception(e, "Madbfs");
+        });
+
+        async::spawn(m_async_ctx, m_connection.start(), [](std::exception_ptr e) {
+            log::log_exception(e, "Madbfs");
+        });
 
         m_signal.async_wait([this, pid = ::getpid()](net::error_code ec, int sig) {
             if (not ec) {
@@ -247,6 +246,9 @@ namespace madbfs
     Madbfs::~Madbfs()
     {
         m_signal.cancel();
+
+        m_connection.cancel(Errc::operation_canceled);
+        m_watchdog_timer.cancel();
 
         if (m_ipc) {
             m_ipc->stop();
@@ -263,5 +265,41 @@ namespace madbfs
     {
         auto handler = IpcHandler{ *this };
         co_return co_await op.visit([&](auto&& op) { return handler.handle(op); });
+    }
+
+    Await<void> Madbfs::watchdog()
+    {
+        using namespace std::chrono_literals;
+        constexpr auto default_timeout = 120s;
+
+        while (m_work_guard.owns_work()) {
+            m_watchdog_timer.expires_after(m_timeout.value_or(default_timeout));
+            if (auto res = co_await m_watchdog_timer.async_wait(); not res) {
+                if (res.error() == net::error::operation_aborted) {
+                    continue;
+                }
+                break;
+            }
+
+            log_d("{}: checking connection", __func__);
+
+            // FIXME: the cache should close/remove all file descriptor on reconnection/optimization
+
+            auto ok = co_await m_connection.ping(m_timeout.value_or(default_timeout));
+
+            if (not ok) {
+                log_i("{}: connection is timed out", __func__);
+                if (auto res = co_await m_connection.reconnect(); res) {
+                    co_await m_connection.start();
+                }
+            } else if (not m_connection.is_optimal()) {
+                log_i("{}: connection is not optimized, trying to optimize", __func__);
+                if (auto res = co_await m_connection.optimize(); res) {
+                    co_await m_connection.start();
+                }
+            } else {
+                log_d("{}: connection is ok", __func__);
+            }
+        }
     }
 }

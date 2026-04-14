@@ -1,12 +1,13 @@
 #include "madbfs/tree/file_tree.hpp"
 
+#include "madbfs/connection.hpp"
 #include "madbfs/tree/node.hpp"
 
 #include <madbfs-common/log.hpp>
 
 namespace madbfs::tree
 {
-    FileTree::FileTree(connection::Connection& connection, data::Cache& cache, Opt<Seconds> ttl)
+    FileTree::FileTree(Connection& connection, data::Cache& cache, Opt<Seconds> ttl)
         : m_root{ "/", nullptr, {}, node::Directory{} }
         , m_connection{ connection }
         , m_cache{ cache }

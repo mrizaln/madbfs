@@ -1,7 +1,7 @@
 #pragma once
 
 #include "madbfs/cmd.hpp"
-#include "madbfs/connection/connection.hpp"
+#include "madbfs/connection.hpp"
 
 #include <madbfs-common/log.hpp>
 #include <madbfs-common/util/split.hpp>
@@ -167,15 +167,15 @@ namespace madbfs::args
      *
      * @return Device status.
      */
-    inline Await<connection::DeviceStatus> check_serial(Str serial)
+    inline Await<DeviceStatus> check_serial(Str serial)
     {
-        if (auto maybe_devices = co_await connection::list_devices(); maybe_devices.has_value()) {
-            auto found = sr::find(*maybe_devices, serial, &connection::Device::serial);
+        if (auto maybe_devices = co_await list_adb_devices(); maybe_devices.has_value()) {
+            auto found = sr::find(*maybe_devices, serial, &Device::serial);
             if (found != maybe_devices->end()) {
                 co_return found->status;
             }
         }
-        co_return connection::DeviceStatus::Unknown;
+        co_return DeviceStatus::Unknown;
     }
 
     /**
@@ -187,13 +187,13 @@ namespace madbfs::args
      */
     inline Await<String> get_serial()
     {
-        auto maybe_devices = co_await connection::list_devices();
+        auto maybe_devices = co_await list_adb_devices();
         if (not maybe_devices.has_value()) {
             co_return "";
         }
-        auto devices = *maybe_devices
-                     | sv::filter([](auto&& d) { return d.status == connection::DeviceStatus::Device; })
-                     | sr::to<Vec<connection::Device>>();
+        auto devices = *maybe_devices    //
+                     | sv::filter([](auto&& d) { return d.status == DeviceStatus::Device; })
+                     | sr::to<Vec<Device>>();
 
         if (devices.empty()) {
             co_return "";
@@ -374,7 +374,7 @@ namespace madbfs::args
         }
 
         std::println("[madbfs] checking adb availability...");
-        if (auto status = co_await connection::start_connection(); not status) {
+        if (auto status = co_await start_adb_server(); not status) {
             std::println(stderr, "\nerror: failed to start adb server [{}].", err_msg(status.error()));
             std::println(stderr, "\nnote: make sure adb is installed and in PATH.");
             std::println(stderr, "note: make sure phone debugging permission is enabled.");
@@ -404,7 +404,7 @@ namespace madbfs::args
             }
         }
 
-        if (auto dev = co_await check_serial(madbfs_opt.serial); dev != connection::DeviceStatus::Device) {
+        if (auto dev = co_await check_serial(madbfs_opt.serial); dev != DeviceStatus::Device) {
             std::println(stderr, "error: serial '{} 'is not valid ({})", madbfs_opt.serial, to_string(dev));
             ::fuse_opt_free_args(&args);
             co_return ParseResult{ 1 };
