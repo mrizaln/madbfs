@@ -404,4 +404,9 @@ namespace madbfs::server
 
         return rpc::resp::Write{ .size = static_cast<usize>(len) };
     }
+
+    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Ping req)
+    {
+        return rpc::resp::Ping{ .num = req.num };
+    }
 }

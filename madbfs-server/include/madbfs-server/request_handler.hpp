@@ -28,6 +28,7 @@ namespace madbfs::server
         Response handle_req(Vec<u8>& buf, rpc::req::Close req);
         Response handle_req(Vec<u8>& buf, rpc::req::Read req);
         Response handle_req(Vec<u8>& buf, rpc::req::Write req);
+        Response handle_req(Vec<u8>& buf, rpc::req::Ping req);
 
     private:
         bool m_renameat2_impl       = true;

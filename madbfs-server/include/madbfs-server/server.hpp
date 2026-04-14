@@ -18,6 +18,8 @@ namespace madbfs::server
         {
         }
 
+        ~Connection(){ stop(); }
+
         AExpect<void> run();
 
         void stop();
@@ -42,7 +44,7 @@ namespace madbfs::server
         net::thread_pool m_pool;
 
         RequestHandler m_handler;
-        bool           m_running;
+        bool           m_running = false;
     };
 
     class Server
@@ -74,6 +76,6 @@ namespace madbfs::server
 
         async::tcp::Acceptor m_acceptor;
         Opt<Connection>      m_connection;
-        std::atomic<bool>    m_running;
+        bool                 m_running = false;
     };
 }

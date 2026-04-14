@@ -92,7 +92,7 @@ namespace madbfs::rpc
         struct Close         { u64 fd; };
         struct Read          { u64 fd; off_t offset; usize size; };
         struct Write         { u64 fd; off_t offset; Span<const u8> in; };
-        struct Ping          { };
+        struct Ping          { u64 num; };
         // clang-format on
     }
 
@@ -152,7 +152,7 @@ namespace madbfs::rpc
         struct Close         { };
         struct Read          { Span<const u8> read; };
         struct Write         { usize size; };
-        struct Ping          { };
+        struct Ping          { u64 num; };
         // clang-format on
 
         struct Stat

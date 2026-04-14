@@ -475,8 +475,9 @@ namespace madbfs::rpc
                     .write_bytes(req.in)
                     .build();
             },
-            [&](req::Ping) {
+            [&](req::Ping req) {
                 return builder    //
+                    .write_int<u64>(req.num)
                     .build();
             },
         });
@@ -543,7 +544,7 @@ namespace madbfs::rpc
             [&](const resp::Close&             ) { return builder.build();                           },
             [&](const resp::Read&          resp) { return builder.write_bytes   (resp.read).build(); },
             [&](const resp::Write&         resp) { return builder.write_int<u64>(resp.size).build(); },
-            [&](const resp::Ping&) { return builder.build(); },
+            [&](const resp::Ping&          resp) { return builder.write_int<u64>(resp.num ).build(); },
             // clang-format on
         });
     }
@@ -677,7 +678,10 @@ namespace madbfs::rpc
             return req::Write{ .fd = *fd, .offset = static_cast<off_t>(*offset), .in = *bytes };
         }
 
-        case Procedure::Ping: return req::Ping{};
+        case Procedure::Ping: {
+            TRY(num, reader.read_int<u64>())
+            return req::Ping{ .num = *num };
+        }
         }
 
         return std::nullopt;
@@ -798,7 +802,10 @@ namespace madbfs::rpc
             return resp::Write{ .size = static_cast<usize>(*size) };
         }
 
-        case Procedure::Ping: return resp::Ping{};
+        case Procedure::Ping: {
+            TRY(num, reader.read_int<u64>())
+            return resp::Ping{ .num = *num };
+        }
         }
 
         return std::nullopt;
