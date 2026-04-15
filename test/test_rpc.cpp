@@ -4,6 +4,7 @@
 #include <madbfs-common/rpc.hpp>
 
 #include <boost/ut.hpp>
+#include <spdlog/sinks/null_sink.h>
 #include <spdlog/spdlog.h>
 
 #include <thread>
@@ -109,6 +110,7 @@ int main()
     using namespace ut::literals;
     using namespace ut::operators;
 
+    spdlog::set_default_logger(spdlog::null_logger_mt("madbfs-test-rpc"));
     // spdlog::set_level(spdlog::level::debug);
 
     auto context = async::Context{};

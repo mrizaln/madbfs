@@ -6,8 +6,10 @@
 
 #include <boost/ut.hpp>
 #include <dtlx/dtlx.hpp>
+#include <fmt/format.h>
+#include <spdlog/sinks/null_sink.h>
+#include <spdlog/spdlog.h>
 
-#include <format>
 #include <source_location>
 
 namespace ut = boost::ext::ut;
@@ -155,21 +157,74 @@ String diff_str(Str str1, Str str2)
     return buf;
 }
 
+namespace mock
+{
+    using namespace madbfs;
+
+    struct DummyTransport final : public transport::Transport
+    {
+        Str name() const override { return "dummy"; }
+
+        bool running() const override { return true; }
+
+        void stop(rpc::Status) override{};
+
+        Await<void> start() override { co_return; };
+
+        AExpect<rpc::Response> send(Vec<u8>& /* buffer */, rpc::Request req) override
+        {
+            using namespace rpc;
+            co_return req.visit(Overload{
+                // clang-format off
+                [] (const req::Stat&         ) -> rpc::Response { return resp::Stat         {}; },
+                [] (const req::Listdir&      ) -> rpc::Response { return resp::Listdir      {}; },
+                [] (const req::Readlink&     ) -> rpc::Response { return resp::Readlink     {}; },
+                [] (const req::Mknod&        ) -> rpc::Response { return resp::Mknod        {}; },
+                [] (const req::Mkdir&        ) -> rpc::Response { return resp::Mkdir        {}; },
+                [] (const req::Unlink&       ) -> rpc::Response { return resp::Unlink       {}; },
+                [] (const req::Rmdir&        ) -> rpc::Response { return resp::Rmdir        {}; },
+                [] (const req::Rename&       ) -> rpc::Response { return resp::Rename       {}; },
+                [] (const req::Truncate&     ) -> rpc::Response { return resp::Truncate     {}; },
+                [] (const req::Utimens&      ) -> rpc::Response { return resp::Utimens      {}; },
+                [] (const req::CopyFileRange&) -> rpc::Response { return resp::CopyFileRange{}; },
+                [] (const req::Open&         ) -> rpc::Response { return resp::Open         {}; },
+                [] (const req::Close&        ) -> rpc::Response { return resp::Close        {}; },
+                [] (const req::Read&         ) -> rpc::Response { return resp::Read         {}; },
+                [] (const req::Write&        ) -> rpc::Response { return resp::Write        {}; },
+                [] (const req::Ping&         ) -> rpc::Response { return resp::Ping         {}; },
+                // clang-format on
+            });
+        }
+
+        AExpect<rpc::Response> send(Vec<u8>& buffer, rpc::Request req, Milliseconds /* timeout */) override
+        {
+            return send(buffer, std::move(req));
+        }
+    };
+
+    const auto dummy_strategy = connection_strategy::Custom{ .create = [] {
+        return std::make_unique<DummyTransport>();
+    } };
+}
+
 int main()
 {
     using namespace ut::literals;
     using ut::expect, ut::that;
 
+    spdlog::set_default_logger(spdlog::null_logger_mt("madbfs-test-tree"));
+    // spdlog::set_level(spdlog::level::debug);
+
     "constructed tree from raw node have same shape"_test = [&] {
         using namespace madbfs::tree;
 
-#define unwrap() transform_error([](auto e) { return raise_expect_error<Node*>(e); }).value()
-
         using madbfs::path::operator""_path;
 
-        auto io_context = madbfs::async::Context{};
-        auto connection = madbfs::Connection{ io_context, madbfs::connection_strategy::Null{} };
-        auto cache      = madbfs::data::Cache{ io_context, connection, 64 * 1024, 1024 };
+        auto context    = madbfs::async::Context{};
+        auto guard      = madbfs::net::make_work_guard(context);
+        auto thread     = std::jthread{ [&] { context.run(); } };
+        auto connection = madbfs::Connection{ context, mock::dummy_strategy };
+        auto cache      = madbfs::data::Cache{ connection, 64 * 1024, 1024 };
         auto counter    = std::atomic<u64>{};
 
         // NOTE: operations like mknod and mkdir only considers filename
@@ -182,6 +237,8 @@ int main()
             path = dummy.view();
             return Node::Context{ connection, cache, counter, path };
         };
+
+#define unwrap() transform_error([](auto e) { return raise_expect_error<Node*>(e); }).value()
 
         auto coro = [&] -> madbfs::Await<void> {
             auto root = Node{ "/", nullptr, {}, node::Directory{} };
@@ -231,23 +288,27 @@ int main()
             expect(expected == tree_str) << diff_str(expected, tree_str);
         };
 
-        madbfs::async::spawn(io_context, coro(), madbfs::async::detached);
-        io_context.run_one();
-
 #undef unwrap
+
+        madbfs::async::block(context, coro());
+
+        guard.reset();
+        context.stop();
     };
 
     "constructed FileTree have same shape"_test = [&] {
         using namespace madbfs::tree;
 
-        auto io_context = madbfs::async::Context{};
-        auto connection = madbfs::Connection{ io_context, madbfs::connection_strategy::Null{} };
-        auto cache      = madbfs::data::Cache{ io_context, connection, 64 * 1024, 1024 };
+        auto context    = madbfs::async::Context{};
+        auto guard      = madbfs::net::make_work_guard(context);
+        auto thread     = std::jthread{ [&] { context.run(); } };
+        auto connection = madbfs::Connection{ context, mock::dummy_strategy };
+        auto cache      = madbfs::data::Cache{ connection, 64 * 1024, 1024 };
         auto tree       = FileTree{ connection, cache, std::nullopt };
 
-#define unwrap(T) transform_error([](auto e) { return raise_expect_error<T>(e); }).value()
-
         using madbfs::path::operator""_path;
+
+#define unwrap(T) transform_error([](auto e) { return raise_expect_error<T>(e); }).value()
 
         auto coro = [&] -> madbfs::Await<void> {
             (co_await tree.mkdir("/hello"_path, 0)).unwrap(Node*);
@@ -309,9 +370,11 @@ int main()
             expect(expected_rm == tree_str) << diff_str(expected_rm, tree_str);
         };
 
-        madbfs::async::spawn(io_context, coro(), madbfs::async::detached);
-        io_context.run_one();
-
 #undef unwrap
+
+        madbfs::async::block(context, coro());
+
+        guard.reset();
+        context.stop();
     };
 }
