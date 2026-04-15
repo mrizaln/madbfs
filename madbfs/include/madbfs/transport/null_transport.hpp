@@ -1,3 +1,5 @@
+#pragma once
+
 #include "madbfs/transport/transport.hpp"
 
 namespace madbfs::transport
