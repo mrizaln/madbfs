@@ -38,23 +38,35 @@ namespace madbfs::server
             auto [it, _] = m_requests.emplace(header->id, Promise{ std::move(buffer), req->proc() });
             log_d("{}: new request [{}] [{}]", __func__, header->id.inner(), to_string(*req));
 
-            async::spawn(
-                m_pool,
-                handle_request(it->second.buffer, std::move(*req)),
-                [&, id = header->id](std::exception_ptr e, Var<rpc::Status, rpc::Response> resp) {
-                    log::log_exception(e, "handler");
-                    async::spawn(
-                        m_channel.get_executor(),
-                        m_channel.async_send({}, { id, std::move(resp) }),
-                        [](std::exception_ptr e, Expect<void, net::error_code> res) {
-                            log::log_exception(e, "handler");
-                            if (not res) {
-                                log_e("handler: finished with error: {}", res.error().message());
-                            }
-                        }
-                    );
+            // special for Ping: handle directly on request listener thread to allow it to response
+            // immediately without waiting for work on worker thread complete
+
+            if (const auto id = header->id; req->proc() == rpc::Procedure::Ping) {
+                auto resp = co_await handle_request(it->second.buffer, std::move(*req));
+                if (auto res = co_await m_channel.async_send({}, { id, std::move(resp) }); not res) {
+                    log_e("handler: finished with error: {}", res.error().message());
+                    m_requests.extract(id);
                 }
-            );
+            } else {
+                async::spawn(
+                    m_pool,
+                    handle_request(it->second.buffer, std::move(*req)),
+                    [&, id](std::exception_ptr e, Var<rpc::Status, rpc::Response> resp) {
+                        log::log_exception(e, "handler");
+                        async::spawn(
+                            m_channel.get_executor(),
+                            m_channel.async_send({}, { id, std::move(resp) }),
+                            [&, id](std::exception_ptr e, Expect<void, net::error_code> res) {
+                                log::log_exception(e, "handler");
+                                if (not res) {
+                                    log_e("handler: finished with error: {}", res.error().message());
+                                    m_requests.extract(id);
+                                }
+                            }
+                        );
+                    }
+                );
+            }
         }
 
         m_pool.wait();
@@ -100,7 +112,7 @@ namespace madbfs::server
             if (auto req = m_requests.extract(id); not req.empty()) {
                 auto& [_, proc] = req.mapped();
                 log_d("{}: response is [{}]", __func__, to_string(proc));
-                std::ignore     = co_await rpc::send_response(m_socket, payload_buf, proc, response, id);
+                std::ignore = co_await rpc::send_response(m_socket, payload_buf, proc, response, id);
             } else {
                 log_e("{}: response incoming for id {} but no promise registered", __func__, id.inner());
             }
