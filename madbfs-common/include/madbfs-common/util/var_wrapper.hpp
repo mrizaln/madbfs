@@ -150,7 +150,7 @@ namespace madbfs::util
         const T* as() const
         {
             auto& var = as_var();
-            return std::get_if<const T>(&var);
+            return std::get_if<T>(&var);
         }
     };
 }

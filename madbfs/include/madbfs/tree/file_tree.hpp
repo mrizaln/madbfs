@@ -1,10 +1,14 @@
 #pragma once
 
-#include "madbfs/connection/connection.hpp"
 #include "madbfs/path.hpp"
 #include "madbfs/tree/node.hpp"
 
 #include <functional>
+
+namespace madbfs
+{
+    class Connection;
+}
 
 namespace madbfs::tree
 {
@@ -20,7 +24,7 @@ namespace madbfs::tree
     public:
         using Filler = std::move_only_function<void(const char* name)>;
 
-        FileTree(connection::Connection& connection, data::Cache& cache, Opt<Seconds> ttl);
+        FileTree(Connection& connection, data::Cache& cache, Opt<Seconds> ttl);
         ~FileTree() = default;
 
         FileTree(Node&& root)            = delete;
@@ -138,11 +142,11 @@ namespace madbfs::tree
             };
         }
 
-        Node                    m_root;
-        connection::Connection& m_connection;
-        data::Cache&            m_cache;
-        std::atomic<u64>        m_fd_counter       = 0;
-        bool                    m_root_initialized = false;
-        Opt<Seconds>            m_ttl              = std::nullopt;
+        Node             m_root;
+        Connection&      m_connection;
+        data::Cache&     m_cache;
+        std::atomic<u64> m_fd_counter       = 0;
+        bool             m_root_initialized = false;
+        Opt<Seconds>     m_ttl              = std::nullopt;
     };
 }

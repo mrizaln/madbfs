@@ -16,7 +16,7 @@ namespace madbfs::rpc
 
     static_assert(sizeof(Status) == 4, "huh, unusual system. usually enums without base (int) are 4 bytes.");
 
-    // NOTE: if you decided to add/remove one or more entries, do update domain check in read_procedure
+    // NOTE: if you decide to add/remove one or more entries, do update domain check in read_procedure
     enum class Procedure : u8
     {
         Stat,
@@ -34,6 +34,7 @@ namespace madbfs::rpc
         Close,
         Read,
         Write,
+        Ping,    // special procedure for checking aliveness
     };
 
     enum class OpenMode : u8
@@ -55,19 +56,19 @@ namespace madbfs::rpc
 
         struct Hash
         {
-            usize operator()(Id id) const { return std::hash<Inner>{}(id.inner()); }
+            constexpr usize operator()(Id id) const { return std::hash<Inner>{}(id.inner()); }
         };
 
-        Id() = default;
+        constexpr Id() = default;
 
-        Id(Inner inner)
+        constexpr Id(Inner inner)
             : m_inner{ inner }
         {
         }
 
-        Inner inner() const { return m_inner; }
+        constexpr Inner inner() const { return m_inner; }
 
-        auto operator<=>(const Id&) const = default;
+        constexpr auto operator<=>(const Id&) const = default;
 
     private:
         Inner m_inner = 0;
@@ -91,6 +92,7 @@ namespace madbfs::rpc
         struct Close         { u64 fd; };
         struct Read          { u64 fd; off_t offset; usize size; };
         struct Write         { u64 fd; off_t offset; Span<const u8> in; };
+        struct Ping          { u64 num; };
         // clang-format on
     }
 
@@ -110,12 +112,26 @@ namespace madbfs::rpc
               req::Open,
               req::Close,
               req::Read,
-              req::Write>
+              req::Write,
+              req::Ping>
     {
         // make the base constructor visible
         using VarWrapper::VarWrapper;
 
-        Procedure proc() { return static_cast<Procedure>(index()); }
+        Procedure proc() const { return static_cast<Procedure>(index()); }
+    };
+
+    struct NamedRequest
+    {
+        Id      id;
+        Request req;
+    };
+
+    struct RequestHeader
+    {
+        Id        id;
+        Procedure proc;
+        u64       size;
     };
 
     namespace resp
@@ -136,6 +152,7 @@ namespace madbfs::rpc
         struct Close         { };
         struct Read          { Span<const u8> read; };
         struct Write         { usize size; };
+        struct Ping          { u64 num; };
         // clang-format on
 
         struct Stat
@@ -167,12 +184,21 @@ namespace madbfs::rpc
               resp::Open,
               resp::Close,
               resp::Read,
-              resp::Write>
+              resp::Write,
+              resp::Ping>
     {
         // make the base constructor visible
         using VarWrapper::VarWrapper;
 
-        Procedure proc() { return static_cast<Procedure>(index()); }
+        Procedure proc() const { return static_cast<Procedure>(index()); }
+    };
+
+    struct ResponseHeader
+    {
+        Id        id;
+        Procedure proc;
+        Status    status;
+        u64       size;
     };
 
     template <typename T>
@@ -186,121 +212,6 @@ namespace madbfs::rpc
 
     template <IsResponse Resp>
     using ToReq = util::VarTraits<Response::Var>::Swap<Resp, rpc::Request::Var>;
-
-    /**
-     * @class Client
-     *
-     * @brief RPC Client.
-     */
-    class Client
-    {
-    public:
-        Client(Socket socket)
-            : m_socket{ std::move(socket) }
-            , m_channel{ socket.get_executor() }
-        {
-        }
-
-        ~Client() { stop(); }
-
-        /**
-         * @brief Check whether the client sender/receiver channel is open.
-         */
-        bool running() const { return m_running; }
-
-        /**
-         * @brief Start the client sender/receiver channel with the server.
-         *
-         * The function will return immediately when awaited, spawning a new coroutine detached from caller.
-         * The client manages the lifetime.
-         */
-        Await<void> start();
-
-        /**
-         * @brief Send request through the channel.
-         *
-         * @param buffer Buffer used by `req`.
-         * @param req The requested procedure.
-         * @param timeout Operation timeout.
-         *
-         * @return The returned response or error.
-         *
-         * THe Buffer will be reused for the response returned by this function.
-         */
-        AExpect<Response> send_req(Vec<u8>& buffer, Request req, Opt<Milliseconds> timeout);
-
-        /**
-         * @brief Stop and close the client sender/receiver channel and the socket.
-         */
-        void stop();
-
-    private:
-        struct Promise
-        {
-            Vec<u8>&                       buffer;
-            saf::promise<Expect<Response>> promise;
-        };
-
-        using Inflight = std::unordered_map<Id, Promise, Id::Hash>;
-        using Channel  = async::Channel<Tup<Id, Span<const u8>>>;
-
-        AExpect<void> receive();
-        AExpect<void> send();
-
-        Socket  m_socket;
-        Channel m_channel;
-
-        Inflight  m_requests;
-        Id::Inner m_counter = 0;
-        bool      m_running = false;
-    };
-
-    class Server
-    {
-    public:
-        struct Promise
-        {
-            Vec<u8>   buffer;
-            Procedure procedure;
-        };
-
-        using HandlerSig = Await<Var<Status, Response>>(Vec<u8>& buffer, Request request);
-        using Handler    = std::function<HandlerSig>;
-        using Inflight   = std::unordered_map<Id, Promise, Id::Hash>;
-        using Channel    = async::Channel<Tup<Id, Var<Status, Response>>>;
-
-        Server(Socket socket)
-            : m_socket{ std::move(socket) }
-            , m_channel{ socket.get_executor() }
-            , m_pool{ 1 }
-        {
-        }
-
-        ~Server() { stop(); }
-
-        /**
-         * @brief Start listening for RPC requests.
-         *
-         * @param handler The procedure handler.
-         */
-        AExpect<void> listen(Handler handler);
-
-        /**
-         * @brief Stop listening for requests.
-         */
-        void stop();
-
-    private:
-        AExpect<void> send();
-        AExpect<void> send_resp(Id id, Procedure proc, Var<Status, Response> response);
-
-        Socket m_socket;
-        bool   m_running;
-
-        Channel          m_channel;
-        Inflight         m_requests;
-        net::thread_pool m_pool;
-    };
 
     static constexpr Str server_ready_string = "SERVER_IS_READY";
 
@@ -329,4 +240,21 @@ namespace madbfs::rpc
      * @brief Do a handshake with remote connection.
      */
     AExpect<void> handshake(Socket& sock);
+
+    // TODO: comments
+
+    AExpect<void> send_request(Socket& socket, Vec<u8>& buffer, Request request, Id id);
+    AExpect<void> send_response(
+        Socket&               socket,
+        Vec<u8>&              buffer,
+        Procedure             proc,
+        Var<Status, Response> response,
+        Id                    id
+    );
+
+    AExpect<RequestHeader>  receive_request_header(Socket& socket);
+    AExpect<ResponseHeader> receive_response_header(Socket& socket);
+
+    AExpect<Request>  receive_request(Socket& socket, Vec<u8>& buffer, RequestHeader header);
+    AExpect<Response> receive_response(Socket& socket, Vec<u8>& buffer, ResponseHeader header);
 }

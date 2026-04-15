@@ -3,8 +3,9 @@
 
 #include <madbfs-common/log.hpp>
 
+#include <fmt/base.h>
+
 #include <exception>
-#include <print>
 
 void termination()
 {
@@ -36,8 +37,8 @@ try {
         return 1;
     }
 
-    std::println("[madbfs] mount '{}' [cache={} MiB, page={} KiB]", opt.serial, opt.cachesize, opt.pagesize);
-    std::println("[madbfs] unmount with 'fusermount -u {:?}'", opt.mount);
+    fmt::println("[madbfs] mount '{}' [cache={} MiB, page={} KiB]", opt.serial, opt.cachesize, opt.pagesize);
+    fmt::println("[madbfs] unmount with 'fusermount -u {:?}'", opt.mount);
 
     if (opt.log_file != "-") {
         madbfs::log_i(
@@ -50,7 +51,7 @@ try {
     }
 
     if (::setenv("ANDROID_SERIAL", opt.serial.c_str(), 1) < 0) {
-        std::println(stderr, "error: failed to set env variable 'ANDROID_SERIAL' ({})", strerror(errno));
+        fmt::println(stderr, "error: failed to set env variable 'ANDROID_SERIAL' ({})", strerror(errno));
         return 1;
     }
 
@@ -64,9 +65,9 @@ try {
 
     return ret;
 } catch (const std::exception& e) {
-    std::println(stderr, "error: exception occurred: {}", e.what());
+    fmt::println(stderr, "error: exception occurred: {}", e.what());
     return 1;
 } catch (...) {
-    std::println(stderr, "error: exception occurred (unknown exception)");
+    fmt::println(stderr, "error: exception occurred (unknown exception)");
     return 1;
 }

@@ -9,9 +9,10 @@
 #include <boost/ut.hpp>
 #include <spdlog/sinks/null_sink.h>
 #include <spdlog/spdlog.h>
+#include <fmt/base.h>
+#include <fmt/std.h>
 
 #include <filesystem>
-#include <print>
 
 namespace fs    = std::filesystem;
 namespace ut    = boost::ut;
@@ -116,7 +117,7 @@ int main()
         auto to_sec = [](auto dur) { return chr::duration_cast<chr::duration<float>>(dur); };
         auto to_ms  = [](auto dur) { return chr::duration_cast<chr::duration<float, std::milli>>(dur); };
 
-        std::println("duration: {} ({} per ops)", to_sec(duration), to_ms(duration / ops.size()));
+        fmt::println("duration: {} ({} per ops)", to_sec(duration), to_ms(duration / ops.size()));
     };
 
     guard.reset();

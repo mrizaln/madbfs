@@ -1,42 +1,58 @@
 #pragma once
 
+#include "madbfs-server/request_handler.hpp"
+
 #include <madbfs-common/aliases.hpp>
 #include <madbfs-common/async/async.hpp>
 #include <madbfs-common/rpc.hpp>
 
 namespace madbfs::server
 {
-    class RequestHandler
+    class Connection
     {
     public:
-        using Response = Var<rpc::Status, rpc::Response>;
+        Connection(rpc::Socket socket)
+            : m_socket{ std::move(socket) }
+            , m_channel{ m_socket.get_executor() }
+            , m_pool{ 1 }
+        {
+        }
 
-        RequestHandler() = default;
+        ~Connection(){ stop(); }
 
-        Response handle_req(Vec<u8>& buf, rpc::req::Listdir req);
-        Response handle_req(Vec<u8>& buf, rpc::req::Stat req);
-        Response handle_req(Vec<u8>& buf, rpc::req::Readlink req);
-        Response handle_req(Vec<u8>& buf, rpc::req::Mknod req);
-        Response handle_req(Vec<u8>& buf, rpc::req::Mkdir req);
-        Response handle_req(Vec<u8>& buf, rpc::req::Unlink req);
-        Response handle_req(Vec<u8>& buf, rpc::req::Rmdir req);
-        Response handle_req(Vec<u8>& buf, rpc::req::Rename req);
-        Response handle_req(Vec<u8>& buf, rpc::req::Truncate req);
-        Response handle_req(Vec<u8>& buf, rpc::req::Utimens req);
-        Response handle_req(Vec<u8>& buf, rpc::req::CopyFileRange req);
-        Response handle_req(Vec<u8>& buf, rpc::req::Open req);
-        Response handle_req(Vec<u8>& buf, rpc::req::Close req);
-        Response handle_req(Vec<u8>& buf, rpc::req::Read req);
-        Response handle_req(Vec<u8>& buf, rpc::req::Write req);
+        AExpect<void> run();
+
+        void stop();
 
     private:
-        bool m_renameat2_impl       = true;
-        bool m_copy_file_range_impl = true;
+        struct Promise
+        {
+            Vec<u8>        buffer;
+            rpc::Procedure procedure;
+        };
+
+        using Inflight = std::unordered_map<rpc::Id, Promise, rpc::Id::Hash>;
+        using Channel  = async::Channel<Tup<rpc::Id, Var<rpc::Status, rpc::Response>>>;
+
+        Await<Var<rpc::Status, rpc::Response>> handle_request(Vec<u8>& buffer, rpc::Request req);
+
+        AExpect<void> send_response();
+
+        rpc::Socket      m_socket;
+        Channel          m_channel;
+        Inflight         m_requests;
+        net::thread_pool m_pool;
+
+        RequestHandler m_handler;
+        bool           m_running = false;
     };
 
     class Server
     {
     public:
+        using HandlerSig = Await<Var<rpc::Status, rpc::Response>>(Vec<u8>& buffer, rpc::Request request);
+        using Handler    = std::function<HandlerSig>;
+
         Server(async::Context& context, u16 port) noexcept(false);
         ~Server();
 
@@ -46,13 +62,20 @@ namespace madbfs::server
         Server(const Server&)            = delete;
         Server& operator=(const Server&) = delete;
 
+        /**
+         * @brief Start listening for RPC requests.
+         *
+         * @param handler The procedure handler.
+         */
         AExpect<void> run();
-        void          stop();
+
+        void stop();
 
     private:
         AExpect<void> handle_connection(async::tcp::Socket sock);
 
         async::tcp::Acceptor m_acceptor;
-        std::atomic<bool>    m_running;
+        Opt<Connection>      m_connection;
+        bool                 m_running = false;
     };
 }

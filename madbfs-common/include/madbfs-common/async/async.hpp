@@ -227,6 +227,24 @@ namespace madbfs::async
         }
     }
 
+    template <typename T>
+    AExpect<ToUnit<T>> timeout(AExpect<T>&& awaitable, Milliseconds time)
+    {
+        using net::experimental::awaitable_operators::operator||;
+
+        auto timer = Timer{ co_await net::this_coro::executor };
+
+        timer.expires_after(time);
+        auto res = co_await (std::move(awaitable) || timer.async_wait());
+
+        switch (res.index()) {
+        case 0: co_return std::move(std::get<0>(res));
+        case 1: co_return Unexpect{ Errc::timed_out };
+        }
+
+        co_return Unexpect{ Errc::timed_out };
+    }
+
     /**
      * @brief Spawn coroutine with timeout.
      *

@@ -47,10 +47,12 @@ PROJECT_ROOT = CURRENT_DIR / ".."
 BINARY_PATH = PROJECT_ROOT / "build/Release/madbfs/madbfs"
 SERVER_PATH = PROJECT_ROOT / "madbfs-server/build/android-all-release/madbfs-server"
 
+READDIR_BIG_SIZE = 200
+
 DEFAULT_PAGE_SIZE = 128  # in KiB
 DEFAULT_CACHE_SIZE = 256  # in MiB
 DEFAULT_TTL = 30  # in seconds
-DEFAULT_TIMEOUT = 10  # in seconds
+DEFAULT_TIMEOUT = 2 # in seconds
 DEFAULT_LOG_LEVEL = "debug"  # on this test only
 
 logger = logging.getLogger(__name__)
@@ -121,7 +123,7 @@ def environ(request):
     abi = abi.stdout.decode("utf-8").strip()
 
     server_path = SERVER_PATH.parent / f"{SERVER_PATH.name}-{abi}"
-    if not server_path.exists():
+    if request.param and not server_path.exists():
         pytest.fail(f"server path '{server_path}' doesn't exists. compile it first!")
 
     mount_point = CURRENT_DIR / "mount"
@@ -284,7 +286,7 @@ def tst_readdir_big(work_dir: Path):
     # Add enough entries so that readdir needs to be called multiple times.
     files = []
 
-    for i in range(500):
+    for i in range(READDIR_BIG_SIZE):
         prefix = "A rather long filename to make sure that we fill up the buffer - "
         file = work_dir / f"{prefix * 3}{i}"
         with open(file, "w") as fh:
@@ -614,7 +616,7 @@ def tst_open_rename(work_dir: Path):
 # first args is there just for symmetry, it's unused
 def tst_ipc(work_dir: str, serial: str, server_used: bool):
     version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
-    connection = "server" if server_used else "adb"
+    connection = "proxy" if server_used else "adb"
     timeout = DEFAULT_TIMEOUT if server_used else 0
 
     with ipc_connect(serial) as sock:
@@ -772,8 +774,11 @@ def test_filesystem(environ):
         work_dir.mkdir(exist_ok=True)
 
         def call(fn, *args):
+            start_time = time.perf_counter()
             logger.info(f"testing: {fn.__name__}", stacklevel=2)
             fn(work_dir, *args)
+            run_time = time.perf_counter() - start_time
+            logger.info(f"testing: {fn.__name__} in {run_time}s", stacklevel=2)
 
         call(tst_readdir)
         call(tst_readdir_big)

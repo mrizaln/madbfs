@@ -13,9 +13,9 @@ target_sources(
     src/cmd.cpp
     src/operations.cpp
     src/path.cpp
-    src/connection/connection.cpp
-    src/connection/adb_connection.cpp
-    src/connection/server_connection.cpp
+    src/connection.cpp
+    src/transport/adb_transport.cpp
+    src/transport/proxy_transport.cpp
     src/data/cache.cpp
     src/tree/file_tree.cpp
     src/tree/node.cpp

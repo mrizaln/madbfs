@@ -1,407 +1,112 @@
 #include "madbfs-server/server.hpp"
 
 #include <madbfs-common/log.hpp>
-#include <madbfs-common/rpc.hpp>
-#include <madbfs-common/util/defer.hpp>
-#include <madbfs-common/util/slice.hpp>
-
-#include <dirent.h>
-#include <linux/fs.h>
-#include <sys/stat.h>
-#include <sys/syscall.h>
-#include <unistd.h>
-
-// android API changes: https://android.googlesource.com/platform/bionic/+/HEAD/docs/status.md
-
-namespace
-{
-    madbfs::rpc::Status status_from_errno(
-        madbfs::Str          name,
-        madbfs::Str          path,
-        madbfs::Str          msg,
-        std::source_location loc = std::source_location::current()
-    )
-    {
-        using madbfs::log::Level;
-        using madbfs::log::log_loc;
-
-        auto err = errno;
-        log_loc(loc, Level::err, "{}: {} {:?}: {}", name, msg, path, strerror(err));
-        return static_cast<madbfs::rpc::Status>(err);
-    }
-}
 
 namespace madbfs::server
 {
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& buf, rpc::req::Listdir req)
+    AExpect<void> Connection::run()
     {
-        const auto& [path] = req;
-        log_d("listdir: path={:?}", path.data());
+        m_running = true;
 
-        auto dir = ::opendir(path.data());
-        if (dir == nullptr) {
-            return status_from_errno(__func__, path, "failed to open dir");
-        }
-
-        auto deferred = util::defer([=] {
-            if (::closedir(dir) < 0) {
-                std::ignore = status_from_errno(__func__, path, "failed to close dir");
+        auto exec = co_await async::current_executor();
+        async::spawn(exec, send_response(), [&](std::exception_ptr e, Expect<void> res) {
+            log::log_exception(e, "send");
+            if (not res) {
+                log_e("send: finished with error: {}", err_msg(res.error()));
             }
+
+            m_channel.cancel();
+            m_channel.reset();
         });
 
-        // WARN: invalidates strings and spans from argument
-        buf.clear();
+        log_d("{}: listening for requests", __func__);
 
-        auto slices = Vec<Pair<util::Slice, rpc::resp::Stat>>{};
-        auto dirfd  = ::dirfd(dir);
-
-        while (auto entry = ::readdir(dir)) {
-            auto name = Str{ entry->d_name };
-            if (name == "." or name == "..") {
-                continue;
-            }
-
-            struct stat filestat = {};
-            if (auto res = ::fstatat(dirfd, entry->d_name, &filestat, AT_SYMLINK_NOFOLLOW); res < 0) {
-                std::ignore = status_from_errno(__func__, name, "failed to stat file");
-                continue;
-            }
-
-            auto name_u8 = reinterpret_cast<const u8*>(name.data());
-            auto off     = buf.size();
-
-            buf.insert(buf.end(), name_u8, name_u8 + name.size());
-
-            auto slice = util::Slice{ off, name.size() };
-            auto stat  = rpc::resp::Stat{
-                 .size  = static_cast<off_t>(filestat.st_size),
-                 .links = static_cast<nlink_t>(filestat.st_nlink),
-                 .mtime = filestat.st_mtim,
-                 .atime = filestat.st_atim,
-                 .ctime = filestat.st_ctim,
-                 .mode  = static_cast<mode_t>(filestat.st_mode),
-                 .uid   = filestat.st_uid,
-                 .gid   = filestat.st_gid,
-            };
-
-            slices.emplace_back(std::move(slice), std::move(stat));
-        }
-
-        auto entries = Vec<Pair<Str, rpc::resp::Stat>>{};
-        entries.reserve(slices.size());
-
-        for (auto&& [slice, stat] : slices) {
-            auto name = Str{ reinterpret_cast<const char*>(buf.data()) + slice.offset, slice.size };
-            entries.emplace_back(std::move(name), std::move(stat));
-        }
-
-        return rpc::resp::Listdir{ .entries = std::move(entries) };
-    }
-
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Stat req)
-    {
-        const auto& [path] = req;
-        log_d("stat: path={:?}", path.data());
-
-        struct stat filestat = {};
-        if (auto res = ::lstat(path.data(), &filestat); res < 0) {
-            return status_from_errno(__func__, path, "failed to stat file");
-        }
-
-        return rpc::resp::Stat{
-            .size  = static_cast<off_t>(filestat.st_size),
-            .links = static_cast<nlink_t>(filestat.st_nlink),
-            .mtime = filestat.st_mtim,
-            .atime = filestat.st_atim,
-            .ctime = filestat.st_ctim,
-            .mode  = static_cast<mode_t>(filestat.st_mode),
-            .uid   = filestat.st_uid,
-            .gid   = filestat.st_gid,
-        };
-    }
-
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Readlink req)
-    {
-        const auto& [path] = req;
-        log_d("readlink: path={:?}", path.data());
-
-        // NOTE: can't use server's buffer as destination since using it will invalidate path.
-        // PERF: since the buffer won't change anyway, making it static reduces memory usage
-        thread_local static auto buffer = Array<char, PATH_MAX>{};
-
-        auto len = ::readlink(path.data(), buffer.data(), buffer.size());
-        if (len < 0) {
-            return status_from_errno(__func__, path, "failed to readlink");
-        }
-
-        return rpc::resp::Readlink{ .target = Str{ buffer.begin(), static_cast<usize>(len) } };
-    }
-
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Mknod req)
-    {
-        const auto& [path, mode, dev] = req;
-        log_d("mknod: path={:?} mode={:#08o} dev={:#04x}", path.data(), mode, dev);
-
-        if (::mknod(path.data(), mode, dev) < 0) {
-            return status_from_errno(__func__, path, "failed to create file");
-        }
-
-        return rpc::resp::Mknod{};
-    }
-
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Mkdir req)
-    {
-        const auto& [path, mode] = req;
-        log_d("mkdir: path={:?} mode={:#08o}", path.data(), mode);
-
-        if (::mkdir(path.data(), mode) < 0) {
-            return status_from_errno(__func__, path, "failed to create directory");
-        }
-
-        return rpc::resp::Mkdir{};
-    }
-
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Unlink req)
-    {
-        const auto& [path] = req;
-        log_d("unlink: path={:?}", path.data());
-
-        if (::unlink(path.data()) < 0) {
-            return status_from_errno(__func__, path, "failed to remove file");
-        }
-
-        return rpc::resp::Unlink{};
-    }
-
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Rmdir req)
-    {
-        const auto& [path] = req;
-        log_d("rmdir: path={:?}", path.data());
-
-        if (::rmdir(path.data()) < 0) {
-            return status_from_errno(__func__, path, "failed to remove directory");
-        }
-
-        return rpc::resp::Rmdir{};
-    }
-
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Rename req)
-    {
-        const auto& [from, to, flags] = req;
-        log_d("rename: from={:?} -> to={:?} [flags={}]", from, to, flags);
-
-        // paths are guaranteed to be absolute for both from and to, so the fds are not required since they
-        // will be ignored. see man rename(2).
-
-        // NOTE: renameat2 is only available from API level 30
-        if (m_renameat2_impl) {
-            auto res = syscall(SYS_renameat2, 0, from.data(), 0, to.data(), flags);
-            if (res < 0 and errno == ENOSYS) {
-                m_renameat2_impl = false;
-                log_w("renameat2 syscall is not implemented, proceeding into fallback");
-            } else if (res < 0) {
-                return status_from_errno(__func__, from, "failed to rename file");
-            } else {
-                return rpc::resp::Rename{};
-            }
-        }
-
-        // renameat don't take flags
-        if (flags != 0) {
-            return rpc::Status::invalid_argument;
-        }
-
-        if (::renameat(0, from.data(), 0, to.data()) < 0) {
-            return status_from_errno(__func__, from, "failed to rename file");
-        }
-
-        return rpc::resp::Rename{};
-    }
-
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Truncate req)
-    {
-        const auto& [path, size] = req;
-        log_d("truncate: path={:?} size={}", path.data(), size);
-
-        if (::truncate(path.data(), size) < 0) {
-            return status_from_errno(__func__, path, "failed to truncate file");
-        }
-
-        return rpc::resp::Truncate{};
-    }
-
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Utimens req)
-    {
-        const auto& [path, atime, mtime] = req;
-
-        auto to_pair = [](timespec time) { return Pair{ time.tv_sec, time.tv_nsec }; };
-        log_d("utimens: path={:?} atime={} mtime={}", path.data(), to_pair(atime), to_pair(mtime));
-
-        auto times = Array{ atime, mtime };
-        if (::utimensat(0, path.data(), times.data(), AT_SYMLINK_NOFOLLOW) < 0) {
-            return status_from_errno(__func__, path, "failed to utimens file");
-        }
-
-        return rpc::resp::Utimens{};
-    }
-
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::CopyFileRange req)
-    {
-        const auto& [in, in_off, out, out_off, size] = req;
-        log_d("copy_file_range: from={:?} -> to={:?}", in.data(), out.data());
-
-        auto in_fd = ::open(in.data(), O_RDONLY);
-        if (in_fd < 0) {
-            return status_from_errno(__func__, in, "failed to open file");
-        }
-        auto in_deferred = util::defer([=] {
-            if (::close(in_fd) < 0) {
-                std::ignore = status_from_errno(__func__, in, "failed to close file");
-            }
-        });
-
-        if (::lseek(in_fd, in_off, SEEK_SET) < 0) {
-            return status_from_errno(__func__, in, "failed to seek file");
-        }
-
-        auto out_fd = ::open(out.data(), O_WRONLY);
-        if (out_fd < 0) {
-            return status_from_errno(__func__, out, "failed to open file");
-        }
-        auto out_deferred = util::defer([=] {
-            if (::close(out_fd) < 0) {
-                std::ignore = status_from_errno(__func__, out, "failed to close file");
-            }
-        });
-
-        if (::lseek(out_fd, out_off, SEEK_SET) < 0) {
-            return status_from_errno(__func__, out, "failed to seek file");
-        }
-
-        // NOTE: copy_file_range syscall only available from API level 34
-        if (m_copy_file_range_impl) {
-            auto in_off_  = in_off;     // must be mutable
-            auto out_off_ = out_off;    // must be mutable
-
-            auto res = syscall(SYS_copy_file_range, in_fd, &in_off_, out_fd, &out_off_, size, 0);
-            if (res >= 0) {
-                return rpc::resp::CopyFileRange{ .size = static_cast<usize>(res) };
-            }
-
-            if (res < 0 and errno == ENOSYS) {
-                m_copy_file_range_impl = false;
-                log_w("copy_file_range syscall is not implemented, proceeding into fallback");
-            } else if (res < 0 and errno == EXDEV) {
-                // should the fallback be here on the server or should it be on the client?
-                // if the fallback is here, the operation will take very long time and trigger timeout while
-                // also preventing any other operation to occur simulataneously since the server is busy
-                // dealing with just this operation
-                log_w("cross-filesystem copy, proceeding into fallback");
-            } else if (res < 0) {
-                return status_from_errno(__func__, out, "failed to copy file range");
-            }
-        }
-
-        auto buffer = Array<char, 64 * 1024>{};
-        auto copied = 0_usize;
-
-        auto last_read  = 0_i64;
-        auto last_write = 0_i64;
-
-        while (copied < size and last_write >= 0) {
-            const auto to_read = std::min(buffer.size(), size - copied);
-
-            last_read = ::read(in_fd, buffer.data(), to_read);
-            if (last_read <= 0) {
+        while (m_running and m_channel.is_open()) {
+            auto header = co_await rpc::receive_request_header(m_socket);
+            if (not header) {
+                log_e("{}: failed to read request header: {}", __func__, err_msg(header.error()));
                 break;
             }
 
-            auto begin     = buffer.data();
-            auto remaining = last_read;
+            auto buffer = Vec<u8>{};
+            auto req    = co_await rpc::receive_request(m_socket, buffer, *header);
+            if (not req) {
+                log_e("{}: failed to receive request: {}", __func__, err_msg(req.error()));
+                break;
+            }
 
-            while (remaining > 0) {
-                if (last_write = ::write(out_fd, begin, static_cast<usize>(remaining)); last_write < 0) {
-                    goto end_copy;
+            auto [it, _] = m_requests.emplace(header->id, Promise{ std::move(buffer), req->proc() });
+            log_d("{}: new request [{}] [{}]", __func__, header->id.inner(), to_string(*req));
+
+            async::spawn(
+                m_pool,
+                handle_request(it->second.buffer, std::move(*req)),
+                [&, id = header->id](std::exception_ptr e, Var<rpc::Status, rpc::Response> resp) {
+                    log::log_exception(e, "handler");
+                    async::spawn(
+                        m_channel.get_executor(),
+                        m_channel.async_send({}, { id, std::move(resp) }),
+                        [](std::exception_ptr e, Expect<void, net::error_code> res) {
+                            log::log_exception(e, "handler");
+                            if (not res) {
+                                log_e("handler: finished with error: {}", res.error().message());
+                            }
+                        }
+                    );
                 }
+            );
+        }
 
-                begin     += last_write;
-                remaining -= last_write;
-                copied    += static_cast<usize>(last_write);
+        m_pool.wait();
+        log_d("{}: listening complete", __func__);
+
+        co_return Expect<void>{};
+    }
+
+    void Connection::stop()
+    {
+        if (m_running) {
+            m_running = false;
+            m_pool.stop();
+            m_pool.wait();
+            m_socket.cancel();
+            m_socket.close();
+            m_channel.cancel();
+            m_channel.close();
+        }
+    }
+
+    Await<Var<rpc::Status, rpc::Response>> Connection::handle_request(Vec<u8>& buffer, rpc::Request req)
+    {
+        co_return std::move(req).visit([&](rpc::IsRequest auto&& req) {
+            return m_handler.handle_req(buffer, std::move(req));
+        });
+    }
+
+    AExpect<void> Connection::send_response()
+    {
+        auto payload_buf = Vec<u8>{};
+
+        while (m_running and m_channel.is_open()) {
+            auto id_resp = co_await m_channel.async_receive();
+            if (not id_resp) {
+                log_e("{}: failed to receive response from channel: {}", __func__, id_resp.error().message());
+                co_return Unexpect{ async::to_generic_err(id_resp.error(), Errc::broken_pipe) };
+            }
+
+            auto [id, response] = std::move(*id_resp);
+            log_d("{}: new response: {}", __func__, id.inner());
+
+            if (auto req = m_requests.extract(id); not req.empty()) {
+                auto& [_, proc] = req.mapped();
+                log_d("{}: response is [{}]", __func__, to_string(proc));
+                std::ignore     = co_await rpc::send_response(m_socket, payload_buf, proc, response, id);
+            } else {
+                log_e("{}: response incoming for id {} but no promise registered", __func__, id.inner());
             }
         }
-    end_copy:
 
-        if (last_read < 0 or last_write < 0) {
-            return status_from_errno(__func__, out, "failed to copy file");
-        }
-
-        return rpc::resp::CopyFileRange{ .size = static_cast<usize>(copied) };
-    }
-
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Open req)
-    {
-        const auto& [path, mode] = req;
-        log_d("open: path={:?} mode={}", path.data(), static_cast<int>(mode));
-
-        auto fd = ::open(path.data(), static_cast<int>(req.mode));
-        if (fd < 0) {
-            return status_from_errno(__func__, path, "failed to open file");
-        }
-
-        return rpc::resp::Open{ .fd = static_cast<u64>(fd) };
-    }
-
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Close req)
-    {
-        const auto& [fd] = req;
-        log_d("close: fd={}", fd);
-
-        if (::close(static_cast<int>(fd)) < 0) {
-            return status_from_errno(__func__, std::format("[{}]", fd), "failed to close file");
-        }
-
-        return rpc::resp::Close{};
-    }
-
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& buf, rpc::req::Read req)
-    {
-        const auto& [fd, offset, size] = req;
-        log_d("read: fd={} offset={} size={}", fd, offset, size);
-
-        auto fd_int = static_cast<int>(fd);
-
-        if (::lseek(fd_int, offset, SEEK_SET) < 0) {
-            return status_from_errno(__func__, std::format("[{}]", fd), "failed to seek file");
-        }
-
-        // WARN: invalidates strings and spans from argument
-        buf.resize(size);
-
-        auto len = ::read(fd_int, buf.data(), buf.size());
-        if (len < 0) {
-            return status_from_errno(__func__, std::format("[{}]", fd), "failed to read file");
-        }
-
-        return rpc::resp::Read{ .read = Span{ buf.begin(), static_cast<usize>(len) } };
-    }
-
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Write req)
-    {
-        const auto& [fd, offset, in] = req;
-        log_d("write: fd={} offset={}, size={}", fd, offset, in.size());
-
-        auto fd_int = static_cast<int>(fd);
-
-        if (::lseek(fd_int, offset, SEEK_SET) < 0) {
-            return status_from_errno(__func__, std::format("[{}]", fd), "failed to seek file");
-        }
-
-        auto len = ::write(fd_int, in.data(), in.size());
-        if (len < 0) {
-            return status_from_errno(__func__, std::format("[{}]", fd), "failed to read file");
-        }
-
-        return rpc::resp::Write{ .size = static_cast<usize>(len) };
+        co_return Expect<void>{};
     }
 }
 
@@ -423,12 +128,7 @@ namespace madbfs::server
 
     AExpect<void> Server::run()
     {
-        log_i("{}: madbfs-server version {}", __func__, MADBFS_VERSION_STRING);
-        log_i("{}: launching tcp server on port: {}", __func__, m_acceptor.local_endpoint().port());
-
         m_running = true;
-
-        auto handler = RequestHandler{};
 
         while (m_running) {
             auto sock = co_await m_acceptor.async_accept();
@@ -437,19 +137,25 @@ namespace madbfs::server
                 break;
             }
 
-            if (auto res = co_await rpc::handshake(*sock); not res) {
-                co_return Unexpect{ res.error() };
-            }
+            log_d("{}: new connection", __func__);
 
-            auto rpc  = rpc::Server{ std::move(*sock) };
-            auto task = rpc.listen([&](Vec<u8>& buf, rpc::Request req) -> Await<RequestHandler::Response> {
-                co_return std::move(req).visit([&](rpc::IsRequest auto&& req) {
-                    return handler.handle_req(buf, std::move(req));
+            if (not m_connection) {
+                if (auto res = co_await rpc::handshake(*sock); not res) {
+                    co_return Unexpect{ res.error() };
+                }
+
+                log_d("{}: connection ok", __func__);
+
+                m_connection.emplace(std::move(*sock));
+
+                auto exec = co_await async::current_executor();
+                async::spawn(exec, m_connection->run(), [this](std::exception_ptr e, Expect<void> res) {
+                    log::log_exception(e, "run");
+                    log_e("run: connection terminated: {}", err_msg(res.error()));
+                    m_connection.reset();
                 });
-            });
-
-            if (auto res = co_await std::move(task); not res) {
-                log_e("{}: rpc::Server::listen return with an error: {}", __func__, err_msg(res.error()));
+            } else {
+                std::ignore = co_await async::write_lv<char>(*sock, "BUSY");
             }
         }
 
@@ -458,8 +164,13 @@ namespace madbfs::server
 
     void Server::stop()
     {
-        m_running = false;
-        m_acceptor.cancel();
-        m_acceptor.close();
+        if (m_running) {
+            m_running = false;
+            if (m_connection) {
+                m_connection->stop();
+            }
+            m_acceptor.cancel();
+            m_acceptor.close();
+        }
     }
 }

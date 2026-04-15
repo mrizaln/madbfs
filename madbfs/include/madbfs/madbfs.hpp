@@ -1,6 +1,6 @@
 #pragma once
 
-#include "madbfs/connection/connection.hpp"
+#include "madbfs/connection.hpp"
 #include "madbfs/tree/file_tree.hpp"
 
 #include <madbfs-common/ipc.hpp>
@@ -56,7 +56,6 @@ namespace madbfs
          * @param ctx Async context.
          * @param server Server binary path.
          * @param port Port on which the server will be ran on.
-         * @param timeout Remote operation timeout.
          *
          * @return New connection.
          *
@@ -64,12 +63,7 @@ namespace madbfs
          * then fall back to `AdbConnection` if the connection failed. If it is not set, it will immediately
          * cerate `AdbConnection` instead. The returned value will never be null.
          */
-        static Uniq<connection::Connection> prepare_connection(
-            async::Context& ctx,
-            Opt<path::Path> server,
-            u16             port,
-            Opt<Seconds>    timeout
-        );
+        static Connection prepare_connection(async::Context& ctx, Opt<path::Path> server, u16 port);
 
         /**
          * @brief Create an IPC server.
@@ -94,17 +88,28 @@ namespace madbfs
          */
         Await<boost::json::value> ipc_handler(ipc::FsOp op);
 
+        Await<void> watchdog();
+
+        Await<void> reaper();
+
         struct fuse* m_fuse;
 
         async::Context   m_async_ctx;
         async::WorkGuard m_work_guard;    // to prevent `async::Context` from returning immediately
         std::jthread     m_work_thread;
 
-        Uniq<connection::Connection> m_connection;
-        data::Cache                  m_cache;
-        tree::FileTree               m_tree;
-        Opt<ipc::Server>             m_ipc;
-        net::signal_set              m_signal;
-        String                       m_mountpoint;
+        Connection       m_connection;
+        data::Cache      m_cache;
+        tree::FileTree   m_tree;
+        Opt<ipc::Server> m_ipc;
+
+        async::Timer    m_watchdog_timer;
+        async::Timer    m_reaper_timer;
+        net::signal_set m_signal;
+
+        String          m_mountpoint;
+        Opt<path::Path> m_server_path;
+        u16             m_server_port;
+        Opt<Seconds>    m_timeout;
     };
 }

@@ -45,7 +45,7 @@ namespace
     inline madbfs::Str get_no_dev_serial()
     {
         if (auto* serial = std::getenv("ANDROID_SERIAL"); serial != nullptr) {
-            static auto no_dev_serial = std::format("adb: device '{}' not found", serial);
+            static auto no_dev_serial = fmt::format("adb: device '{}' not found", serial);
             return no_dev_serial;
         }
         return {};
@@ -59,17 +59,19 @@ namespace
     inline madbfs::Errc to_errc(AdbError err)
     {
         using Err = AdbError;
+        // clang-format off
         switch (err) {
-        case Err::Unknown: return madbfs::Errc::io_error;
-        case Err::NoDev: return madbfs::Errc::no_such_device;
-        case Err::PermDenied: return madbfs::Errc::permission_denied;
+        case Err::Unknown:         return madbfs::Errc::io_error;
+        case Err::NoDev:           return madbfs::Errc::no_such_device;
+        case Err::PermDenied:      return madbfs::Errc::permission_denied;
         case Err::NoSuchFileOrDir: return madbfs::Errc::no_such_file_or_directory;
-        case Err::NotADir: return madbfs::Errc::not_a_directory;
-        case Err::Inaccessible: return madbfs::Errc::operation_not_supported;
-        case Err::ReadOnly: return madbfs::Errc::read_only_file_system;
-        case Err::TryAgain: return madbfs::Errc::resource_unavailable_try_again;
-        default: return madbfs::Errc::io_error;
+        case Err::NotADir:         return madbfs::Errc::not_a_directory;
+        case Err::Inaccessible:    return madbfs::Errc::operation_not_supported;
+        case Err::ReadOnly:        return madbfs::Errc::read_only_file_system;
+        case Err::TryAgain:        return madbfs::Errc::resource_unavailable_try_again;
+        default:                   return madbfs::Errc::io_error;
         }
+        // clang-format on
     }
 
     /**
