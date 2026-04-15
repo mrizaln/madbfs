@@ -187,6 +187,7 @@ namespace madbfs::transport
                     log_i("{}: successfully terminating server", __func__);
                 }
             }
+            m_process.reset();
         }
     }
 
