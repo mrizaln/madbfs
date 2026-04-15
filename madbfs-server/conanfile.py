@@ -10,7 +10,6 @@ class Recipe(ConanFile):
     settings = ["os", "compiler", "build_type", "arch"]
     generators = ["CMakeToolchain", "CMakeDeps"]
     requires = ["asio/1.34.2", "spdlog/1.15.1"]
-    default_options = {"spdlog/*:use_std_fmt": True}
 
     def layout(self):
         arch = self.settings.get_safe("arch")

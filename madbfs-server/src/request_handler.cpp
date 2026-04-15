@@ -358,7 +358,7 @@ namespace madbfs::server
         log_d("close: fd={}", fd);
 
         if (::close(static_cast<int>(fd)) < 0) {
-            return status_from_errno(__func__, std::format("[{}]", fd), "failed to close file");
+            return status_from_errno(__func__, fmt::format("[{}]", fd), "failed to close file");
         }
 
         return rpc::resp::Close{};
@@ -372,7 +372,7 @@ namespace madbfs::server
         auto fd_int = static_cast<int>(fd);
 
         if (::lseek(fd_int, offset, SEEK_SET) < 0) {
-            return status_from_errno(__func__, std::format("[{}]", fd), "failed to seek file");
+            return status_from_errno(__func__, fmt::format("[{}]", fd), "failed to seek file");
         }
 
         // WARN: invalidates strings and spans from argument
@@ -380,7 +380,7 @@ namespace madbfs::server
 
         auto len = ::read(fd_int, buf.data(), buf.size());
         if (len < 0) {
-            return status_from_errno(__func__, std::format("[{}]", fd), "failed to read file");
+            return status_from_errno(__func__, fmt::format("[{}]", fd), "failed to read file");
         }
 
         return rpc::resp::Read{ .read = Span{ buf.begin(), static_cast<usize>(len) } };
@@ -394,12 +394,12 @@ namespace madbfs::server
         auto fd_int = static_cast<int>(fd);
 
         if (::lseek(fd_int, offset, SEEK_SET) < 0) {
-            return status_from_errno(__func__, std::format("[{}]", fd), "failed to seek file");
+            return status_from_errno(__func__, fmt::format("[{}]", fd), "failed to seek file");
         }
 
         auto len = ::write(fd_int, in.data(), in.size());
         if (len < 0) {
-            return status_from_errno(__func__, std::format("[{}]", fd), "failed to read file");
+            return status_from_errno(__func__, fmt::format("[{}]", fd), "failed to read file");
         }
 
         return rpc::resp::Write{ .size = static_cast<usize>(len) };

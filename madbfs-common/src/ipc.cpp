@@ -76,7 +76,7 @@ namespace madbfs::ipc
                 auto level = json::value_to<String>(json.at("value"));
                 if (not log::level_from_str(level)) {
                     return Unexpect{
-                        std::format("'{}' is not a valid log level {}", level, log::level_names)
+                        fmt::format("'{}' is not a valid log level {}", level, log::level_names)
                     };
                 }
                 return Op{ op::SetLogLevel{ .lvl = level } };
@@ -86,7 +86,7 @@ namespace madbfs::ipc
                 return Op{ op::Unmount{} };
             }
 
-            return Unexpect{ std::format("'{}' is not a valid operation, try 'help'", op) };
+            return Unexpect{ fmt::format("'{}' is not a valid operation, try 'help'", op) };
         } catch (const boost::system::system_error& e) {
             return Unexpect{ e.code().message() };
         } catch (...) {
@@ -116,7 +116,11 @@ namespace madbfs::ipc
         while (queue.size() >= m_max_queue) {
             queue.pop_front();
         }
-        queue.emplace_back(m_buf, msg.color_range_start, msg.color_range_end, static_cast<usize>(msg.level));
+
+        auto string = fmt::to_string(m_buf);
+        auto level  = static_cast<usize>(msg.level);
+
+        queue.emplace_back(std::move(string), msg.color_range_start, msg.color_range_end, level);
     }
 }
 

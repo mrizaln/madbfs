@@ -2,6 +2,8 @@
 
 #include "madbfs-common/aliases.hpp"
 
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <spdlog/pattern_formatter.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -14,7 +16,7 @@ namespace madbfs::log
     using Level = spdlog::level::level_enum;
 
     // I need to use const char* here because spdlog's doesn't support std::string_view... :(
-    static constexpr auto logger_pattern = "[%Y-%m-%d|%H:%M:%S] [%^-%L-%$] [%s:%#] %v";
+    static constexpr auto logger_pattern = "[%Y-%m-%d|%H:%M:%S] [%^-%L-%$] [%-20s|%3#] %v";
     static constexpr auto logger_name    = "madbfs-log";
 
     // I have to do this conversion gymnastics because somehow spdlog's string_view is not compaitble with

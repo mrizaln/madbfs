@@ -2,9 +2,10 @@
 #include <madbfs-common/rpc.hpp>
 #include <madbfs-server/server.hpp>
 
+#include <fmt/base.h>
+
 #include <charconv>
 #include <csignal>
-#include <print>
 
 struct Exit
 {
@@ -25,10 +26,10 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
     for (auto i = 1; i < argc; ++i) {
         auto arg = madbfs::Str{ argv[i] };
         if (arg == "--help" or arg == "-h") {
-            std::println("{} [--port PORT] [--debug] [--verbose]\n", argv[0]);
-            std::println("  --port PORT       Port number the server listen on (default: 12345");
-            std::println("  --debug           Enable debug logging.");
-            std::println("  --verbose         Enable verbose logging.");
+            fmt::println("{} [--port PORT] [--debug] [--verbose]\n", argv[0]);
+            fmt::println("  --port PORT       Port number the server listen on (default: 12345");
+            fmt::println("  --debug           Enable debug logging.");
+            fmt::println("  --verbose         Enable verbose logging.");
             return Exit{ 0 };
         } else if (arg == "--debug") {
             args.log_level = Level::debug;
@@ -36,7 +37,7 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
             args.log_level = Level::info;
         } else if (arg == "--port") {
             if (i + 1 >= argc) {
-                std::println(stderr, "expecting port number after '--port' argument");
+                fmt::println(stderr, "expecting port number after '--port' argument");
                 return Exit{ 1 };
             }
 
@@ -44,14 +45,14 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
 
             auto [ptr, ec] = std::from_chars(arg.data(), arg.data() + arg.size(), args.port);
             if (ec != std::errc{}) {
-                std::println(stderr, "failed to parse port number '{}': {}", arg, madbfs::err_msg(ec));
+                fmt::println(stderr, "failed to parse port number '{}': {}", arg, madbfs::err_msg(ec));
                 return Exit{ 1 };
             } else if (ptr != arg.data() + arg.size()) {
-                std::println(stderr, "failed to parse port number '{}': invalid trailing characters", arg);
+                fmt::println(stderr, "failed to parse port number '{}': invalid trailing characters", arg);
                 return Exit{ 1 };
             }
         } else {
-            std::println(stderr, "unknown argument: {}", arg);
+            fmt::println(stderr, "unknown argument: {}", arg);
             return Exit{ 1 };
         }
     }
@@ -81,7 +82,7 @@ try {
         co_return res;
     };
 
-    std::println(madbfs::rpc::server_ready_string);
+    fmt::println(madbfs::rpc::server_ready_string);
     std::fflush(stdout);    // ensure the message is sent
 
     madbfs::log_i("{}: madbfs-server version {}", __func__, MADBFS_VERSION_STRING);

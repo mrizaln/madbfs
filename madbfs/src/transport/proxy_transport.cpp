@@ -41,7 +41,7 @@ namespace
         auto serv_file = Str{ "/data/local/tmp/madbfs-server" };
 
         // enable port forwarding
-        auto forward = std::format("tcp:{}", port);
+        auto forward = fmt::format("tcp:{}", port);
         if (auto res = co_await cmd::exec({ "adb", "forward", forward, forward }); not res) {
             log_e("{}: failed to enable forwarding at port {}: {}", __func__, port, err_msg(res.error()));
             co_return Unexpect{ res.error() };
@@ -76,7 +76,7 @@ namespace
 
         // run server
         auto cmd      = bp::environment::find_executable("adb");
-        auto port_str = std::format("{}", port);
+        auto port_str = fmt::format("{}", port);
         auto args     = std::to_array<boost::string_view>({
             "shell",
             { serv_file.data(), serv_file.size() },

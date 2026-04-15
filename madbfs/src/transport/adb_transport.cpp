@@ -109,7 +109,7 @@ namespace
      */
     madbfs::String quote(madbfs::Str path)
     {
-        return std::format("\"{}\"", path);
+        return fmt::format("\"{}\"", path);
     }
 }
 
@@ -248,7 +248,7 @@ namespace madbfs
 
         AExpect<rpc::Response> handle_req(Vec<u8>& /* buf */, rpc::req::Truncate req)
         {
-            const auto size_str = std::format("{}", req.size);
+            const auto size_str = fmt::format("{}", req.size);
 
             auto res = co_await cmd::exec({ "adb", "shell", "truncate", "-s", size_str, quote(req.path) });
             co_return res.transform([](auto&&) { return rpc::resp::Truncate{}; });
@@ -281,7 +281,7 @@ namespace madbfs
                 default: {
                     const auto tp = chr::system_clock::time_point{ chr::seconds{ time.tv_sec } };
                     const auto zt = z->to_local(chr::floor<chr::seconds>(tp));
-                    const auto t  = std::format("{:%Y%m%d%H%M.%S}{}", zt, time.tv_nsec);
+                    const auto t  = std::format("{:%Y%m%d%H%M.%S}{}", zt, time.tv_nsec);    // fmt can't
 
                     log_i("{}: utimens to {}", __func__, t);
 
@@ -300,11 +300,11 @@ namespace madbfs
 
         AExpect<rpc::Response> handle_req(Vec<u8>& /* buf */, rpc::req::CopyFileRange req)
         {
-            const auto skip  = std::format("skip={}", req.in_offset);
-            const auto count = std::format("count={}", req.size);
-            const auto ifile = std::format("if=\"{}\"", req.in_path);
-            const auto seek  = std::format("seek={}", req.out_offset);
-            const auto ofile = std::format("of=\"{}\"", req.out_path);
+            const auto skip  = fmt::format("skip={}", req.in_offset);
+            const auto count = fmt::format("count={}", req.size);
+            const auto ifile = fmt::format("if=\"{}\"", req.in_path);
+            const auto seek  = fmt::format("seek={}", req.out_offset);
+            const auto ofile = fmt::format("of=\"{}\"", req.out_path);
 
             // count_bytes: https://stackoverflow.com/a/40792605/16506263
             // notrunc    : https://unix.stackexchange.com/a/146923
@@ -338,7 +338,7 @@ namespace madbfs
                     .and_then([](util::SplitResult<4> r) { return util::split_n<1>(r.result[3], ' '); })
                     .and_then([](util::SplitResult<1> r) { return parse_integral<usize>(r.result[0], 10); })
                     .transform([](auto n) { return rpc::resp::CopyFileRange{ .size = n }; })
-                    .value_or({ .size = 0 });
+                    .value_or(rpc::resp::CopyFileRange{ .size = 0 });
             });
         }
 
@@ -368,9 +368,9 @@ namespace madbfs
             }
 
             const auto& path  = entry->second;
-            const auto  skip  = std::format("skip={}", req.offset);
-            const auto  count = std::format("count={}", req.size);
-            const auto  ifile = std::format("if=\"{}\"", path);
+            const auto  skip  = fmt::format("skip={}", req.offset);
+            const auto  count = fmt::format("count={}", req.size);
+            const auto  ifile = fmt::format("if=\"{}\"", path);
 
             // `bs` is skipped, relies on `count_bytes`: https://stackoverflow.com/a/40792605/16506263
             auto res = co_await cmd::exec(
@@ -394,8 +394,8 @@ namespace madbfs
             }
 
             const auto& path  = entry->second;
-            const auto  seek  = std::format("seek={}", req.offset);
-            const auto  ofile = std::format("of=\"{}\"", path);
+            const auto  seek  = fmt::format("seek={}", req.offset);
+            const auto  ofile = fmt::format("of=\"{}\"", path);
 
             auto in_str = Str{ reinterpret_cast<const char*>(req.in.data()), req.in.size() };
 

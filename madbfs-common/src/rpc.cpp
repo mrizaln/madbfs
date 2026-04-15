@@ -357,7 +357,7 @@ namespace madbfs::rpc
 
     AExpect<void> handshake(Socket& sock)
     {
-        const auto message = std::format("{}:{}\n", server_ready_string, MADBFS_VERSION_STRING);
+        const auto message = fmt::format("{}:{}\n", server_ready_string, MADBFS_VERSION_STRING);
 
         auto n = co_await async::write_lv<char>(sock, message);
         HANDLE_ERROR(n, message.size(), "failed to send handshake to server");

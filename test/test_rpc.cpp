@@ -1,5 +1,3 @@
-#include "util.hpp"
-
 #include <madbfs-common/aliases.hpp>
 #include <madbfs-common/async/async.hpp>
 #include <madbfs-common/log.hpp>
@@ -8,9 +6,6 @@
 #include <boost/ut.hpp>
 #include <spdlog/spdlog.h>
 
-#include <chrono>
-#include <print>
-#include <random>
 #include <thread>
 
 namespace ut    = boost::ut;

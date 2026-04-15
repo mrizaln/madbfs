@@ -37,6 +37,8 @@ namespace madbfs
          * @class Proxy
          *
          * @brief Connection strategy that uses the proxy or when it is unavailable, delegate to Adb.
+         *
+         * Proxy -> Adb -> Null
          */
         struct Proxy
         {
@@ -48,6 +50,8 @@ namespace madbfs
          * @class Adb
          *
          * @brief Connection strategy that only uses Adb.
+         *
+         * Adb -> Null
          */
         struct Adb
         {
@@ -323,7 +327,7 @@ namespace madbfs
                 // reconnection complete, try again
             }
 
-            // gave up if too many attempts
+            // give up if too many attempts
             co_return Unexpect{ Errc::timed_out };
         }
 
