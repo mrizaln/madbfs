@@ -15,13 +15,17 @@
 namespace
 {
     madbfs::Await<madbfs::Uniq<madbfs::transport::Transport>> create_transport(
-        madbfs::ConnectionStrategy strat
+        const madbfs::ConnectionStrategy& strat
     )
     {
         using namespace madbfs;
         namespace conn = connection_strategy;
 
         switch (strat.index()) {
+        case ConnectionStrategy::index_of<conn::Custom>(): {
+            auto custom = strat.as<conn::Custom>();
+            co_return custom->create();
+        }
         case ConnectionStrategy::index_of<conn::Proxy>(): {
             auto proxy     = strat.as<conn::Proxy>();
             auto transport = co_await transport::ProxyTransport::create(proxy->server, proxy->port);
@@ -40,13 +44,17 @@ namespace
     }
 
     madbfs::AExpect<madbfs::Uniq<madbfs::transport::Transport>> create_optimized_transport(
-        madbfs::ConnectionStrategy strat
+        const madbfs::ConnectionStrategy& strat
     )
     {
         using namespace madbfs;
         namespace conn = connection_strategy;
 
         switch (strat.index()) {
+        case ConnectionStrategy::index_of<conn::Custom>(): {
+            auto custom = strat.as<conn::Custom>();
+            co_return custom->create();
+        }
         case ConnectionStrategy::index_of<conn::Proxy>(): {
             auto proxy = strat.as<conn::Proxy>();
             co_return co_await transport::ProxyTransport::create(proxy->server, proxy->port);
@@ -67,6 +75,7 @@ namespace
             [](const conn::Proxy&) { return "proxy"; },
             [](const conn::Adb&) { return "adb"; },
             [](const conn::Null&) { return "null"; },
+            [](const conn::Custom&) { return "custom"; },
         });
     }
 }
