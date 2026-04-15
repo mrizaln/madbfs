@@ -39,9 +39,9 @@ namespace
             auto coro = (tree.*fn)(std::forward<Args>(args)...);
             return madbfs::async::block(ctx, std::move(coro));
         } catch (const std::exception& e) {
-            madbfs::log_c("invoke_tree: exception occurred: {}", e.what());
+            madbfs::log_c(__func__, "exception occurred: {}", e.what());
         } catch (...) {
-            madbfs::log_c("invoke_tree: unknown exception occurred");
+            madbfs::log_c(__func__, "unknown exception occurred");
         }
         return madbfs::Unexpect{ madbfs::Errc::io_error };
     }
@@ -56,14 +56,14 @@ namespace
      * @return Lambda that transforms error into integer and logs them.
      */
     auto fuse_err(
-        madbfs::Str          name,
+        const char*          name,
         const char*          path,
         std::source_location loc = std::source_location::current()
     )
     {
         using madbfs::log::Level;
         auto log = [=]<typename... Args>(Level level, fmt::format_string<Args...>&& fmt, Args&&... args) {
-            madbfs::log::log_loc(loc, level, std::move(fmt), std::forward<Args>(args)...);
+            madbfs::log::log_loc_named(loc, level, name, std::move(fmt), std::forward<Args>(args)...);
         };
 
         return [=](std::errc err) {
@@ -86,12 +86,12 @@ namespace
             case std::errc::invalid_argument: {
                 if (madbfs::log::get_level() == madbfs::log::Level::debug) {
                     const auto& msg = madbfs::err_msg(err);
-                    log(Level::warn, "{}: {:?} returned with error code [{}]: {}", name, path, errint, msg);
+                    log(Level::warn, "{:?} returned with error code [{}]: {}", path, errint, msg);
                 }
             } break;
             default: {
                 const auto& msg = madbfs::err_msg(err);
-                log(Level::err, "{}: {:?} returned with error code [{}]: {}", name, path, errint, msg);
+                log(Level::err, "{:?} returned with error code [{}]: {}", path, errint, msg);
             }
             }
             return -errint;
@@ -106,8 +106,10 @@ namespace madbfs::operations
     void* init(fuse_conn_info* conn, fuse_config*) noexcept
     {
         if (conn->want & FUSE_CAP_ATOMIC_O_TRUNC) {
-            auto msg = "fuse sets atomic O_TRUNC capability, but filesystem doesn't support it, disabling...";
-            log_w("{}: {}", __func__, msg);
+            log_w(
+                __func__,
+                "fuse sets atomic O_TRUNC capability, but filesystem doesn't support it, disabling..."
+            );
             conn->want &= ~static_cast<u32>(FUSE_CAP_ATOMIC_O_TRUNC);
         }
 
@@ -115,7 +117,7 @@ namespace madbfs::operations
         assert(args != nullptr and "data should not be empty!");
 
         if (args->server and not args->server->is_absolute()) {
-            log_c("{}: server path is not absolute when it should! ignoring", __func__);
+            log_c(__func__, "server path is not absolute when it should! ignoring");
             args->server.reset();
         }
 
@@ -139,9 +141,9 @@ namespace madbfs::operations
         delete data;
 
         if (const auto* serial = ::getenv("ANDROID_SERIAL"); serial != nullptr) {
-            log_i("madbfs for device {} successfully terminated", serial);
+            log_i(__func__, "madbfs for device {} successfully terminated", serial);
         } else [[unlikely]] {
-            log_i("madbfs successfully terminated");
+            log_i(__func__, "madbfs successfully terminated");
         }
 
         // to force flushing remaining logs in queue
@@ -150,7 +152,7 @@ namespace madbfs::operations
 
     i32 getattr(const char* path, struct stat* stbuf, [[maybe_unused]] fuse_file_info* fi) noexcept
     {
-        log_i("{}: {:?}", __func__, path);
+        log_i(__func__, "{:?}", path);
 
         auto maybe_stat = ok_or(path::create(path), Errc::operation_not_supported).and_then([](path::Path p) {
             return invoke_tree(&FileTree::getattr, p);
@@ -180,7 +182,7 @@ namespace madbfs::operations
 
     i32 readlink(const char* path, char* buf, size_t size) noexcept
     {
-        log_i("{}: {:?}", __func__, path);
+        log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([](path::Path p) { return invoke_tree(&FileTree::readlink, p); })
@@ -192,7 +194,7 @@ namespace madbfs::operations
                 if (target[0] == '/') {    // absolute link
                     auto mount = get_data().mountpoint();
                     if (auto pathsize = mount.size() + target.size() + 1; pathsize > size) {
-                        log_e("readlink: path size is too long: {} vs {}", size, pathsize);
+                        log_e(__func__, "path size is too long: {} vs {}", size, pathsize);
                         return Unexpect{ Errc::filename_too_long };
                     }
                     std::memcpy(buf, mount.data(), mount.size());
@@ -200,7 +202,7 @@ namespace madbfs::operations
                     buf[mount.size() + target.size()] = '\0';
                 } else {
                     if (auto pathsize = target.size(); pathsize + 1 > size) {
-                        log_e("readlink: path size is too long: {} vs {}", size, pathsize);
+                        log_e(__func__, "path size is too long: {} vs {}", size, pathsize);
                         return Unexpect{ Errc::filename_too_long };
                     }
                     std::memcpy(buf, target.data(), target.size());
@@ -215,7 +217,7 @@ namespace madbfs::operations
 
     i32 mknod(const char* path, mode_t mode, dev_t dev) noexcept
     {
-        log_i("{}: {:?}", __func__, path);
+        log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([=](path::Path p) { return invoke_tree(&FileTree::mknod, p, mode, dev); })
@@ -225,7 +227,7 @@ namespace madbfs::operations
 
     i32 mkdir(const char* path, mode_t mode) noexcept
     {
-        log_i("{}: {:?}", __func__, path);
+        log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([=](path::Path p) { return invoke_tree(&FileTree::mkdir, p, mode | S_IFDIR); })
@@ -235,7 +237,7 @@ namespace madbfs::operations
 
     i32 unlink(const char* path) noexcept
     {
-        log_i("{}: {:?}", __func__, path);
+        log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([](path::Path p) { return invoke_tree(&FileTree::unlink, p); })
@@ -245,7 +247,7 @@ namespace madbfs::operations
 
     i32 rmdir(const char* path) noexcept
     {
-        log_i("{}: {:?}", __func__, path);
+        log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([](path::Path p) { return invoke_tree(&FileTree::rmdir, p); })
@@ -256,7 +258,7 @@ namespace madbfs::operations
     // see: man page of rename(2)
     i32 rename(const char* from, const char* to, u32 flags) noexcept
     {
-        log_i("{}: {:?} -> {:?} [flags={}]", __func__, from, to, flags);
+        log_i(__func__, "{:?} -> {:?} [flags={}]", from, to, flags);
 
         auto from_path = path::create(from);
         auto to_path   = path::create(to);
@@ -275,7 +277,7 @@ namespace madbfs::operations
 
     i32 truncate(const char* path, off_t size, [[maybe_unused]] fuse_file_info* fi) noexcept
     {
-        log_i("{}: [size={}] {:?}", __func__, size, path);
+        log_i(__func__, "[size={}] {:?}", size, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([&](path::Path p) { return invoke_tree(&FileTree::truncate, p, size); })
@@ -285,7 +287,7 @@ namespace madbfs::operations
 
     i32 open(const char* path, fuse_file_info* fi) noexcept
     {
-        log_i("{}: {:?} [flags={:#08o}]", __func__, path, fi->flags);
+        log_i(__func__, "{:?} [flags={:#08o}]", path, fi->flags);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([&](path::Path p) { return invoke_tree(&FileTree::open, p, fi->flags); })
@@ -296,7 +298,7 @@ namespace madbfs::operations
 
     i32 read(const char* path, char* buf, size_t size, off_t offset, fuse_file_info* fi) noexcept
     {
-        log_i("{}: [offset={}|size={}] {:?}", __func__, offset, size, path);
+        log_i(__func__, "[offset={}|size={}] {:?}", offset, size, path);
 
         auto res = ok_or(path::create(path), Errc::operation_not_supported).and_then([&](path::Path p) {
             return invoke_tree(&FileTree::read, p, fi->fh, { buf, size }, offset);
@@ -306,7 +308,7 @@ namespace madbfs::operations
 
     i32 write(const char* path, const char* buf, size_t size, off_t offset, fuse_file_info* fi) noexcept
     {
-        log_i("{}: [offset={}|size={}] {:?}", __func__, offset, size, path);
+        log_i(__func__, "[offset={}|size={}] {:?}", offset, size, path);
 
         auto res = ok_or(path::create(path), Errc::operation_not_supported).and_then([&](path::Path p) {
             return invoke_tree(&FileTree::write, p, fi->fh, { buf, size }, offset);
@@ -316,7 +318,7 @@ namespace madbfs::operations
 
     i32 flush(const char* path, fuse_file_info* fi) noexcept
     {
-        log_i("{}: {:?}", __func__, path);
+        log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([&](path::Path p) { return invoke_tree(&FileTree::flush, p, fi->fh); })
@@ -326,7 +328,7 @@ namespace madbfs::operations
 
     i32 release(const char* path, fuse_file_info* fi) noexcept
     {
-        log_i("{}: {:?}", __func__, path);
+        log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([&](path::Path p) { return invoke_tree(&FileTree::release, p, fi->fh); })
@@ -343,7 +345,7 @@ namespace madbfs::operations
         [[maybe_unused]] fuse_readdir_flags flags
     ) noexcept
     {
-        log_i("{}: {:?}", __func__, path);
+        log_i(__func__, "{:?}", path);
 
         const auto fill = [&](const char* name) { filler(buf, name, nullptr, 0, FUSE_FILL_DIR_PLUS); };
 
@@ -355,7 +357,7 @@ namespace madbfs::operations
 
     i32 access([[maybe_unused]] const char* path, [[maybe_unused]] i32 mask) noexcept
     {
-        log_i("{}: {:?}", __func__, path);
+        log_i(__func__, "{:?}", path);
 
         // NOTE: empty
 
@@ -364,7 +366,7 @@ namespace madbfs::operations
 
     i32 utimens(const char* path, const timespec tv[2], [[maybe_unused]] fuse_file_info* fi) noexcept
     {
-        log_i("{}: {:?}", __func__, path);
+        log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
             .and_then([&](path::Path p) { return invoke_tree(&FileTree::utimens, p, tv[0], tv[1]); })
@@ -384,13 +386,7 @@ namespace madbfs::operations
     ) noexcept
     {
         log_i(
-            "{}: [size={}] | {:?} [off={}] -> {:?} [off={}]",
-            __func__,
-            size,
-            in_path,
-            in_off,
-            out_path,
-            out_off
+            __func__, "[size={}] | {:?} [off={}] -> {:?} [off={}]", size, in_path, in_off, out_path, out_off
         );
 
         auto in  = path::create(in_path);

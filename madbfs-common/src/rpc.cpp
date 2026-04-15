@@ -7,20 +7,20 @@
 // error handling that adapts error_code into errc
 #define HANDLE_ERROR(Res, Want, Msg)                                                                         \
     if (not(Res)) {                                                                                          \
-        madbfs::log_e("{}: " Msg ": {}", __func__, Res.error().message());                                   \
+        madbfs::log_e(__func__, Msg ": {}", Res.error().message());                                          \
         co_return madbfs::Unexpect{ madbfs::async::to_generic_err(Res.error(), Errc::not_connected) };       \
     } else if (Res.value() != Want) {                                                                        \
-        madbfs::log_e("{}: " Msg ": message length mismatch [{} vs {}]", __func__, Res.value(), Want);       \
+        madbfs::log_e(__func__, Msg ": message length mismatch [{} vs {}]", Res.value(), Want);              \
         co_return madbfs::Unexpect{ madbfs::Errc::bad_message };                                             \
     }
 
 // error handling that adapts error_code into errc with custom handling on failure
 #define HANDLE_ERROR_ELSE(Res, Want, Msg, Else)                                                              \
     if (not(Res)) {                                                                                          \
-        madbfs::log_e("{}: " Msg ": {}", __func__, Res.error().message());                                   \
+        madbfs::log_e(__func__, Msg ": {}", Res.error().message());                                          \
         Else;                                                                                                \
     } else if (Res.value() != Want) {                                                                        \
-        madbfs::log_e("{}: " Msg ": message length mismatch [{} vs {}]", __func__, Res.value(), Want);       \
+        madbfs::log_e(__func__, "" Msg ": message length mismatch [{} vs {}]", Res.value(), Want);           \
         Else;                                                                                                \
     }
 
@@ -276,9 +276,6 @@ namespace
             auto  arr  = to_net_bytes(static_cast<u64>(size));
             sr::copy_n(arr.begin(), arr.size(), buf.begin() + header_size - sizeof(u64));
 
-            // auto str = Str{ reinterpret_cast<const char*>(buf.data()), buf.size() };
-            // log_d("{}: request built: {:?}", __func__, str);
-
             return buf;
         }
     };
@@ -310,9 +307,6 @@ namespace
             auto  size = buf.size() - header_size;
             auto  arr  = to_net_bytes(static_cast<u64>(size));
             sr::copy_n(arr.begin(), arr.size(), buf.begin() + header_size - sizeof(u64));
-
-            // auto str = Str{ reinterpret_cast<const char*>(buf.data()), buf.size() };
-            // log_d("{}: response built: {:?}", __func__, str);
 
             return buf;
         }
@@ -364,11 +358,11 @@ namespace madbfs::rpc
 
         auto buffer = String(message.size(), '\0');
         auto n1     = co_await async::read_lv<char>(sock, buffer);
-        log_d("{}: received: {:?}", __func__, Str{ buffer.data(), n1.value_or(0) });
+        log_d(__func__, "received: {:?}", Str{ buffer.data(), n1.value_or(0) });
         HANDLE_ERROR(n1, buffer.size(), "failed to read handshake from server");
 
         if (not sr::equal(buffer, message)) {
-            log_e("mismatched message: [{:?} vs {:?}]", buffer, message);
+            log_e(__func__, "mismatched message: [{:?} vs {:?}]", buffer, message);
             co_return Unexpect{ Errc::bad_message };
         }
 
@@ -848,7 +842,7 @@ namespace madbfs::rpc
         auto size   = reader.read_int<u64>().value();
 
         if (not proc) {
-            log_e("{}: received response for [{}] but it's an [invalid procedure]", __func__, id.inner());
+            log_e(__func__, "received response for [{}] but it's an [invalid procedure]", id.inner());
             co_return Unexpect{ Status::bad_message };
         }
 
@@ -870,7 +864,7 @@ namespace madbfs::rpc
         auto size   = reader.read_int<u64>().value();
 
         if (not proc) {
-            log_e("{}: received response for [{}] but it's an [invalid procedure]", __func__, id.inner());
+            log_e(__func__, "received response for [{}] but it's an [invalid procedure]", id.inner());
             co_return Unexpect{ Status::bad_message };
         }
 

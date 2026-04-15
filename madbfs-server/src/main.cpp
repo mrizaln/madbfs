@@ -85,17 +85,17 @@ try {
     fmt::println(madbfs::rpc::server_ready_string);
     std::fflush(stdout);    // ensure the message is sent
 
-    madbfs::log_i("{}: madbfs-server version {}", __func__, MADBFS_VERSION_STRING);
-    madbfs::log_i("{}: launching tcp server on port: {}", __func__, args.port);
+    madbfs::log_i(__func__, "madbfs-server version {}", MADBFS_VERSION_STRING);
+    madbfs::log_i(__func__, "launching tcp server on port: {}", args.port);
 
     auto res = madbfs::async::once(context, task());
 
-    madbfs::log_i("server exited normally: {}", madbfs::err_msg(res.error_or({})));
+    madbfs::log_i(__func__, "server exited normally: {}", madbfs::err_msg(res.error_or({})));
     return 0;
 } catch (const std::exception& e) {
-    madbfs::log_c("exception: {}", e.what());
+    madbfs::log_c(__func__, "exception: {}", e.what());
     return 1;
 } catch (...) {
-    madbfs::log_c("exception (unknown type)");
+    madbfs::log_c(__func__, "exception (unknown type)");
     return 1;
 }

@@ -62,7 +62,7 @@ namespace
 
         in >> std::chrono::parse("%F %T %z", tp);
         if (in.fail()) {
-            madbfs::log_d("{}: fail to parse {:?}", __func__, date);
+            madbfs::log_d(__func__, "fail to parse {:?}", date);
         }
 
         auto secs  = std::chrono::time_point_cast<std::chrono::seconds>(tp);
@@ -186,7 +186,7 @@ namespace madbfs
                 return ok_or(parse_file_stat(util::strip(out)), Errc::io_error)
                     .transform([](auto parsed) { return std::get<1>(parsed); })
                     .transform_error([&](auto err) {
-                        log_e("Connection::stat: parsing stat failed [{}]", req.path);
+                        log_e(__func__, "parsing stat failed [{}]", req.path);
                         return err;
                     });
             });
@@ -264,7 +264,7 @@ namespace madbfs
                 try {
                     z = chr::current_zone();
                 } catch (const std::runtime_error& e) {
-                    log_c("{}: {}", __func__, e.what());
+                    log_c(__func__, "{}", e.what());
                     co_return Unexpect{ Errc::resource_unavailable_try_again };
                 }
             }
@@ -283,7 +283,7 @@ namespace madbfs
                     const auto zt = z->to_local(chr::floor<chr::seconds>(tp));
                     const auto t  = std::format("{:%Y%m%d%H%M.%S}{}", zt, time.tv_nsec);    // fmt can't
 
-                    log_i("{}: utimens to {}", __func__, t);
+                    log_i(__func__, "utimens to {}", t);
 
                     auto res = co_await cmd::exec(
                         { "adb", "shell", "touch", "-c", flag, "-t", t, quote(req.path) }
@@ -333,7 +333,7 @@ namespace madbfs
              */
 
             co_return res.transform([&](Str str) {
-                log_d("copy_file_range: {:?}", str);
+                log_d(__func__, "copy_file_range: {:?}", str);
                 return util::split_n<4>(str, '\n')
                     .and_then([](util::SplitResult<4> r) { return util::split_n<1>(r.result[3], ' '); })
                     .and_then([](util::SplitResult<1> r) { return parse_integral<usize>(r.result[0], 10); })
@@ -451,7 +451,7 @@ namespace madbfs::transport
 
     Await<void> AdbTransport::start()
     {
-        log_d("{}: called", __func__);
+        log_d(__func__, "called");
 
         m_running = true;
         auto exec = co_await async::current_executor();
@@ -461,11 +461,11 @@ namespace madbfs::transport
 
             log::log_exception(e, "response_receive");
             if (not res) {
-                log_w("response_receive: finished with error: {}", err_msg(res.error()));
+                log_w("response_receive", "finished with error: {}", err_msg(res.error()));
             }
 
             if (not m_requests.empty()) {
-                log_e("response_receive: there are {} promises unhandled", m_requests.size());
+                log_e("response_receive", "there are {} promises unhandled", m_requests.size());
                 for (auto& [id, p] : m_requests) {
                     p.result.set_value(Unexpect{ e ? Errc::state_not_recoverable : Errc::operation_canceled }
                     );
@@ -480,11 +480,11 @@ namespace madbfs::transport
         });
 
         async::spawn(exec, request_dispatch(), [&](std::exception_ptr e, Expect<void> res) {
-            log::log_exception(e, "request_send");
+            log::log_exception(e, "request_dispatch");
             if (not res) {
-                log_e("request_dispatch: finished with error: {}", err_msg(res.error()));
+                log_e("request_dispatch", "finished with error: {}", err_msg(res.error()));
             }
-            log_e("request_dispatch: stopped sending requests");
+            log_e("request_dispatch", "stopped sending requests");
         });
     }
 
@@ -501,11 +501,11 @@ namespace madbfs::transport
         m_requests.emplace(id, Promise{ buffer, req.proc(), std::move(promise) });
 
         if (auto res = co_await m_in_channel.async_send({}, { id, req }); not res) {
-            log_e("{}: failed to send payload to channel: {}", __func__, res.error().message());
+            log_e(__func__, "failed to send payload to channel: {}", res.error().message());
             co_return Unexpect{ async::to_generic_err(res.error(), Errc::broken_pipe) };
         }
 
-        log_d("{}: REQ QUEUED {} [{}]", __func__, id.inner(), rpc::to_string(req));
+        log_d(__func__, "REQ QUEUED {} [{}]", id.inner(), rpc::to_string(req));
 
         co_return co_await future.async_extract();
     }
@@ -523,15 +523,15 @@ namespace madbfs::transport
         m_requests.emplace(id, Promise{ buffer, req.proc(), std::move(promise) });
 
         if (auto res = co_await m_in_channel.async_send({}, { id, req }); not res) {
-            log_e("{}: failed to send payload to channel: {}", __func__, res.error().message());
+            log_e(__func__, "failed to send payload to channel: {}", res.error().message());
             co_return Unexpect{ async::to_generic_err(res.error(), Errc::broken_pipe) };
         }
 
-        log_d("{}: REQ QUEUED {} [{}]", __func__, id.inner(), rpc::to_string(req));
+        log_d(__func__, "REQ QUEUED {} [{}]", id.inner(), rpc::to_string(req));
 
         co_await async::timeout(future.async_wait(async::use_awaitable), timeout, [&] {
             if (auto entry = m_requests.extract(id); not entry.empty()) {
-                log_d("send: REQ CANCELLED {} [{}]", id.inner(), rpc::to_string(req));
+                log_d("send", "REQ CANCELLED {} [{}]", id.inner(), rpc::to_string(req));
                 entry.mapped().result.set_value(Unexpect{ Errc::timed_out });
             }
         });
@@ -546,14 +546,14 @@ namespace madbfs::transport
         while (m_running and m_in_channel.is_open()) {
             auto id_req = co_await m_in_channel.async_receive();
             if (not id_req) {
-                log_e("{}: failed to recv payload from channel: {}", __func__, id_req.error().message());
+                log_e(__func__, "failed to recv payload from channel: {}", id_req.error().message());
                 co_return Unexpect{ async::to_generic_err(id_req.error(), Errc::broken_pipe) };
             }
 
             auto [id, req] = std::move(*id_req);
             auto promise   = m_requests.find(id);
             if (promise == m_requests.end()) {
-                log_e("{}: request {} has no associated promise ", __func__, id.inner());
+                log_e(__func__, "request {} has no associated promise ", id.inner());
                 continue;
             }
 
@@ -569,7 +569,7 @@ namespace madbfs::transport
                         [](std::exception_ptr e, Expect<void, net::error_code> res) {
                             log::log_exception(e, "handler");
                             if (not res) {
-                                log_e("handler: finished with error: {}", res.error().message());
+                                log_e("handler", "finished with error: {}", res.error().message());
                             }
                         }
                     );
@@ -578,7 +578,7 @@ namespace madbfs::transport
         }
 
         m_pool.wait();
-        log_d("{}: listening complete", __func__);
+        log_d(__func__, "listening complete");
 
         co_return Expect<void>{};
     }
@@ -588,7 +588,7 @@ namespace madbfs::transport
         while (m_running and m_out_channel.is_open()) {
             auto id_resp = co_await m_out_channel.async_receive();
             if (not id_resp) {
-                log_e("{}: failed to receive response from channel: {}", __func__, id_resp.error().message());
+                log_e(__func__, "failed to receive response from channel: {}", id_resp.error().message());
                 co_return Unexpect{ async::to_generic_err(id_resp.error(), Errc::broken_pipe) };
             }
 
@@ -596,12 +596,12 @@ namespace madbfs::transport
 
             auto req = m_requests.extract(id);
             if (req.empty()) {
-                log_e("{}: response incoming for id {} but no promise", __func__, id.inner());
+                log_e(__func__, "response incoming for id {} but no promise", id.inner());
                 continue;
             }
 
             auto& [_, proc, res] = req.mapped();
-            log_d("{}: RESP RECV {} [{}]", __func__, id.inner(), rpc::to_string(proc));
+            log_d(__func__, "RESP RECV {} [{}]", id.inner(), rpc::to_string(proc));
 
             res.set_value(std::move(response));
         }

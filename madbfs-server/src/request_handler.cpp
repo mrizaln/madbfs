@@ -37,7 +37,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(Vec<u8>& buf, rpc::req::Listdir req)
     {
         const auto& [path] = req;
-        log_d("listdir: path={:?}", path.data());
+        log_d("listdir", "path={:?}", path.data());
 
         auto dir = ::opendir(path.data());
         if (dir == nullptr) {
@@ -102,7 +102,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Stat req)
     {
         const auto& [path] = req;
-        log_d("stat: path={:?}", path.data());
+        log_d("stat", "path={:?}", path.data());
 
         struct stat filestat = {};
         if (auto res = ::lstat(path.data(), &filestat); res < 0) {
@@ -124,7 +124,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Readlink req)
     {
         const auto& [path] = req;
-        log_d("readlink: path={:?}", path.data());
+        log_d("readlink", "path={:?}", path.data());
 
         // NOTE: can't use server's buffer as destination since using it will invalidate path.
         // PERF: since the buffer won't change anyway, making it static reduces memory usage
@@ -141,7 +141,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Mknod req)
     {
         const auto& [path, mode, dev] = req;
-        log_d("mknod: path={:?} mode={:#08o} dev={:#04x}", path.data(), mode, dev);
+        log_d("mknod", "path={:?} mode={:#08o} dev={:#04x}", path.data(), mode, dev);
 
         if (::mknod(path.data(), mode, dev) < 0) {
             return status_from_errno(__func__, path, "failed to create file");
@@ -153,7 +153,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Mkdir req)
     {
         const auto& [path, mode] = req;
-        log_d("mkdir: path={:?} mode={:#08o}", path.data(), mode);
+        log_d("mkdir", "path={:?} mode={:#08o}", path.data(), mode);
 
         if (::mkdir(path.data(), mode) < 0) {
             return status_from_errno(__func__, path, "failed to create directory");
@@ -165,7 +165,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Unlink req)
     {
         const auto& [path] = req;
-        log_d("unlink: path={:?}", path.data());
+        log_d("unlink", "path={:?}", path.data());
 
         if (::unlink(path.data()) < 0) {
             return status_from_errno(__func__, path, "failed to remove file");
@@ -177,7 +177,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Rmdir req)
     {
         const auto& [path] = req;
-        log_d("rmdir: path={:?}", path.data());
+        log_d("rmdir", "path={:?}", path.data());
 
         if (::rmdir(path.data()) < 0) {
             return status_from_errno(__func__, path, "failed to remove directory");
@@ -189,7 +189,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Rename req)
     {
         const auto& [from, to, flags] = req;
-        log_d("rename: from={:?} -> to={:?} [flags={}]", from, to, flags);
+        log_d("rename", "from={:?} -> to={:?} [flags={}]", from, to, flags);
 
         // paths are guaranteed to be absolute for both from and to, so the fds are not required since they
         // will be ignored. see man rename(2).
@@ -199,7 +199,7 @@ namespace madbfs::server
             auto res = syscall(SYS_renameat2, 0, from.data(), 0, to.data(), flags);
             if (res < 0 and errno == ENOSYS) {
                 m_renameat2_impl = false;
-                log_w("renameat2 syscall is not implemented, proceeding into fallback");
+                log_w("rename", "renameat2 syscall is not implemented, proceeding into fallback");
             } else if (res < 0) {
                 return status_from_errno(__func__, from, "failed to rename file");
             } else {
@@ -222,7 +222,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Truncate req)
     {
         const auto& [path, size] = req;
-        log_d("truncate: path={:?} size={}", path.data(), size);
+        log_d("truncate", "path={:?} size={}", path.data(), size);
 
         if (::truncate(path.data(), size) < 0) {
             return status_from_errno(__func__, path, "failed to truncate file");
@@ -236,7 +236,7 @@ namespace madbfs::server
         const auto& [path, atime, mtime] = req;
 
         auto to_pair = [](timespec time) { return Pair{ time.tv_sec, time.tv_nsec }; };
-        log_d("utimens: path={:?} atime={} mtime={}", path.data(), to_pair(atime), to_pair(mtime));
+        log_d("utimens", "path={:?} atime={} mtime={}", path.data(), to_pair(atime), to_pair(mtime));
 
         auto times = Array{ atime, mtime };
         if (::utimensat(0, path.data(), times.data(), AT_SYMLINK_NOFOLLOW) < 0) {
@@ -249,7 +249,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::CopyFileRange req)
     {
         const auto& [in, in_off, out, out_off, size] = req;
-        log_d("copy_file_range: from={:?} -> to={:?}", in.data(), out.data());
+        log_d("copy_file_range", "from={:?} -> to={:?}", in.data(), out.data());
 
         auto in_fd = ::open(in.data(), O_RDONLY);
         if (in_fd < 0) {
@@ -291,13 +291,13 @@ namespace madbfs::server
 
             if (res < 0 and errno == ENOSYS) {
                 m_copy_file_range_impl = false;
-                log_w("copy_file_range syscall is not implemented, proceeding into fallback");
+                log_w("copy_file_range", "syscall is not implemented, proceeding into fallback");
             } else if (res < 0 and errno == EXDEV) {
-                // should the fallback be here on the server or should it be on the client?
+                // NOTE: should the fallback be here on the server or should it be on the client?
                 // if the fallback is here, the operation will take very long time and trigger timeout while
                 // also preventing any other operation to occur simulataneously since the server is busy
                 // dealing with just this operation
-                log_w("cross-filesystem copy, proceeding into fallback");
+                log_w("copy_file_range", "cross-filesystem copy, proceeding into fallback");
             } else if (res < 0) {
                 return status_from_errno(__func__, out, "failed to copy file range");
             }
@@ -342,7 +342,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Open req)
     {
         const auto& [path, mode] = req;
-        log_d("open: path={:?} mode={}", path.data(), static_cast<int>(mode));
+        log_d("open", "path={:?} mode={}", path.data(), static_cast<int>(mode));
 
         auto fd = ::open(path.data(), static_cast<int>(req.mode));
         if (fd < 0) {
@@ -355,7 +355,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Close req)
     {
         const auto& [fd] = req;
-        log_d("close: fd={}", fd);
+        log_d("close", "fd={}", fd);
 
         if (::close(static_cast<int>(fd)) < 0) {
             return status_from_errno(__func__, fmt::format("[{}]", fd), "failed to close file");
@@ -367,7 +367,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(Vec<u8>& buf, rpc::req::Read req)
     {
         const auto& [fd, offset, size] = req;
-        log_d("read: fd={} offset={} size={}", fd, offset, size);
+        log_d("read", "fd={} offset={} size={}", fd, offset, size);
 
         auto fd_int = static_cast<int>(fd);
 
@@ -389,7 +389,7 @@ namespace madbfs::server
     RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Write req)
     {
         const auto& [fd, offset, in] = req;
-        log_d("write: fd={} offset={}, size={}", fd, offset, in.size());
+        log_d("write", "fd={} offset={}, size={}", fd, offset, in.size());
 
         auto fd_int = static_cast<int>(fd);
 

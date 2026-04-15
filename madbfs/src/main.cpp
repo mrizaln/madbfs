@@ -3,8 +3,6 @@
 
 #include <madbfs-common/log.hpp>
 
-#include <fmt/base.h>
-
 #include <exception>
 
 void termination()
@@ -13,12 +11,12 @@ void termination()
         try {
             std::rethrow_exception(e);
         } catch (const std::exception& e) {
-            madbfs::log_c("> Uncaught exception:\n{}", e.what());
+            madbfs::log_c(__func__, "> Uncaught exception:\n{}", e.what());
         } catch (...) {
-            madbfs::log_c("> Uncaught exception (unknown type)");
+            madbfs::log_c(__func__, "> Uncaught exception (unknown type)");
         }
     }
-    madbfs::log_c("> Terminating");
+    madbfs::log_c(__func__, "> Terminating");
     madbfs::log::shutdown();
     std::abort();
 }
@@ -42,6 +40,7 @@ try {
 
     if (opt.log_file != "-") {
         madbfs::log_i(
+            __func__,
             "[madbfs] mount '{}' at '{}' with cache size {} MiB and page size {} KiB",
             opt.serial,
             opt.mount,

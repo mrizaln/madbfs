@@ -2,8 +2,6 @@
 
 #include "madbfs/connection.hpp"
 
-#include "madbfs-common/log.hpp"
-
 namespace madbfs::tree::node
 {
     Regular::Mode Regular::open(u64 fd, int flags)

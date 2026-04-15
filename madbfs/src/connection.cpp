@@ -88,7 +88,7 @@ namespace madbfs
         : m_transport{ nullptr }
         , m_strategy{ strat }
     {
-        log_i("{}: Connection is constructed using this strategy: {}", __func__, strategy_name(strat));
+        log_i(__func__, "Connection is constructed using this strategy: {}", strategy_name(strat));
         m_transport = async::block(ctx, create_transport(strat));
     }
 
@@ -125,7 +125,7 @@ namespace madbfs
             co_return Expect<void>{};    // well, do nothing
         }
 
-        log_i("{}: new {} transport created", __func__, (**transport).name());
+        log_i(__func__, "new {} transport created", (**transport).name());
 
         if (m_reconnection) {
             co_return Unexpect{ Errc::operation_in_progress };
@@ -139,7 +139,7 @@ namespace madbfs
         const auto old = m_transport->name();
         m_transport    = std::move(*transport);
 
-        log_i("{}: {} transport replaced with {} transport", __func__, old, m_transport->name());
+        log_i(__func__, "{} transport replaced with {} transport", old, m_transport->name());
 
         promise.set_value(Errc{});
         m_reconnection.reset();
@@ -161,7 +161,7 @@ namespace madbfs
         const auto old = m_transport->name();
         m_transport    = co_await create_transport(m_strategy);
 
-        log_i("{}: {} transport replaced with {} transport", __func__, old, m_transport->name());
+        log_i(__func__, "{} transport replaced with {} transport", old, m_transport->name());
 
         promise.set_value(Errc{});
         m_reconnection.reset();

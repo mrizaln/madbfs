@@ -138,7 +138,7 @@ namespace madbfs::ipc
         sock.connect(ep, ec);
 
         if (ec) {
-            log_e("{}: failed to connect to remote {:?}: {}", __func__, path.c_str(), ec.message());
+            log_e(__func__, "failed to connect to remote {:?}: {}", path.c_str(), ec.message());
             return Unexpect{ async::to_generic_err(ec, Errc::address_not_available) };
         }
 
@@ -180,7 +180,7 @@ namespace madbfs::ipc
         try {
             co_return json::parse(*response_str);
         } catch (const std::exception& e) {
-            log_e("{}: failed to deserialize response: {}", __func__, e.what());
+            log_e(__func__, "failed to deserialize response: {}", e.what());
             co_return Unexpect{ Errc::bad_message };
         }
     }
@@ -200,7 +200,7 @@ namespace madbfs::ipc
         try {
             co_return json::parse(*response_str);
         } catch (const std::exception& e) {
-            log_e("{}: failed to deserialize response: {}", __func__, e.what());
+            log_e(__func__, "failed to deserialize response: {}", e.what());
             co_return Unexpect{ Errc::bad_message };
         }
     }
@@ -220,7 +220,7 @@ namespace madbfs::ipc
         try {
             co_return json::parse(*response_str);
         } catch (const std::exception& e) {
-            log_e("{}: failed to deserialize response: {}", __func__, e.what());
+            log_e(__func__, "failed to deserialize response: {}", e.what());
             co_return Unexpect{ Errc::bad_message };
         }
     }
@@ -249,7 +249,7 @@ namespace madbfs::ipc
         }
         if (not m_socket_path.empty()) {
             if (auto sock = m_socket_path.c_str(); ::unlink(sock) < 0) {
-                log_e("{}: failed to unlink socket: {} [{}]", __func__, sock, strerror(errno));
+                log_e(__func__, "failed to unlink socket: {} [{}]", sock, strerror(errno));
             }
         }
     }
@@ -268,7 +268,7 @@ namespace madbfs::ipc
         acc.listen(acc.max_listen_connections, ec);
 
         if (ec) {
-            log_e("{}: failed to construct acceptor {:?}: {}", __func__, path.c_str(), ec.message());
+            log_e(__func__, "failed to construct acceptor {:?}: {}", path.c_str(), ec.message());
             return Unexpect{ async::to_generic_err(ec, Errc::address_not_available) };
         }
 
@@ -277,14 +277,14 @@ namespace madbfs::ipc
 
     Await<void> Server::launch(OnFsOp on_op)
     {
-        log_d("{}: ipc launched!", __func__);
+        log_d(__func__, "ipc launched!");
 
         m_running = true;
         m_on_op   = std::move(on_op);
 
         auto logger = log::get_logger();
         if (not logger) {
-            log_e("{}: can't find logger with name '{}', logcat won't function", __func__, log::logger_name);
+            log_e(__func__, "can't find logger with name '{}', logcat won't function", log::logger_name);
             co_await run();
             co_return;
         }
@@ -314,11 +314,11 @@ namespace madbfs::ipc
         while (m_running) {
             auto res = co_await m_socket.async_accept();
             if (not res) {
-                log_e("{}: socket accept failed: {}", __func__, res.error().message());
+                log_e(__func__, "socket accept failed: {}", res.error().message());
                 continue;
             }
 
-            log_i("{}: new ipc connection from peer", __func__);
+            log_i(__func__, "new ipc connection from peer");
             co_await handle_peer(std::move(res).value());
         }
     }
@@ -330,7 +330,7 @@ namespace madbfs::ipc
             co_return;
         }
 
-        log_d("{}: op sent by peer: {:?}", __func__, *op_str);
+        log_d(__func__, "op sent by peer: {:?}", *op_str);
 
         auto op     = parse_op(op_str.value());
         auto status = Str{};
@@ -353,7 +353,7 @@ namespace madbfs::ipc
                 m_logcat_subscribers.emplace_back(std::move(sock), op->as<op::Logcat>()->color);
                 co_return;
             default:
-                log_c("{}: [BUG] not all op variants are handled!", __func__);    //
+                log_c(__func__, "[BUG] not all op variants are handled!");    //
                 co_return;
             }
         } else {
@@ -367,7 +367,7 @@ namespace madbfs::ipc
         });
 
         if (auto res = co_await send_message(sock, response); not res) {
-            log_w("{}: failed to send message: {}", __func__, err_msg(res.error()));
+            log_w(__func__, "failed to send message: {}", err_msg(res.error()));
         }
     }
 
@@ -375,7 +375,7 @@ namespace madbfs::ipc
     {
         using namespace std::chrono_literals;
 
-        log_i("{}: start", __func__);
+        log_i(__func__, "start");
 
         // copying what spdlog do on ansicolor_sink :P
         const auto colors = Array<Str, log::Level::n_levels>{
@@ -399,7 +399,7 @@ namespace madbfs::ipc
 
             if (m_logcat_subscribers.empty()) {
                 if (not prev_empty) {
-                    log_i("{}: no subscribers, turning off logcat sink", __func__);
+                    log_i(__func__, "no subscribers, turning off logcat sink");
                     m_logcat_sink->set_level(log::Level::off);
                     m_logcat_sink->swap().clear();
                     m_logcat_sink->swap().clear();
@@ -407,7 +407,7 @@ namespace madbfs::ipc
                 prev_empty = true;
                 continue;
             } else if (prev_empty) {
-                log_i("{}: subscribers not empty anymore, turning on logcat sink", __func__);
+                log_i(__func__, "subscribers not empty anymore, turning on logcat sink");
                 m_logcat_sink->set_level(log::Level::trace);    // capture all
                 prev_empty = false;
             }
@@ -455,6 +455,6 @@ namespace madbfs::ipc
 
         m_logcat_subscribers.clear();
 
-        log_i("{}: end", __func__);
+        log_i(__func__, "end");
     }
 }

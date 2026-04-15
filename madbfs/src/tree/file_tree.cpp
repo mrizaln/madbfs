@@ -145,7 +145,7 @@ namespace madbfs::tree
 
     AExpect<void> FileTree::update(Node& node, path::Path path)
     {
-        log_d("{}: {:?}", __func__, path);
+        log_d(__func__, "{:?}", path);
 
         auto new_stat = co_await m_connection.stat(path);
         auto old_stat = node.stat();
@@ -164,12 +164,12 @@ namespace madbfs::tree
 
         // no change
         if (old_stat and not detect_modification(old_stat->get(), *new_stat)) {
-            log_d("{}: unchanged: {:?}", __func__, path);
+            log_d(__func__, "unchanged: {:?}", path);
             node.expires_after(m_ttl.value_or(Seconds::max()));
             co_return Expect<void>{};
         }
 
-        log_w("{}:   changed: {:?}", __func__, path);
+        log_w(__func__, "  changed: {:?}", path);
         co_await m_cache.invalidate_one(node.id(), false);    // maybe conditionally flush?
 
         switch (new_stat->mode & S_IFMT) {
@@ -252,7 +252,7 @@ namespace madbfs::tree
 
             if (list.empty()) {
                 for (auto [stat, name] : may_stats.value()) {
-                    log_d("{}: [{:?}] new entry    : {:?}", __func__, parent->name(), name);
+                    log_d(__func__, "[{:?}] new entry    : {:?}", parent->name(), name);
 
                     auto file  = co_await build_file(name, stat.mode);
                     auto child = std::make_unique<Node>(name, parent, std::move(stat), std::move(file));
@@ -268,7 +268,7 @@ namespace madbfs::tree
 
                     auto found = list.find(name);
                     if (found == list.end()) {
-                        log_d("{}: [{:?}] new entry: {:?}", __func__, parent->name(), name);
+                        log_d(__func__, "[{:?}] new entry: {:?}", parent->name(), name);
 
                         auto file  = co_await build_file(name, stat.mode);
                         auto child = std::make_unique<Node>(name, parent, std::move(stat), std::move(file));
@@ -280,13 +280,13 @@ namespace madbfs::tree
 
                     auto& child = (**found);
                     if (auto child_stat = child.stat(); not child_stat) {    // Error node
-                        log_d("{}: [{:?}]   changed: {:?}", __func__, parent->name(), name);
+                        log_d(__func__, "[{:?}]   changed: {:?}", parent->name(), name);
 
                         child.set_stat(std::move(stat));
                         child.mutate(co_await build_file(name, stat.mode));
                         child.expires_after(m_ttl.value_or(Seconds::max()));
                     } else if (child.expired() and detect_modification(child_stat->get(), stat)) {
-                        log_d("{}: [{:?}]   changed: {:?}", __func__, parent->name(), name);
+                        log_d(__func__, "[{:?}]   changed: {:?}", parent->name(), name);
 
                         child.set_stat(std::move(stat));
                         child.mutate(co_await build_file(name, stat.mode));
@@ -295,14 +295,14 @@ namespace madbfs::tree
                         co_await m_cache.invalidate_one(child.id(), false);    // should I flush?
                     }
 
-                    log_d("{}: [{:?}] unchanged: {:?}", __func__, parent->name(), name);
+                    log_d(__func__, "[{:?}] unchanged: {:?}", parent->name(), name);
                 }
 
                 // remove old entries if doesn't exist in new entries
                 for (auto it = list.begin(); it != list.end();) {
                     auto name = (**it).name();
                     if (not new_list.contains(name)) {
-                        log_d("{}: [{:?}]   removed: {:?}", __func__, parent->name(), name);
+                        log_d(__func__, "[{:?}]   removed: {:?}", parent->name(), name);
                         co_await m_cache.invalidate_one((**it).id(), false);    // should I flush
                         it = list.erase(it);
                         continue;

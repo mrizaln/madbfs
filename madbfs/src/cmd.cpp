@@ -163,7 +163,7 @@ namespace madbfs::cmd
 
         namespace bp = boost::process::v2;
 
-        log_d("{}: run {}", __func__, cmd);
+        log_d(__func__, "run {}", cmd);
 
         auto exec = co_await async::current_executor();
 
@@ -181,7 +181,7 @@ namespace madbfs::cmd
 
         // NOTE: synchronous write to prevent interleaving
         if (auto n = net::write(pipe_in, net::buffer(in), ec); ec) {
-            log_e("{}: failed to write to stdin: {}", __func__, ec.message());
+            log_e(__func__, "failed to write to stdin: {}", ec.message());
             co_return Unexpect{ async::to_generic_err(ec) };
         } else if (n < in.size()) {
             co_return Unexpect{ Errc::broken_pipe };
@@ -190,20 +190,20 @@ namespace madbfs::cmd
 
         auto out = String{};
         if (auto ec = co_await drain_pipe(pipe_out, out); ec and ec != net::error::eof) {
-            log_e("{}: failed to read from stdout: {}", __func__, ec.message());
+            log_e(__func__, "failed to read from stdout: {}", ec.message());
             co_return Unexpect{ async::to_generic_err(ec) };
         }
 
         auto err = String{};
         if (auto ec = co_await drain_pipe(pipe_err, err); ec and ec != net::error::eof) {
-            log_e("{}: failed to read from stderr: {}", __func__, ec.message());
+            log_e(__func__, "failed to read from stderr: {}", ec.message());
             co_return Unexpect{ async::to_generic_err(ec) };
         }
 
         auto ret = co_await proc.async_wait();
         if (check and ret != 0) {
             auto errmsg = not err.empty() ? util::strip(err) : util::strip(out);
-            log_i("non-zero command status ({}) {}: err: [{}]", ret, cmd, errmsg);
+            log_i(__func__, "non-zero command status ({}) {}: err: [{}]", ret, cmd, errmsg);
             co_return Unexpect{ to_errc(parse_stderr(errmsg)) };
         }
 

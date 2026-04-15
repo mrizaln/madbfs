@@ -172,24 +172,24 @@ namespace madbfs
 
         auto ipc = ipc::Server::create(ctx, socket_path);
         if (not ipc.has_value()) {
-            log_e("Madbfs: failed to initialize ipc: {}", err_msg(ipc.error()));
+            log_e(__func__, "failed to initialize ipc: {}", err_msg(ipc.error()));
             return {};
         }
 
-        log_i("Madbfs: succesfully created ipc: {}", ipc->path());
+        log_i(__func__, "succesfully created ipc: {}", ipc->path());
         return std::move(*ipc);
     }
 
     void Madbfs::work_thread_function(async::Context& ctx)
     {
         try {
-            log_i("Madbfs: io_context running...");
+            log_i(__func__, "io_context running...");
             auto num_handlers = ctx.run();
-            log_i("Madbfs: io_context stopped with {} handlers executed", num_handlers);
+            log_i(__func__, "io_context stopped with {} handlers executed", num_handlers);
         } catch (const std::exception& e) {
-            log_w("Madbfs: io_context stopped with an exception: {}", e.what());
+            log_w(__func__, "io_context stopped with an exception: {}", e.what());
         } catch (...) {
-            log_w("Madbfs: io_context stopped with an exception (unknown type)");
+            log_w(__func__, "io_context stopped with an exception (unknown type)");
         }
     }
 
@@ -236,7 +236,7 @@ namespace madbfs
         m_signal.async_wait([this, pid = ::getpid()](net::error_code ec, int sig) {
             if (not ec) {
                 assert(m_fuse != nullptr);
-                madbfs::log_w("signal raised: SIG{} ({})", ::sigabbrev_np(sig), sig);
+                madbfs::log_w("Madbfs", "signal raised: SIG{} ({})", ::sigabbrev_np(sig), sig);
                 ::fuse_exit(m_fuse);
                 ::kill(pid, SIGPIPE);
             }
@@ -279,23 +279,23 @@ namespace madbfs
                 break;
             }
 
-            log_d("{}: checking connection", __func__);
+            log_d(__func__, "checking connection");
             auto ok = co_await m_connection.ping(m_timeout.value_or(Seconds::max()));
 
             if (not ok) {
-                log_i("{}: connection is timed out", __func__);
+                log_i(__func__, "connection is timed out");
                 if (auto res = co_await m_connection.reconnect(); res) {
                     co_await m_cache.invalidate_fds(false);
                     co_await m_connection.start();
                 }
             } else if (not m_connection.is_optimal()) {
-                log_i("{}: connection is ok but not optimized. trying to optimize...", __func__);
+                log_i(__func__, "connection is ok but not optimized. trying to optimize...");
                 if (auto res = co_await m_connection.optimize(); res) {
                     co_await m_cache.invalidate_fds(false);
                     co_await m_connection.start();
                 }
             } else {
-                log_d("{}: connection is ok", __func__);
+                log_d(__func__, "connection is ok");
             }
         }
     }

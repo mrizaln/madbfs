@@ -16,7 +16,7 @@ namespace madbfs::log
     using Level = spdlog::level::level_enum;
 
     // I need to use const char* here because spdlog's doesn't support std::string_view... :(
-    static constexpr auto logger_pattern = "[%Y-%m-%d|%H:%M:%S] [%^-%L-%$] [%-20s|%3#] %v";
+    static constexpr auto logger_pattern = "[%Y-%m-%d|%H:%M:%S] [%^-%L-%$] [%-20!s|%3#] %-20!!: %v";
     static constexpr auto logger_name    = "madbfs-log";
 
     // I have to do this conversion gymnastics because somehow spdlog's string_view is not compaitble with
@@ -196,9 +196,6 @@ namespace madbfs::log
      * @brief Log a message with a specific log level.
      *
      * @param level Severity.
-     *
-     * NOTE: The type identity is needed to allow CTAD for FmtWithLoc:
-     * https://stackoverflow.com/a/79155521/16506263
      */
     template <typename... Args>
     inline void log(
@@ -207,6 +204,27 @@ namespace madbfs::log
         Args&&... args
     )
     {
+        spdlog::log(fmt.loc, level, fmt.fmt, std::forward<Args>(args)...);
+    }
+
+    /**
+     * @brief Log a message with a specific log level and name.
+     *
+     * @param level Severity of the message.
+     * @param name The name of the message.
+     *
+     * Normally log message use name based on the function it's called on, with this function you can change
+     * the name. Although keep in mind that the name needs to live for the entire program (static storage).
+     */
+    template <typename... Args>
+    inline void log_named(
+        spdlog::level::level_enum                 level,
+        const char*                               name,
+        FmtWithLoc<std::type_identity_t<Args>...> fmt,
+        Args&&... args
+    )
+    {
+        fmt.loc.funcname = name;
         spdlog::log(fmt.loc, level, fmt.fmt, std::forward<Args>(args)...);
     }
 
@@ -228,6 +246,26 @@ namespace madbfs::log
     }
 
     /**
+     * @brief Log a message with specific log level, location, and name.
+     *
+     * @param loc Location.
+     * @param level Severity.
+     */
+    template <typename... Args>
+    inline void log_loc_named(
+        std::source_location             loc,
+        spdlog::level::level_enum        level,
+        const char*                      name,
+        spdlog::format_string_t<Args...> fmt,
+        Args&&... args
+    )
+    {
+        auto new_loc     = to_spdlog_source_loc(loc);
+        new_loc.funcname = name;
+        spdlog::log(new_loc, level, fmt, std::forward<Args>(args)...);
+    }
+
+    /**
      * @brief Log an exception pointer.
      *
      * @param e Exception pointer.
@@ -235,21 +273,22 @@ namespace madbfs::log
      * @param loc Location.
      *
      * This function will rethrow the exception and them immediately catch it before logging it to be able to
-     * get the message contained within the exception. The exception will be logged at critical severity.
+     * get the message contained within the exception. The exception will be logged at critical severity. The
+     * prefix must have static storage duration.
      */
     template <typename... Args>
     inline void log_exception(
         std::exception_ptr   e,
-        Str                  prefix,
+        const char*          prefix,
         std::source_location loc = std::source_location::current()
     )
     {
         try {
             e ? std::rethrow_exception(e) : void();
         } catch (const std::exception& e) {
-            log_loc(loc, Level::critical, "{}: exception occurred: {}", prefix, e.what());
+            log_loc_named(loc, Level::critical, prefix, "exception occurred: {}", e.what());
         } catch (...) {
-            log_loc(loc, Level::critical, "{}: exception occurred (unknown exception)", prefix);
+            log_loc_named(loc, Level::critical, prefix, "exception occurred (unknown exception)");
         }
     }
 }
@@ -258,12 +297,12 @@ namespace madbfs
 {
 #define MADBFS_LOG_LOG_ENTRY(Name, Level)                                                                    \
     template <typename... Args>                                                                              \
-    inline void Name(log::FmtWithLoc<std::type_identity_t<Args>...> fmt, Args&&... args)                     \
+    inline void Name(const char* name, log::FmtWithLoc<std::type_identity_t<Args>...> fmt, Args&&... args)   \
     {                                                                                                        \
-        log::log(spdlog::level::Level, std::move(fmt), std::forward<Args>(args)...);                         \
+        log::log_named(spdlog::level::Level, name, std::move(fmt), std::forward<Args>(args)...);             \
     }
 
-    // Handy aliases with dedicated severity suffix to `log::log` function.
+    // Handy aliases with dedicated severity suffix to `log::log_named` function.
     MADBFS_LOG_LOG_ENTRY(log_t, trace)
     MADBFS_LOG_LOG_ENTRY(log_d, debug)
     MADBFS_LOG_LOG_ENTRY(log_i, info)
