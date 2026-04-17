@@ -51,7 +51,7 @@ READDIR_BIG_SIZE = 200
 
 DEFAULT_PAGE_SIZE = 128  # in KiB
 DEFAULT_CACHE_SIZE = 256  # in MiB
-DEFAULT_TTL = 30  # in seconds
+DEFAULT_TTL = 60  # in seconds
 DEFAULT_TIMEOUT = 2 # in seconds
 DEFAULT_LOG_LEVEL = "debug"  # on this test only
 

@@ -36,7 +36,7 @@ namespace madbfs::args
         const char* log_file   = nullptr;
         int         cache_size = 256;    // in MiB
         int         page_size  = 128;    // in KiB
-        int         ttl        = 30;     // in seconds
+        int         ttl        = 60;     // in seconds
         int         timeout    = 2;      // in seconds
         int         port       = 23237;
         int         no_server  = false;
@@ -159,7 +159,7 @@ namespace madbfs::args
             "                             (maximum: 4096)\n"
             "                             (value will be rounded up to the next power of 2)\n"
             "    --ttl=<int>            set the TTL of the stat cache of the filesystem in seconds\n"
-            "                             (default: 30)\n"
+            "                             (default: 60)\n"
             "                             (set to 0 to disable it)\n"
             "    --timeout=<int>        set the timeout of every remote operation\n"
             "                             (default: 2)\n"
