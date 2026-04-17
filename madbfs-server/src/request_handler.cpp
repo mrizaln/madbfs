@@ -36,7 +36,7 @@ namespace madbfs::server
 {
     RequestHandler::Response RequestHandler::handle_req(rpc::req::Listdir req)
     {
-        auto&& [path, out_buf] = req;
+        auto& [path, buf] = req;
         log_d("listdir", "path={:?}", path.data());
 
         auto dir = ::opendir(path.data());
@@ -50,8 +50,8 @@ namespace madbfs::server
             }
         });
 
-        // invalidates strings and spans from argument
-        out_buf.clear();
+        // invalidates path
+        buf.clear();
 
         auto slices = Vec<Pair<util::Slice, rpc::resp::Stat>>{};
         auto dirfd  = ::dirfd(dir);
@@ -69,9 +69,9 @@ namespace madbfs::server
             }
 
             auto name_u8 = reinterpret_cast<const u8*>(name.data());
-            auto off     = out_buf.size();
+            auto off     = buf.size();
 
-            out_buf.insert(out_buf.end(), name_u8, name_u8 + name.size());
+            buf.insert(buf.end(), name_u8, name_u8 + name.size());
 
             auto slice = util::Slice{ off, name.size() };
             auto stat  = rpc::resp::Stat{
@@ -92,7 +92,7 @@ namespace madbfs::server
         entries.reserve(slices.size());
 
         for (auto&& [slice, stat] : slices) {
-            auto name = Str{ reinterpret_cast<const char*>(out_buf.data()) + slice.offset, slice.size };
+            auto name = Str{ reinterpret_cast<const char*>(buf.data()) + slice.offset, slice.size };
             entries.emplace_back(std::move(name), std::move(stat));
         }
 

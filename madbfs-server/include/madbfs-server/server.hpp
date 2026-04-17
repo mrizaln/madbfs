@@ -27,8 +27,8 @@ namespace madbfs::server
     private:
         struct Promise
         {
-            Vec<u8>        buffer;
-            rpc::Procedure procedure;
+            Vec<u8>        buf;
+            rpc::Procedure proc;
         };
 
         using Inflight = std::unordered_map<rpc::Id, Promise, rpc::Id::Hash>;

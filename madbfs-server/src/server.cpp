@@ -28,16 +28,16 @@ namespace madbfs::server
                 break;
             }
 
-            auto buf = Vec<u8>{};
-            auto req = co_await rpc::receive_request(m_socket, buf, *header);
+            // buffer must live until the request handled by `handle_request()`
+            auto [it, _] = m_requests.emplace(header->id, Promise{ .buf = {}, .proc = header->proc });
+            log_d(__func__, "new request [{}] [{}]", header->id.inner(), to_string(header->proc));
+
+            auto req = co_await rpc::receive_request(m_socket, it->second.buf, *header);
             if (not req) {
+                m_requests.extract(header->id);
                 log_e(__func__, "failed to receive request: {}", err_msg(req.error()));
                 break;
             }
-
-            // buffer must live until the request handled by `handle_request()`
-            m_requests.emplace(header->id, Promise{ std::move(buf), req->proc() });
-            log_d(__func__, "new request [{}] [{}]", header->id.inner(), to_string(*req));
 
             // special for Ping: handle directly on request listener thread to allow it to response
             // immediately without waiting for work on worker thread complete
