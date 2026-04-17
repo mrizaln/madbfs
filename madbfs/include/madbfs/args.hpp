@@ -38,7 +38,7 @@ namespace madbfs::args
         int         page_size  = 128;    // in KiB
         int         ttl        = 30;     // in seconds
         int         timeout    = 2;      // in seconds
-        int         port       = 12345;
+        int         port       = 23237;
         int         no_server  = false;
         int         adb_only   = false;
 
@@ -165,7 +165,7 @@ namespace madbfs::args
             "                             (default: 2)\n"
             "                             (set to 0 to disable it)\n"
             "    --port=<int>           set the port number the server will listen on\n"
-            "                             (default: 12345)\n"
+            "                             (default: 23237)\n"
             "    --no-server            don't launch server\n"
             "                             (will still attempt to connect to specified port)\n"
             "                             (fall back to adb shell calls if connection failed)\n"

@@ -15,7 +15,7 @@ struct Exit
 struct Args
 {
     madbfs::log::Level log_level = madbfs::log::Level::warn;
-    madbfs::u16        port      = 12345;
+    madbfs::u16        port      = 23237;
 };
 
 std::variant<Exit, Args> parse_args(int argc, char** argv)
@@ -27,7 +27,7 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
         auto arg = madbfs::Str{ argv[i] };
         if (arg == "--help" or arg == "-h") {
             fmt::println("{} [--port PORT] [--debug] [--verbose]\n", argv[0]);
-            fmt::println("  --port PORT       Port number the server listen on (default: 12345");
+            fmt::println("  --port PORT       Port number the server listen on (default: 23237");
             fmt::println("  --debug           Enable debug logging.");
             fmt::println("  --verbose         Enable verbose logging.");
             return Exit{ 0 };

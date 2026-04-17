@@ -222,15 +222,16 @@ Options for madbfs:
     --page-size=<int>      page size for cache & transfer in KiB
                              (default: 128)
                              (minimum: 64)
+                             (maximum: 4096)
                              (value will be rounded up to the next power of 2)
     --ttl=<int>            set the TTL of the stat cache of the filesystem in seconds
                              (default: 30)
                              (set to 0 to disable it)
     --timeout=<int>        set the timeout of every remote operation
-                             (default: 10)
+                             (default: 2)
                              (set to 0 to disable it)
     --port=<int>           set the port number the server will listen on
-                             (default: 12345)
+                             (default: 23237)
     --no-server            don't launch server
                              (will still attempt to connect to specified port)
                              (fall back to adb shell calls if connection failed)
