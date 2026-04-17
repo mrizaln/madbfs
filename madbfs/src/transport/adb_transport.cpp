@@ -1,5 +1,6 @@
 #include "madbfs/transport/adb_transport.hpp"
 
+#include "madbfs/adb.hpp"
 #include "madbfs/cmd.hpp"
 
 #include <madbfs-common/log.hpp>
@@ -110,6 +111,32 @@ namespace
     madbfs::String quote(madbfs::Str path)
     {
         return fmt::format("\"{}\"", path);
+    }
+
+    /**
+     * @brief Check whether the device is connected through adb.
+     */
+    madbfs::AExpect<void> check_connection()
+    {
+        const auto* serial = ::getenv("ANDROID_SERIAL");
+        if (serial == nullptr) [[unlikely]] {
+            co_return std::unexpected{ std::errc::not_connected };
+        }
+
+        auto devices = co_await madbfs::adb::list_devices();
+        if (not devices) {
+            co_return std::unexpected{ std::errc::not_connected };
+        }
+
+        auto found = madbfs::sr::find(*devices, serial, &madbfs::adb::Device::serial);
+        if (found == devices->end()) {
+            co_return std::unexpected{ std::errc::not_connected };
+        } else if (found->status != madbfs::adb::DeviceStatus::Device) {
+            madbfs::log_d(__func__, "device connected but: {}", to_string(found->status));
+            co_return std::unexpected{ std::errc::not_connected };
+        }
+
+        co_return madbfs::Expect<void>{};
     }
 }
 
@@ -414,8 +441,8 @@ namespace madbfs
 
         AExpect<rpc::Response> handle_req(rpc::req::Ping req)
         {
-            // TODO: maybe check adb status?
-            co_return rpc::resp::Ping{ .num = req.num };
+            auto res = co_await check_connection();
+            co_return res.transform([&] { return rpc::resp::Ping{ .num = req.num }; });
         }
 
     private:
@@ -431,6 +458,14 @@ namespace madbfs::transport
     AdbTransport::~AdbTransport()
     {
         stop(Errc::operation_canceled);
+    }
+
+    AExpect<Uniq<AdbTransport>> AdbTransport::create()
+    {
+        if (auto res = co_await check_connection(); not res) {
+            co_return Unexpect{ res.error() };
+        }
+        co_return Uniq<AdbTransport>{ new AdbTransport{ co_await async::current_executor() } };
     }
 
     void AdbTransport::stop(rpc::Status status)

@@ -7,18 +7,6 @@ namespace madbfs::transport
     class AdbTransport final : public Transport
     {
     public:
-        /**
-         * @brief Create a new adb transport.
-         *
-         * @param exec Async io excecutor.
-         */
-        AdbTransport(net::any_io_executor exec)
-            : m_in_channel{ exec }
-            , m_out_channel{ exec }
-            , m_pool{ 1 }
-        {
-        }
-
         AdbTransport(AdbTransport&&)            = delete;
         AdbTransport& operator=(AdbTransport&&) = delete;
 
@@ -26,6 +14,11 @@ namespace madbfs::transport
         AdbTransport& operator=(const AdbTransport&) = delete;
 
         ~AdbTransport();
+
+        /**
+         * @brief Create a new adb transport.
+         */
+        static AExpect<Uniq<AdbTransport>> create();
 
         // overrides
         // ---------
@@ -49,6 +42,20 @@ namespace madbfs::transport
         using Inflight   = std::unordered_map<rpc::Id, Promise, rpc::Id::Hash>;
         using InChannel  = async::Channel<Tup<rpc::Id, rpc::Request>>;
         using OutChannel = async::Channel<Tup<rpc::Id, Expect<rpc::Response>>>;
+
+        /**
+         * @brief Create a new adb transport.
+         *
+         * @param exec Async io excecutor.
+         *
+         * Use the `create()` static member function to create the instance instead.
+         */
+        AdbTransport(net::any_io_executor exec)
+            : m_in_channel{ exec }
+            , m_out_channel{ exec }
+            , m_pool{ 1 }
+        {
+        }
 
         /**
          * @brief Generate next id.
