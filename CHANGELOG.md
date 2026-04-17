@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-02-17
+
+- Better signal handling using ASIO mechanisms.
+- IPC operation for unmounting filesystem (`unmount`).
+- `Ping` procedure that checks connection every once in a while.
+- Proper reconnection logic across any transport method.
+- Make connection able to change the transport to other one available if current one is not responding or has an error.
+- Program option `--adb-only` to set the server to use `adb` transport only.
+
+### Fixed
+
+- Partial write on `copy_file_range` operation not implemented correctly.
+- `rename` handler on `proxy` mode doesn't have any fallback on unavailable `renameat2` syscall.
+- Using bad date format for `utimens` operation on `adb` connection.
+- `stat::st_blocks` calculation (https://github.com/mrizaln/madbfs/issues/14).
+
+### Changed
+
+- Read and write operation now open a cached file descriptor for repeated operations instead of opening the file every read/write.
+- `logcat` entries/messages now no longer contain any newline and are now aligned.
+- Connection type on IPC `info` operation for `server` is renamed to `proxy` (it's should have been this way from the beginning).
+- Change the default port number from `12345` to `23237` (`adbfs` on dial pad).
+- Change the default timeout from 10 seconds to 2 seconds.
+
 ## [0.9.0] - 2025-09-28
 
 ### Added
@@ -204,7 +228,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-file LRU page caching for file read/write.
 - `Path` and `PathBuf` class to separate `madbfs`'s virtual paths from real paths (`std::filesystem`).
 
-[unreleased]: https://github.com/mrizaln/madbfs/compare/v0.9.0...HEAD
+[unreleased]: https://github.com/mrizaln/madbfs/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/mrizaln/madbfs/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/mrizaln/madbfs/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/mrizaln/madbfs/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/mrizaln/madbfs/compare/v0.7.0...v0.8.0

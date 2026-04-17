@@ -7,6 +7,7 @@
 https://github.com/user-attachments/assets/dad81c5a-993e-480d-a329-d8fc560a69de
 
 > What's happening above:
+>
 > - viewing a video on Waydroid from host and copying it to host, and
 > - copying a picture from host to Waydroid.
 
@@ -410,20 +411,3 @@ The read command is as follows:
   | adb pull        |         11.7 |           1.00 |
   | read (no cache) |          3.6 |           0.24 |
   | read (cache)    |       2100.0 |         179.49 |
-
-## TODO
-
-- [ ] Add robust reconnection logic (relaunching the server when it doesn't respond)
-- [ ] Find a way to prevent the server from terminating when device sleeps (maybe make the server into an Android app like what scrcpy does)
-- [ ] Cache the file handle for read/write instead of opening the file each read/write operation.
-- [ ] Implement proper permission check (this is difficult since I need to open the file to actually check access, `mode_t` value is not sufficient).
-- [ ] Improve reconnection logic.
-- [ ] Rework RPC framing to be able to recover from error cleanly.
-- [x] Eliminate copying data to and from memory when transferring/copying files within the filesystem.
-- [x] IPC to talk to the `madbfs` to control the filesystem parameters like invalidation, timeout, cache size, etc.
-- [x] Implement file read and write operation caching in memory.
-- [x] Implement the filesystem as actual tree for caching the stat.
-- [x] Implement versioning on each node that expires every certain period of time. When a node expires it needs to query the files from the device again.
-- [x] Make the codebase async using C++20 coroutines.
-- [x] Periodic cache invalidation. Current implementation only look at the size of current cache and only invalidate oldest entry when newest entry is added and the size exceed the `cache-size` limit.
-- [x] Use persistent TCP connection to the server instead of making connection per request.
