@@ -7,7 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-04-17
+
+### Added
+
+- IPC operation for forcing node stats expiration (`expire_stat`).
+
+### Changed
+
+- Changing TTL now resets the expiration of the files if the new TTL is different from the old one.
+- Default TTL is now set to 60 seconds instead of 30 seconds.
+
+### Fixed
+
+- Buffer use-after-move for request handler (server).
+
 ## [0.10.0] - 2026-04-17
+
+### Added
 
 - Better signal handling using ASIO mechanisms.
 - IPC operation for unmounting filesystem (`unmount`).
@@ -228,7 +245,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-file LRU page caching for file read/write.
 - `Path` and `PathBuf` class to separate `madbfs`'s virtual paths from real paths (`std::filesystem`).
 
-[unreleased]: https://github.com/mrizaln/madbfs/compare/v0.10.0...HEAD
+[unreleased]: https://github.com/mrizaln/madbfs/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/mrizaln/madbfs/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/mrizaln/madbfs/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/mrizaln/madbfs/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/mrizaln/madbfs/compare/v0.8.0...v0.8.1
