@@ -51,6 +51,12 @@ namespace madbfs
             co_return json::value{ { "size", page_size * current_pages / 1024 / 1024 } };
         }
 
+        Await<json::value> handle(ipc::op::ExpireStat)
+        {
+            auto count = madbfs.tree().expires_all();
+            co_return json::value{ { "count", count } };
+        }
+
         Await<json::value> handle(ipc::op::SetPageSize size)
         {
             const auto old_size = madbfs.m_cache.page_size();

@@ -569,4 +569,10 @@ namespace madbfs::tree
 
         return old;
     }
+    usize FileTree::expires_all()
+    {
+        auto count = 0uz;
+        walk([&](Node& node) { ++count, node.expires_after(Seconds{ 0 }); });
+        return count;
+    }
 }

@@ -2,7 +2,7 @@
 
 #include <spdlog/sinks/base_sink.h>
 #if not defined(MADBFS_BUILD_IPC)
-#    error "macro MADBFS_BUILD_IPC is not defined, you should not include this header!"
+#error "macro MADBFS_BUILD_IPC is not defined, you should not include this header!"
 #endif
 
 #include "madbfs-common/aliases.hpp"
@@ -25,6 +25,7 @@ namespace madbfs::ipc
         struct Version         { };
         struct Info            { };
         struct InvalidateCache { };
+        struct ExpireStat      { };
         struct SetPageSize     { usize kib; };
         struct SetCacheSize    { usize mib; };
         struct SetTTL          { usize sec; };
@@ -40,6 +41,7 @@ namespace madbfs::ipc
             constexpr auto version          = "version";
             constexpr auto info             = "info";
             constexpr auto invalidate_cache = "invalidate_cache";
+            constexpr auto expire_stat      = "expire_stat";
             constexpr auto set_page_size    = "set_page_size";
             constexpr auto set_cache_size   = "set_cache_size";
             constexpr auto set_ttl          = "set_ttl";
@@ -54,6 +56,7 @@ namespace madbfs::ipc
             name::version,
             name::info,
             name::invalidate_cache,
+            name::expire_stat,
             name::set_page_size,
             name::set_cache_size,
             name::set_ttl,
@@ -73,6 +76,7 @@ namespace madbfs::ipc
         : util::VarWrapper<
               op::Info,
               op::InvalidateCache,
+              op::ExpireStat,
               op::SetPageSize,
               op::SetCacheSize,
               op::SetTTL,

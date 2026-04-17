@@ -355,6 +355,12 @@ std::optional<ipc::Op> parse_message(std::span<const std::string> message)
         } else {
             op = ipc::op::InvalidateCache{};
         }
+    } else if (op_str == ipc::op::name::expire_stat) {
+        if (value_str) {
+            too_much(op_str, 0);
+        } else {
+            op = ipc::op::ExpireStat{};
+        }
     } else if (op_str == ipc::op::name::set_page_size) {
         if (not value_str) {
             too_few(op_str, 1);

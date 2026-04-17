@@ -64,6 +64,8 @@ namespace madbfs::ipc
                 return Op{ op::Info{} };
             } else if (op == op::name::invalidate_cache) {
                 return Op{ op::InvalidateCache{} };
+            } else if (op == op::name::expire_stat) {
+                return Op{ op::ExpireStat{} };
             } else if (op == op::name::set_page_size) {
                 return Op{ op::SetPageSize{ .kib = json::value_to<u32>(json.at("value")) } };
             } else if (op == op::name::set_cache_size) {
@@ -159,6 +161,7 @@ namespace madbfs::ipc
         auto op_json = std::move(op).visit(Overload{
             [&](op::Info           ) { return json::value{ { "op", n::info             }                      }; },
             [&](op::InvalidateCache) { return json::value{ { "op", n::invalidate_cache }                      }; },
+            [&](op::ExpireStat     ) { return json::value{ { "op", n::expire_stat      }                      }; },
             [&](op::SetPageSize  op) { return json::value{ { "op", n::set_page_size    }, { "value", op.kib } }; },
             [&](op::SetCacheSize op) { return json::value{ { "op", n::set_cache_size   }, { "value", op.mib } }; },
             [&](op::SetTTL       op) { return json::value{ { "op", n::set_ttl          }, { "value", op.sec } }; },

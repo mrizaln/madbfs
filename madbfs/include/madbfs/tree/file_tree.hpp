@@ -84,6 +84,11 @@ namespace madbfs::tree
         Opt<Seconds> set_ttl(Opt<Seconds> ttl);
 
         /**
+         * @brief Mark all nodes as expired.
+         */
+        usize expires_all();
+
+        /**
          * @brief Get root node.
          */
         const Node& root() const { return m_root; }
