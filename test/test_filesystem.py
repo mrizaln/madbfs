@@ -617,7 +617,7 @@ def tst_open_rename(work_dir: Path):
 def tst_ipc(work_dir: str, serial: str, server_used: bool):
     version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
     connection = "proxy" if server_used else "adb"
-    timeout = DEFAULT_TIMEOUT if server_used else 0
+    timeout = DEFAULT_TIMEOUT
 
     with ipc_connect(serial) as sock:
         Protocol.send(sock, json.dumps({"op": "help"}))

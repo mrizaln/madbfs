@@ -24,6 +24,60 @@ using madbfs::log_e;
 static constexpr u16 echo_request_port  = 54321;
 static constexpr u16 echo_response_port = 54322;
 
+rpc::Request create_dummy_request(rpc::Procedure proc, Vec<u8>& buf)
+{
+    namespace req = rpc::req;
+    using Proc    = madbfs::rpc::Procedure;
+
+    // clang-format off
+    switch (proc) {
+    case Proc::Stat          : return req::Stat          { }; break;
+    case Proc::Listdir       : return req::Listdir       { .path = {}, .buf = buf }; break;
+    case Proc::Readlink      : return req::Readlink      { .path = {}, .buf = buf}; break;
+    case Proc::Mknod         : return req::Mknod         { }; break;
+    case Proc::Mkdir         : return req::Mkdir         { }; break;
+    case Proc::Unlink        : return req::Unlink        { }; break;
+    case Proc::Rmdir         : return req::Rmdir         { }; break;
+    case Proc::Rename        : return req::Rename        { }; break;
+    case Proc::Truncate      : return req::Truncate      { }; break;
+    case Proc::Utimens       : return req::Utimens       { }; break;
+    case Proc::CopyFileRange : return req::CopyFileRange { }; break;
+    case Proc::Open          : return req::Open          { }; break;
+    case Proc::Close         : return req::Close         { }; break;
+    case Proc::Read          : return req::Read          { }; break;
+    case Proc::Write         : return req::Write         { }; break;
+    case Proc::Ping          : return req::Ping          { }; break;
+    }
+    // clang-format on
+}
+
+rpc::Response create_dummy_response(rpc::Procedure proc)
+{
+    namespace resp = rpc::resp;
+    using Proc     = madbfs::rpc::Procedure;
+
+    // clang-format off
+    switch (proc) {
+    case Proc::Stat          : return resp::Stat          { }; break;
+    case Proc::Listdir       : return resp::Listdir       { }; break;
+    case Proc::Readlink      : return resp::Readlink      { }; break;
+    case Proc::Mknod         : return resp::Mknod         { }; break;
+    case Proc::Mkdir         : return resp::Mkdir         { }; break;
+    case Proc::Unlink        : return resp::Unlink        { }; break;
+    case Proc::Rmdir         : return resp::Rmdir         { }; break;
+    case Proc::Rename        : return resp::Rename        { }; break;
+    case Proc::Truncate      : return resp::Truncate      { }; break;
+    case Proc::Utimens       : return resp::Utimens       { }; break;
+    case Proc::CopyFileRange : return resp::CopyFileRange { }; break;
+    case Proc::Open          : return resp::Open          { }; break;
+    case Proc::Close         : return resp::Close         { }; break;
+    case Proc::Read          : return resp::Read          { }; break;
+    case Proc::Write         : return resp::Write         { }; break;
+    case Proc::Ping          : return resp::Ping          { }; break;
+    }
+    // clang-format on
+}
+
 Await<rpc::Socket> connect(u16 port)
 {
     auto exec   = co_await async::current_executor();
@@ -93,8 +147,11 @@ Await<void> echo_response()
             continue;
         }
 
+        auto dummy_buf = Vec<u8>{};
+        auto dummy     = create_dummy_request(header->proc, dummy_buf);
+
         auto req_buf = Vec<u8>{};
-        auto req     = co_await rpc::receive_response(*sock, req_buf, *header);
+        auto req     = co_await rpc::receive_response(*sock, req_buf, *header, dummy);
         if (not req) {
             log_e("{}: failed to receive response: {}", __func__, err_msg(req.error()));
             continue;
@@ -123,10 +180,12 @@ int main()
     "Request and Responses variants procedure value should corresponds with each other"_test = [&] {
         using namespace rpc;
 
+        auto dummy = Vec<u8>{};
+
         // clang-format off
         ut::expect(Request{ req::Stat         {} }.proc() == Procedure::Stat         );
-        ut::expect(Request{ req::Listdir      {} }.proc() == Procedure::Listdir      );
-        ut::expect(Request{ req::Readlink     {} }.proc() == Procedure::Readlink     );
+        ut::expect(Request{ req::Listdir      { .path = {}, .buf = dummy } }.proc() == Procedure::Listdir );
+        ut::expect(Request{ req::Readlink     { .path = {}, .buf = dummy } }.proc() == Procedure::Readlink);
         ut::expect(Request{ req::Mknod        {} }.proc() == Procedure::Mknod        );
         ut::expect(Request{ req::Mkdir        {} }.proc() == Procedure::Mkdir        );
         ut::expect(Request{ req::Unlink       {} }.proc() == Procedure::Unlink       );
@@ -242,7 +301,10 @@ int main()
         auto header = async::block(context, rpc::receive_response_header(socket));
         ut::expect(header.has_value() >> ut::fatal);
 
-        auto roundtrip = async::block(context, rpc::receive_response(socket, buffer, *header));
+        auto dummy_buf = Vec<u8>{};
+        auto dummy     = create_dummy_request(header->proc, dummy_buf);
+
+        auto roundtrip = async::block(context, rpc::receive_response(socket, buffer, *header, dummy));
         ut::expect(roundtrip.has_value() >> ut::fatal);
         ut::expect(roundtrip->proc() == Procedure::Listdir);
 

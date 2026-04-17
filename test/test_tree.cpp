@@ -171,7 +171,7 @@ namespace mock
 
         Await<void> start() override { co_return; };
 
-        AExpect<rpc::Response> send(Vec<u8>& /* buffer */, rpc::Request req) override
+        AExpect<rpc::Response> send(rpc::Request req) override
         {
             using namespace rpc;
             co_return req.visit(Overload{
@@ -196,9 +196,9 @@ namespace mock
             });
         }
 
-        AExpect<rpc::Response> send(Vec<u8>& buffer, rpc::Request req, Milliseconds /* timeout */) override
+        AExpect<rpc::Response> send(rpc::Request req, Milliseconds /* timeout */) override
         {
-            return send(buffer, std::move(req));
+            return send(std::move(req));
         }
     };
 
