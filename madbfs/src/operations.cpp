@@ -356,11 +356,7 @@ namespace madbfs::operations
 
     i32 access([[maybe_unused]] const char* path, [[maybe_unused]] i32 mask) noexcept
     {
-        log_i(__func__, "{:?}", path);
-
-        // NOTE: empty
-
-        return 0;
+        return 0;    // NOTE: empty
     }
 
     i32 utimens(const char* path, const timespec tv[2], [[maybe_unused]] fuse_file_info* fi) noexcept

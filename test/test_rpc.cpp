@@ -47,6 +47,7 @@ rpc::Request create_dummy_request(rpc::Procedure proc, Vec<u8>& buf)
     case Proc::Read          : return req::Read          { }; break;
     case Proc::Write         : return req::Write         { }; break;
     case Proc::Ping          : return req::Ping          { }; break;
+    default                  : return req::Ping          { }; break;
     }
     // clang-format on
 }
@@ -74,6 +75,7 @@ rpc::Response create_dummy_response(rpc::Procedure proc)
     case Proc::Read          : return resp::Read          { }; break;
     case Proc::Write         : return resp::Write         { }; break;
     case Proc::Ping          : return resp::Ping          { }; break;
+    default                  : return resp::Ping          { }; break;
     }
     // clang-format on
 }

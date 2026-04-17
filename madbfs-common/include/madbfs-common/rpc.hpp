@@ -138,8 +138,8 @@ namespace madbfs::rpc
     {
         // clang-format off
         struct Stat;
-        struct Listdir       { Vec<Pair<Str, Stat>> entries; };     // uses corresponding `req::Listdir` buf
-        struct Readlink      { Str target; };                       // uses corresponding `req::Readlink` buf 
+        struct Listdir       { Vec<Pair<Str, Stat>> entries; }; // uses corresponding `req::Listdir` buf
+        struct Readlink      { Str target; };                   // uses corresponding `req::Readlink` buf 
         struct Mknod         { };
         struct Mkdir         { };
         struct Unlink        { };
@@ -150,7 +150,7 @@ namespace madbfs::rpc
         struct CopyFileRange { usize size; };
         struct Open          { u64 fd; };
         struct Close         { };
-        struct Read          { Span<const u8> read; };              // uses corresponding `req::Read` out
+        struct Read          { Span<const u8> read; };          // uses corresponding `req::Read` out
         struct Write         { usize size; };
         struct Ping          { u64 num; };
         // clang-format on
