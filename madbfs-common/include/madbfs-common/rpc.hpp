@@ -78,8 +78,8 @@ namespace madbfs::rpc
     {
         // clang-format off
         struct Stat          { Str path; };
-        struct Listdir       { Str path; };
-        struct Readlink      { Str path; };
+        struct Listdir       { Str path; Vec<u8>& buf; };
+        struct Readlink      { Str path; Vec<u8>& buf; };
         struct Mknod         { Str path; mode_t mode; dev_t dev; };
         struct Mkdir         { Str path; mode_t mode; };
         struct Unlink        { Str path; };
@@ -90,7 +90,7 @@ namespace madbfs::rpc
         struct CopyFileRange { Str in_path; off_t in_offset; Str out_path; off_t out_offset; usize size; };
         struct Open          { Str path; OpenMode mode; };
         struct Close         { u64 fd; };
-        struct Read          { u64 fd; off_t offset; usize size; };
+        struct Read          { u64 fd; off_t offset; Span<u8> out; };
         struct Write         { u64 fd; off_t offset; Span<const u8> in; };
         struct Ping          { u64 num; };
         // clang-format on
@@ -243,7 +243,25 @@ namespace madbfs::rpc
 
     // TODO: comments
 
+    /**
+     * @brief [TODO:description]
+     *
+     * @param socket [TODO:parameter]
+     * @param buffer [TODO:parameter]
+     * @param request [TODO:parameter]
+     * @param id [TODO:parameter]
+     */
     AExpect<void> send_request(Socket& socket, Vec<u8>& buffer, Request request, Id id);
+
+    /**
+     * @brief [TODO:description]
+     *
+     * @param socket [TODO:parameter]
+     * @param buffer [TODO:parameter]
+     * @param proc [TODO:parameter]
+     * @param response [TODO:parameter]
+     * @param id [TODO:parameter]
+     */
     AExpect<void> send_response(
         Socket&               socket,
         Vec<u8>&              buffer,
@@ -252,9 +270,46 @@ namespace madbfs::rpc
         Id                    id
     );
 
-    AExpect<RequestHeader>  receive_request_header(Socket& socket);
+    /**
+     * @brief [TODO:description]
+     *
+     * @param socket [TODO:parameter]
+     */
+    AExpect<RequestHeader> receive_request_header(Socket& socket);
+
+    /**
+     * @brief [TODO:description]
+     *
+     * @param socket [TODO:parameter]
+     */
     AExpect<ResponseHeader> receive_response_header(Socket& socket);
 
-    AExpect<Request>  receive_request(Socket& socket, Vec<u8>& buffer, RequestHeader header);
-    AExpect<Response> receive_response(Socket& socket, Vec<u8>& buffer, ResponseHeader header);
+    /**
+     * @brief [TODO:description]
+     *
+     * @param socket [TODO:parameter]
+     * @param buffer [TODO:parameter]
+     * @param header [TODO:parameter]
+     *
+     * The `buffer` is both used for receiving the payload and for output buffer to be filled later for some
+     * procedures. The `buffer` must live long enough for any user that uses the resulting request.
+     */
+    AExpect<Request> receive_request(Socket& socket, Vec<u8>& buffer, RequestHeader header);
+
+    /**
+     * @brief [TODO:description]
+     *
+     * @param socket [TODO:parameter]
+     * @param buffer [TODO:parameter]
+     * @param header [TODO:parameter]
+     * @param req [TODO:parameter]
+     *
+     * The `req` is required since some procedures have an output buffer (for string/bytes data). To prevent
+     * unnecessary copy, the function will fill the data directly into the output buffer. The lifetime of the
+     * output buffer of the request is tied to the response and the request.
+     *
+     * The `buffer` is required for parsing non-string/non-bytes payloads, it may be destroyed/reused
+     * immediately after this function returns.
+     */
+    AExpect<Response> receive_response(Socket& socket, Vec<u8>& buffer, ResponseHeader header, Request req);
 }

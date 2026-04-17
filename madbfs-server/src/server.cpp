@@ -28,21 +28,22 @@ namespace madbfs::server
                 break;
             }
 
-            auto buffer = Vec<u8>{};
-            auto req    = co_await rpc::receive_request(m_socket, buffer, *header);
+            auto buf = Vec<u8>{};
+            auto req = co_await rpc::receive_request(m_socket, buf, *header);
             if (not req) {
                 log_e(__func__, "failed to receive request: {}", err_msg(req.error()));
                 break;
             }
 
-            auto [it, _] = m_requests.emplace(header->id, Promise{ std::move(buffer), req->proc() });
+            // buffer must live until the request handled by `handle_request()`
+            m_requests.emplace(header->id, Promise{ std::move(buf), req->proc() });
             log_d(__func__, "new request [{}] [{}]", header->id.inner(), to_string(*req));
 
             // special for Ping: handle directly on request listener thread to allow it to response
             // immediately without waiting for work on worker thread complete
 
             if (const auto id = header->id; req->proc() == rpc::Procedure::Ping) {
-                auto resp = co_await handle_request(it->second.buffer, std::move(*req));
+                auto resp = co_await handle_request(std::move(*req));
                 if (auto res = co_await m_channel.async_send({}, { id, std::move(resp) }); not res) {
                     log_e("handler", "finished with error: {}", res.error().message());
                     m_requests.extract(id);
@@ -50,7 +51,7 @@ namespace madbfs::server
             } else {
                 async::spawn(
                     m_pool,
-                    handle_request(it->second.buffer, std::move(*req)),
+                    handle_request(std::move(*req)),
                     [&, id](std::exception_ptr e, Var<rpc::Status, rpc::Response> resp) {
                         log::log_exception(e, "handler");
                         async::spawn(
@@ -88,10 +89,10 @@ namespace madbfs::server
         }
     }
 
-    Await<Var<rpc::Status, rpc::Response>> Connection::handle_request(Vec<u8>& buffer, rpc::Request req)
+    Await<Var<rpc::Status, rpc::Response>> Connection::handle_request(rpc::Request req)
     {
         co_return std::move(req).visit([&](rpc::IsRequest auto&& req) {
-            return m_handler.handle_req(buffer, std::move(req));
+            return m_handler.handle_req(std::move(req));
         });
     }
 

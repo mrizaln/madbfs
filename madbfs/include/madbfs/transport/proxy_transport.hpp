@@ -36,8 +36,8 @@ namespace madbfs::transport
         void stop(rpc::Status status) override;
 
         Await<void>            start() override;
-        AExpect<rpc::Response> send(Vec<u8>& buffer, rpc::Request req) override;
-        AExpect<rpc::Response> send(Vec<u8>& buffer, rpc::Request req, Milliseconds timeout) override;
+        AExpect<rpc::Response> send(rpc::Request req) override;
+        AExpect<rpc::Response> send(rpc::Request req, Milliseconds timeout) override;
 
         // ---------
 
@@ -46,7 +46,7 @@ namespace madbfs::transport
 
         struct Promise
         {
-            Vec<u8>&                            buffer;
+            rpc::Request                        req;
             saf::promise<Expect<rpc::Response>> result;
         };
 

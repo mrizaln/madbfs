@@ -34,9 +34,9 @@ namespace
 
 namespace madbfs::server
 {
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& buf, rpc::req::Listdir req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::Listdir req)
     {
-        const auto& [path] = req;
+        auto&& [path, out_buf] = req;
         log_d("listdir", "path={:?}", path.data());
 
         auto dir = ::opendir(path.data());
@@ -50,8 +50,8 @@ namespace madbfs::server
             }
         });
 
-        // WARN: invalidates strings and spans from argument
-        buf.clear();
+        // invalidates strings and spans from argument
+        out_buf.clear();
 
         auto slices = Vec<Pair<util::Slice, rpc::resp::Stat>>{};
         auto dirfd  = ::dirfd(dir);
@@ -69,9 +69,9 @@ namespace madbfs::server
             }
 
             auto name_u8 = reinterpret_cast<const u8*>(name.data());
-            auto off     = buf.size();
+            auto off     = out_buf.size();
 
-            buf.insert(buf.end(), name_u8, name_u8 + name.size());
+            out_buf.insert(out_buf.end(), name_u8, name_u8 + name.size());
 
             auto slice = util::Slice{ off, name.size() };
             auto stat  = rpc::resp::Stat{
@@ -92,14 +92,14 @@ namespace madbfs::server
         entries.reserve(slices.size());
 
         for (auto&& [slice, stat] : slices) {
-            auto name = Str{ reinterpret_cast<const char*>(buf.data()) + slice.offset, slice.size };
+            auto name = Str{ reinterpret_cast<const char*>(out_buf.data()) + slice.offset, slice.size };
             entries.emplace_back(std::move(name), std::move(stat));
         }
 
         return rpc::resp::Listdir{ .entries = std::move(entries) };
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Stat req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::Stat req)
     {
         const auto& [path] = req;
         log_d("stat", "path={:?}", path.data());
@@ -121,24 +121,27 @@ namespace madbfs::server
         };
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Readlink req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::Readlink req)
     {
-        const auto& [path] = req;
+        auto&& [path, out_buf] = req;
         log_d("readlink", "path={:?}", path.data());
 
-        // NOTE: can't use server's buffer as destination since using it will invalidate path.
-        // PERF: since the buffer won't change anyway, making it static reduces memory usage
-        thread_local static auto buffer = Array<char, PATH_MAX>{};
-
-        auto len = ::readlink(path.data(), buffer.data(), buffer.size());
+        // I can't use server's buffer as destination since using it will invalidate path.
+        auto len = ::readlink(path.data(), m_readlink_buf.data(), m_readlink_buf.size());
         if (len < 0) {
             return status_from_errno(__func__, path, "failed to readlink");
         }
 
-        return rpc::resp::Readlink{ .target = Str{ buffer.begin(), static_cast<usize>(len) } };
+        // now I can use the server's buffer
+        out_buf.resize(static_cast<usize>(len));
+        std::copy_n(m_readlink_buf.data(), len, out_buf.data());
+
+        return rpc::resp::Readlink{
+            .target = Str{ reinterpret_cast<const char*>(out_buf.data()), out_buf.size() },
+        };
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Mknod req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::Mknod req)
     {
         const auto& [path, mode, dev] = req;
         log_d("mknod", "path={:?} mode={:#08o} dev={:#04x}", path.data(), mode, dev);
@@ -150,7 +153,7 @@ namespace madbfs::server
         return rpc::resp::Mknod{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Mkdir req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::Mkdir req)
     {
         const auto& [path, mode] = req;
         log_d("mkdir", "path={:?} mode={:#08o}", path.data(), mode);
@@ -162,7 +165,7 @@ namespace madbfs::server
         return rpc::resp::Mkdir{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Unlink req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::Unlink req)
     {
         const auto& [path] = req;
         log_d("unlink", "path={:?}", path.data());
@@ -174,7 +177,7 @@ namespace madbfs::server
         return rpc::resp::Unlink{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Rmdir req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::Rmdir req)
     {
         const auto& [path] = req;
         log_d("rmdir", "path={:?}", path.data());
@@ -186,7 +189,7 @@ namespace madbfs::server
         return rpc::resp::Rmdir{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Rename req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::Rename req)
     {
         const auto& [from, to, flags] = req;
         log_d("rename", "from={:?} -> to={:?} [flags={}]", from, to, flags);
@@ -219,7 +222,7 @@ namespace madbfs::server
         return rpc::resp::Rename{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Truncate req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::Truncate req)
     {
         const auto& [path, size] = req;
         log_d("truncate", "path={:?} size={}", path.data(), size);
@@ -231,7 +234,7 @@ namespace madbfs::server
         return rpc::resp::Truncate{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Utimens req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::Utimens req)
     {
         const auto& [path, atime, mtime] = req;
 
@@ -246,7 +249,7 @@ namespace madbfs::server
         return rpc::resp::Utimens{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::CopyFileRange req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::CopyFileRange req)
     {
         const auto& [in, in_off, out, out_off, size] = req;
         log_d("copy_file_range", "from={:?} -> to={:?}", in.data(), out.data());
@@ -339,7 +342,7 @@ namespace madbfs::server
         return rpc::resp::CopyFileRange{ .size = static_cast<usize>(copied) };
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Open req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::Open req)
     {
         const auto& [path, mode] = req;
         log_d("open", "path={:?} mode={}", path.data(), static_cast<int>(mode));
@@ -352,7 +355,7 @@ namespace madbfs::server
         return rpc::resp::Open{ .fd = static_cast<u64>(fd) };
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Close req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::Close req)
     {
         const auto& [fd] = req;
         log_d("close", "fd={}", fd);
@@ -364,10 +367,10 @@ namespace madbfs::server
         return rpc::resp::Close{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& buf, rpc::req::Read req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::Read req)
     {
-        const auto& [fd, offset, size] = req;
-        log_d("read", "fd={} offset={} size={}", fd, offset, size);
+        const auto& [fd, offset, out] = req;
+        log_d("read", "fd={} offset={} size={}", fd, offset, out.size());
 
         auto fd_int = static_cast<int>(fd);
 
@@ -375,18 +378,15 @@ namespace madbfs::server
             return status_from_errno(__func__, fmt::format("[{}]", fd), "failed to seek file");
         }
 
-        // WARN: invalidates strings and spans from argument
-        buf.resize(size);
-
-        auto len = ::read(fd_int, buf.data(), buf.size());
+        auto len = ::read(fd_int, out.data(), out.size());
         if (len < 0) {
             return status_from_errno(__func__, fmt::format("[{}]", fd), "failed to read file");
         }
 
-        return rpc::resp::Read{ .read = Span{ buf.begin(), static_cast<usize>(len) } };
+        return rpc::resp::Read{ .read = Span{ out.data(), static_cast<usize>(len) } };
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Write req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::Write req)
     {
         const auto& [fd, offset, in] = req;
         log_d("write", "fd={} offset={}, size={}", fd, offset, in.size());
@@ -405,7 +405,7 @@ namespace madbfs::server
         return rpc::resp::Write{ .size = static_cast<usize>(len) };
     }
 
-    RequestHandler::Response RequestHandler::handle_req(Vec<u8>& /* buf */, rpc::req::Ping req)
+    RequestHandler::Response RequestHandler::handle_req(rpc::req::Ping req)
     {
         return rpc::resp::Ping{ .num = req.num };
     }

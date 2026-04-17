@@ -34,7 +34,7 @@ namespace madbfs::server
         using Inflight = std::unordered_map<rpc::Id, Promise, rpc::Id::Hash>;
         using Channel  = async::Channel<Tup<rpc::Id, Var<rpc::Status, rpc::Response>>>;
 
-        Await<Var<rpc::Status, rpc::Response>> handle_request(Vec<u8>& buffer, rpc::Request req);
+        Await<Var<rpc::Status, rpc::Response>> handle_request(rpc::Request req);
 
         AExpect<void> send_response();
 

@@ -118,9 +118,11 @@ namespace madbfs
     class Handler
     {
     public:
-        AExpect<rpc::Response> handle_req(Vec<u8>& buf, rpc::req::Listdir req)
+        AExpect<rpc::Response> handle_req(rpc::req::Listdir req)
         {
-            const auto qpath = quote(req.path);
+            auto& [path, buf] = req;
+
+            const auto qpath = quote(path);
             const auto cmd   = std::to_array<Str>({
                 "adb",
                 "shell",
@@ -176,7 +178,7 @@ namespace madbfs
             co_return rpc::resp::Listdir{ .entries = std::move(entries) };
         }
 
-        AExpect<rpc::Response> handle_req(Vec<u8>& /* buf */, rpc::req::Stat req)
+        AExpect<rpc::Response> handle_req(rpc::req::Stat req)
         {
             auto res = co_await cmd::exec(
                 { "adb", "shell", "stat", "-c", "'%f|%h|%s|%u|%g|%x|%y|%z|%n'", quote(req.path) }
@@ -192,9 +194,11 @@ namespace madbfs
             });
         }
 
-        AExpect<rpc::Response> handle_req(Vec<u8>& buf, rpc::req::Readlink req)
+        AExpect<rpc::Response> handle_req(rpc::req::Readlink req)
         {
-            auto res = co_await cmd::exec({ "adb", "shell", "readlink", quote(req.path) });
+            auto& [path, buf] = req;
+
+            auto res = co_await cmd::exec({ "adb", "shell", "readlink", quote(path) });
             buf.clear();
 
             co_return res.transform([&](Str target) {
@@ -206,31 +210,31 @@ namespace madbfs
             });
         }
 
-        AExpect<rpc::Response> handle_req(Vec<u8>& /* buf */, rpc::req::Mknod req)
+        AExpect<rpc::Response> handle_req(rpc::req::Mknod req)
         {
             auto res = co_await cmd::exec({ "adb", "shell", "touch", quote(req.path) });
             co_return res.transform([](auto&&) { return rpc::resp::Mknod{}; });
         }
 
-        AExpect<rpc::Response> handle_req(Vec<u8>& /* buf */, rpc::req::Mkdir req)
+        AExpect<rpc::Response> handle_req(rpc::req::Mkdir req)
         {
             auto res = co_await cmd::exec({ "adb", "shell", "mkdir", quote(req.path) });
             co_return res.transform([](auto&&) { return rpc::resp::Mkdir{}; });
         }
 
-        AExpect<rpc::Response> handle_req(Vec<u8>& /* buf */, rpc::req::Unlink req)
+        AExpect<rpc::Response> handle_req(rpc::req::Unlink req)
         {
             auto res = co_await cmd::exec({ "adb", "shell", "rm", quote(req.path) });
             co_return res.transform([](auto&&) { return rpc::resp::Unlink{}; });
         }
 
-        AExpect<rpc::Response> handle_req(Vec<u8>& /* buf */, rpc::req::Rmdir req)
+        AExpect<rpc::Response> handle_req(rpc::req::Rmdir req)
         {
             auto res = co_await cmd::exec({ "adb", "shell", "rmdir", quote(req.path) });
             co_return res.transform([](auto&&) { return rpc::resp::Rmdir{}; });
         }
 
-        AExpect<rpc::Response> handle_req(Vec<u8>& /* buf */, rpc::req::Rename req)
+        AExpect<rpc::Response> handle_req(rpc::req::Rename req)
         {
             if (req.flags == RENAME_EXCHANGE) {
                 // NOTE: there is no --exchange flag on Android's mv
@@ -246,7 +250,7 @@ namespace madbfs
             }
         }
 
-        AExpect<rpc::Response> handle_req(Vec<u8>& /* buf */, rpc::req::Truncate req)
+        AExpect<rpc::Response> handle_req(rpc::req::Truncate req)
         {
             const auto size_str = fmt::format("{}", req.size);
 
@@ -254,7 +258,7 @@ namespace madbfs
             co_return res.transform([](auto&&) { return rpc::resp::Truncate{}; });
         }
 
-        AExpect<rpc::Response> handle_req(Vec<u8>& /* buf */, rpc::req::Utimens req)
+        AExpect<rpc::Response> handle_req(rpc::req::Utimens req)
         {
             namespace chr = std::chrono;
 
@@ -298,7 +302,7 @@ namespace madbfs
             co_return rpc::resp::Utimens{};
         }
 
-        AExpect<rpc::Response> handle_req(Vec<u8>& /* buf */, rpc::req::CopyFileRange req)
+        AExpect<rpc::Response> handle_req(rpc::req::CopyFileRange req)
         {
             const auto skip  = fmt::format("skip={}", req.in_offset);
             const auto count = fmt::format("count={}", req.size);
@@ -342,14 +346,14 @@ namespace madbfs
             });
         }
 
-        AExpect<rpc::Response> handle_req(Vec<u8>& /* buf */, rpc::req::Open req)
+        AExpect<rpc::Response> handle_req(rpc::req::Open req)
         {
             auto fd = ++m_fd_counter;
             m_fd_map.emplace(fd, req.path);
             co_return rpc::resp::Open{ .fd = fd };
         }
 
-        AExpect<rpc::Response> handle_req(Vec<u8>& /* buf */, rpc::req::Close req)
+        AExpect<rpc::Response> handle_req(rpc::req::Close req)
         {
             auto entry = m_fd_map.find(req.fd);
             if (entry == m_fd_map.end()) {
@@ -360,16 +364,18 @@ namespace madbfs
             co_return rpc::resp::Close{};
         }
 
-        AExpect<rpc::Response> handle_req(Vec<u8>& buf, rpc::req::Read req)
+        AExpect<rpc::Response> handle_req(rpc::req::Read req)
         {
-            auto entry = m_fd_map.find(req.fd);
+            auto& [fd, offset, out] = req;
+
+            auto entry = m_fd_map.find(fd);
             if (entry == m_fd_map.end()) {
                 co_return Unexpect{ Errc::bad_file_descriptor };
             }
 
             const auto& path  = entry->second;
-            const auto  skip  = fmt::format("skip={}", req.offset);
-            const auto  count = fmt::format("count={}", req.size);
+            const auto  skip  = fmt::format("skip={}", offset);
+            const auto  count = fmt::format("count={}", out.size());
             const auto  ifile = fmt::format("if=\"{}\"", path);
 
             // `bs` is skipped, relies on `count_bytes`: https://stackoverflow.com/a/40792605/16506263
@@ -377,16 +383,14 @@ namespace madbfs
                 { "adb", "shell", "dd", "iflag=skip_bytes,count_bytes", skip, count, ifile }
             );
 
-            buf.clear();
-
             co_return res.transform([&](Str str) {
-                auto size = std::min(str.size(), req.size);
-                buf.insert(buf.end(), str.begin(), str.begin() + size);
-                return rpc::resp::Read{ .read = { buf.begin(), buf.end() } };
+                auto size = std::min(str.size(), out.size());
+                std::copy_n(str.begin(), size, out.begin());
+                return rpc::resp::Read{ .read = out };
             });
         }
 
-        AExpect<rpc::Response> handle_req(Vec<u8>& buf, rpc::req::Write req)
+        AExpect<rpc::Response> handle_req(rpc::req::Write req)
         {
             auto entry = m_fd_map.find(req.fd);
             if (entry == m_fd_map.end()) {
@@ -408,7 +412,7 @@ namespace madbfs
             co_return res.transform([&](auto&&) { return rpc::resp::Write{ .size = in_str.size() }; });
         }
 
-        AExpect<rpc::Response> handle_req(Vec<u8>& /* buf */, rpc::req::Ping req)
+        AExpect<rpc::Response> handle_req(rpc::req::Ping req)
         {
             // TODO: maybe check adb status?
             co_return rpc::resp::Ping{ .num = req.num };
@@ -488,7 +492,7 @@ namespace madbfs::transport
         });
     }
 
-    AExpect<rpc::Response> AdbTransport::send(Vec<u8>& buffer, rpc::Request req)
+    AExpect<rpc::Response> AdbTransport::send(rpc::Request req)
     {
         if (not m_running) {
             co_return Unexpect{ Errc::resource_unavailable_try_again };
@@ -498,7 +502,7 @@ namespace madbfs::transport
         auto promise = saf::promise<Expect<rpc::Response>>{ co_await async::current_executor() };
         auto future  = promise.get_future();
 
-        m_requests.emplace(id, Promise{ buffer, req.proc(), std::move(promise) });
+        m_requests.emplace(id, Promise{ req.proc(), std::move(promise) });
 
         if (auto res = co_await m_in_channel.async_send({}, { id, req }); not res) {
             log_e(__func__, "failed to send payload to channel: {}", res.error().message());
@@ -510,7 +514,7 @@ namespace madbfs::transport
         co_return co_await future.async_extract();
     }
 
-    AExpect<rpc::Response> AdbTransport::send(Vec<u8>& buffer, rpc::Request req, Milliseconds timeout)
+    AExpect<rpc::Response> AdbTransport::send(rpc::Request req, Milliseconds timeout)
     {
         if (not m_running) {
             co_return Unexpect{ Errc::resource_unavailable_try_again };
@@ -520,7 +524,7 @@ namespace madbfs::transport
         auto promise = saf::promise<Expect<rpc::Response>>{ co_await async::current_executor() };
         auto future  = promise.get_future();
 
-        m_requests.emplace(id, Promise{ buffer, req.proc(), std::move(promise) });
+        m_requests.emplace(id, Promise{ req.proc(), std::move(promise) });
 
         if (auto res = co_await m_in_channel.async_send({}, { id, req }); not res) {
             log_e(__func__, "failed to send payload to channel: {}", res.error().message());
@@ -557,10 +561,9 @@ namespace madbfs::transport
                 continue;
             }
 
-            auto& [buf, _, __] = promise->second;
             async::spawn(
                 m_pool,
-                req.visit([&]<rpc::IsRequest R>(R& req) { return handler.handle_req(buf, req); }),
+                req.visit([&]<rpc::IsRequest R>(R& req) { return handler.handle_req(req); }),
                 [&, id](std::exception_ptr e, Expect<rpc::Response> resp) {
                     log::log_exception(e, "handler");
                     async::spawn(
@@ -600,7 +603,7 @@ namespace madbfs::transport
                 continue;
             }
 
-            auto& [_, proc, res] = req.mapped();
+            auto& [proc, res] = req.mapped();
             log_d(__func__, "RESP RECV {} [{}]", id.inner(), rpc::to_string(proc));
 
             res.set_value(std::move(response));

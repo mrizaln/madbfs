@@ -174,12 +174,11 @@ namespace madbfs
         static auto rng  = std::mt19937{ std::random_device{}() };
         static auto dist = std::uniform_int_distribution<u64>(0, std::numeric_limits<u64>::max());
 
-        auto buf = Vec<u8>{};
         auto num = dist(rng);
 
         // special for ping only, it won't bother with reconnection
-        auto res = timeout ? co_await m_transport->send_req(buf, rpc::req::Ping{ .num = num }, *timeout)
-                           : co_await m_transport->send_req(buf, rpc::req::Ping{ .num = num });
+        auto res = timeout ? co_await m_transport->send_req(rpc::req::Ping{ .num = num }, *timeout)
+                           : co_await m_transport->send_req(rpc::req::Ping{ .num = num });
 
         co_return res.and_then([=](rpc::resp::Ping resp) -> Expect<void> {
             return num != resp.num ? Unexpect{ Errc::invalid_argument } : Expect<void>{};
@@ -189,8 +188,8 @@ namespace madbfs
     AExpect<Gen<ParsedStat>> Connection::statdir(path::Path path)
     {
         auto buf  = Vec<u8>{};
-        auto req  = rpc::req::Listdir{ .path = path };
-        auto resp = co_await send_req_with_reconnection(buf, req);
+        auto req  = rpc::req::Listdir{ .path = path, .buf = buf };
+        auto resp = co_await send_req_with_reconnection(req);
         if (not resp) {
             co_return Unexpect{ resp.error() };
         }
@@ -221,7 +220,7 @@ namespace madbfs
         auto buf = Vec<u8>{};
         auto req = rpc::req::Stat{ .path = path };
 
-        co_return (co_await send_req_with_reconnection(buf, req)).transform([](rpc::resp::Stat resp) {
+        co_return (co_await send_req_with_reconnection(req)).transform([](rpc::resp::Stat resp) {
             return data::Stat{
                 .links = resp.links,
                 .size  = resp.size,
@@ -238,67 +237,53 @@ namespace madbfs
     AExpect<String> Connection::readlink(path::Path path)
     {
         auto buf = Vec<u8>{};
-        auto req = rpc::req::Readlink{ .path = path };
+        auto req = rpc::req::Readlink{ .path = path, .buf = buf };
 
-        co_return (co_await send_req_with_reconnection(buf, req)).transform([&](rpc::resp::Readlink resp) {
+        co_return (co_await send_req_with_reconnection(req)).transform([&](rpc::resp::Readlink resp) {
             return String{ resp.target };
         });
     }
 
     AExpect<void> Connection::mknod(path::Path path, mode_t mode, dev_t dev)
     {
-        auto buf = Vec<u8>{};
         auto req = rpc::req::Mknod{ .path = path, .mode = mode, .dev = dev };
-
-        co_return (co_await send_req_with_reconnection(buf, req)).transform(sink_void);
+        co_return (co_await send_req_with_reconnection(req)).transform(sink_void);
     }
 
     AExpect<void> Connection::mkdir(path::Path path, mode_t mode)
     {
-        auto buf = Vec<u8>{};
         auto req = rpc::req::Mkdir{ .path = path, .mode = mode };
-
-        co_return (co_await send_req_with_reconnection(buf, req)).transform(sink_void);
+        co_return (co_await send_req_with_reconnection(req)).transform(sink_void);
     }
 
     AExpect<void> Connection::unlink(path::Path path)
     {
-        auto buf = Vec<u8>{};
         auto req = rpc::req::Unlink{ .path = path };
-
-        co_return (co_await send_req_with_reconnection(buf, req)).transform(sink_void);
+        co_return (co_await send_req_with_reconnection(req)).transform(sink_void);
     }
 
     AExpect<void> Connection::rmdir(path::Path path)
     {
-        auto buf = Vec<u8>{};
         auto req = rpc::req::Rmdir{ .path = path };
-
-        co_return (co_await send_req_with_reconnection(buf, req)).transform(sink_void);
+        co_return (co_await send_req_with_reconnection(req)).transform(sink_void);
     }
 
     AExpect<void> Connection::rename(path::Path from, path::Path to, u32 flags)
     {
-        auto buf = Vec<u8>{};
         auto req = rpc::req::Rename{ .from = from, .to = to, .flags = flags };
-
-        co_return (co_await send_req_with_reconnection(buf, req)).transform(sink_void);
+        co_return (co_await send_req_with_reconnection(req)).transform(sink_void);
     }
 
     AExpect<void> Connection::truncate(path::Path path, off_t size)
     {
-        auto buf = Vec<u8>{};
         auto req = rpc::req::Truncate{ .path = path, .size = size };
-
-        co_return (co_await send_req_with_reconnection(buf, req)).transform(sink_void);
+        co_return (co_await send_req_with_reconnection(req)).transform(sink_void);
     }
 
     AExpect<void> Connection::utimens(path::Path path, timespec atime, timespec mtime)
     {
-        auto buf = Vec<u8>{};
         auto req = rpc::req::Utimens{ .path = path, .atime = atime, .mtime = mtime };
-
-        co_return (co_await send_req_with_reconnection(buf, req)).transform(sink_void);
+        co_return (co_await send_req_with_reconnection(req)).transform(sink_void);
     }
 
     AExpect<usize> Connection::copy_file_range(
@@ -309,7 +294,6 @@ namespace madbfs
         usize      size
     )
     {
-        auto buf = Vec<u8>{};
         auto req = rpc::req::CopyFileRange{
             .in_path    = in,
             .in_offset  = in_off,
@@ -318,32 +302,30 @@ namespace madbfs
             .size       = size,
         };
 
-        co_return (co_await send_req_with_reconnection(buf, req))
-            .transform(proj(&rpc::resp::CopyFileRange::size));
+        co_return (co_await send_req_with_reconnection(req)).transform(proj(&rpc::resp::CopyFileRange::size));
     }
 
     AExpect<u64> Connection::open(path::Path path, data::OpenMode mode)
     {
-        auto buf = Vec<u8>{};
         auto req = rpc::req::Open{ .path = path, .mode = static_cast<rpc::OpenMode>(mode) };
-
-        co_return (co_await send_req_with_reconnection(buf, req)).transform(proj(&rpc::resp::Open::fd));
+        co_return (co_await send_req_with_reconnection(req)).transform(proj(&rpc::resp::Open::fd));
     }
 
     AExpect<void> Connection::close(u64 fd)
     {
-        auto buf = Vec<u8>{};
         auto req = rpc::req::Close{ .fd = fd };
-
-        co_return (co_await send_req_with_reconnection(buf, req)).transform(sink_void);
+        co_return (co_await send_req_with_reconnection(req)).transform(sink_void);
     }
 
     AExpect<usize> Connection::read(u64 fd, Span<char> out, off_t offset)
     {
-        auto buf = Vec<u8>{};
-        auto req = rpc::req::Read{ .fd = fd, .offset = offset, .size = out.size() };
+        auto req = rpc::req::Read{
+            .fd     = fd,
+            .offset = offset,
+            .out    = Span{ reinterpret_cast<u8*>(out.data()), out.size() },
+        };
 
-        co_return (co_await send_req_with_reconnection(buf, req)).transform([&](rpc::resp::Read resp) {
+        co_return (co_await send_req_with_reconnection(req)).transform([&](rpc::resp::Read resp) {
             auto size = std::min(resp.read.size(), out.size());
             std::copy_n(resp.read.begin(), size, out.begin());
             return size;
@@ -352,11 +334,9 @@ namespace madbfs
 
     AExpect<usize> Connection::write(u64 fd, Span<const char> in, off_t offset)
     {
-        auto buf   = Vec<u8>{};
         auto bytes = Span{ reinterpret_cast<const u8*>(in.data()), in.size() };
         auto req   = rpc::req::Write{ .fd = fd, .offset = offset, .in = bytes };
-
-        co_return (co_await send_req_with_reconnection(buf, req)).transform(proj(&rpc::resp::Write::size));
+        co_return (co_await send_req_with_reconnection(req)).transform(proj(&rpc::resp::Write::size));
     }
 
     Await<Opt<Errc>> Connection::check_reconnection()

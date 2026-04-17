@@ -27,12 +27,12 @@ namespace madbfs::transport
         void        stop(rpc::Status) override { }
         Await<void> start() override { co_return; }
 
-        AExpect<rpc::Response> send(Vec<u8>& buffer, rpc::Request req) override
+        AExpect<rpc::Response> send(rpc::Request req) override
         {
             co_return Unexpect{ m_errc };
         }
 
-        AExpect<rpc::Response> send(Vec<u8>& buffer, rpc::Request req, Milliseconds timeout) override
+        AExpect<rpc::Response> send(rpc::Request req, Milliseconds timeout) override
         {
             co_return Unexpect{ m_errc };
         }

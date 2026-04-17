@@ -1,6 +1,7 @@
 #include "madbfs-common/rpc.hpp"
 #include "madbfs-common/async/async.hpp"
 #include "madbfs-common/log.hpp"
+#include "madbfs-common/util/slice.hpp"
 
 #include <bit>
 
@@ -460,7 +461,7 @@ namespace madbfs::rpc
                 return builder    //
                     .write_int<u64>(req.fd)
                     .write_int<i64>(req.offset)
-                    .write_int<u64>(req.size)
+                    .write_int<u64>(req.out.size())
                     .build();
             },
             [&](req::Write req) {
@@ -547,7 +548,8 @@ namespace madbfs::rpc
     /**
      * @brief Parse raw buffer into request of desired procedure.
      *
-     * @param buffer Input buffer.
+     * @param buffer Payload buffer.
+     * @param out_buf Output buffer for some procedures.
      * @param proc Desired buffer.
      *
      * @return The request on success or `std::nullopt` if the buffer is not a payload for desired procedure,
@@ -556,9 +558,9 @@ namespace madbfs::rpc
      * This function must only be used for non-Ping procedures. If Ping is provided, the function will return
      * std::nullopt.
      */
-    Opt<Request> parse_request(Span<const u8> buffer, Procedure proc)
+    Opt<Request> parse_request(Span<const u8> payload, Vec<u8>& out_buf, Procedure proc)
     {
-        auto reader = PayloadReader{ buffer };
+        auto reader = PayloadReader{ payload };
 
         switch (proc) {
         case Procedure::Stat: {
@@ -568,12 +570,12 @@ namespace madbfs::rpc
 
         case Procedure::Listdir: {
             TRY(path, reader.read_path());
-            return req::Listdir{ .path = *path };
+            return req::Listdir{ .path = *path, .buf = out_buf };
         }
 
         case Procedure::Readlink: {
             TRY(path, reader.read_path());
-            return req::Readlink{ .path = *path };
+            return req::Readlink{ .path = *path, .buf = out_buf };
         }
 
         case Procedure::Mknod: {
@@ -659,10 +661,11 @@ namespace madbfs::rpc
             TRY(fd, reader.read_int<u64>());
             TRY(offset, reader.read_int<i64>());
             TRY(size, reader.read_int<u64>());
+            out_buf.size() < *size ? out_buf.resize(*size) : void();
             return req::Read{
                 .fd     = *fd,
                 .offset = static_cast<off_t>(*offset),
-                .size   = static_cast<usize>(*size),
+                .out    = Span{ out_buf.begin(), static_cast<usize>(*size) },
             };
         }
 
@@ -694,11 +697,11 @@ namespace madbfs::rpc
      * This function must only be used for non-Ping procedures. If Ping is provided, the function will return
      * std::nullopt.
      */
-    Opt<Response> parse_response(Span<const u8> buffer, Procedure proc)
+    Opt<Response> parse_response(Span<const u8> buffer, Request req)
     {
         auto reader = PayloadReader{ buffer };
 
-        switch (proc) {
+        switch (req.proc()) {
         case Procedure::Stat: {
             TRY(size, reader.read_int<i64>());
             TRY(links, reader.read_int<u64>());
@@ -725,10 +728,13 @@ namespace madbfs::rpc
         }
 
         case Procedure::Listdir: {
+            auto& buf = req.as<req::Listdir>()->buf;
+            buf.clear();
+
             TRY(size, reader.read_int<u64>());
 
-            auto entries = Vec<Pair<Str, resp::Stat>>{};
-            entries.reserve(*size);
+            auto slices = Vec<Pair<util::Slice, rpc::resp::Stat>>{};
+            slices.reserve(*size);
 
             for (auto _ : sv::iota(0uz, *size)) {
                 TRY(path, reader.read_path());
@@ -744,8 +750,14 @@ namespace madbfs::rpc
                 TRY(uid, reader.read_int<u32>());
                 TRY(gid, reader.read_int<u32>());
 
-                entries.emplace_back(
-                    *path,
+                auto path_u8 = reinterpret_cast<const u8*>(path->data());
+                auto off     = buf.size();
+
+                buf.insert(buf.end(), path_u8, path_u8 + path->size());
+                buf.push_back(0x00);
+
+                slices.emplace_back(
+                    util::Slice{ off, path->size() },
                     resp::Stat{
                         .size  = static_cast<off_t>(*size),
                         .links = static_cast<nlink_t>(*links),
@@ -759,12 +771,25 @@ namespace madbfs::rpc
                 );
             }
 
+            auto entries = Vec<Pair<Str, rpc::resp::Stat>>{};
+            entries.reserve(slices.size());
+
+            for (auto&& [slice, stat] : slices) {
+                auto name = Str{ reinterpret_cast<const char*>(buf.data()) + slice.offset, slice.size };
+                entries.emplace_back(std::move(name), std::move(stat));
+            }
+
             return resp::Listdir{ .entries = std::move(entries) };
         }
 
         case Procedure::Readlink: {
             TRY(path, reader.read_path());
-            return resp::Readlink{ .target = *path };
+
+            auto& buf = req.as<req::Readlink>()->buf;
+            buf.resize(path->size());
+            std::copy_n(path->begin(), path->size(), buf.begin());
+
+            return resp::Readlink{ .target = Str{ reinterpret_cast<const char*>(buf.data()), path->size() } };
         }
 
         case Procedure::Mknod: return resp::Mknod{};
@@ -789,7 +814,12 @@ namespace madbfs::rpc
 
         case Procedure::Read: {
             TRY(bytes, reader.read_bytes());
-            return resp::Read{ .read = *bytes };
+
+            auto out  = req.as<req::Read>()->out;
+            auto size = std::min(bytes->size(), out.size());
+            std::copy_n(bytes->begin(), size, out.begin());
+
+            return resp::Read{ .read = out.subspan(0, size) };
         }
 
         case Procedure::Write: {
@@ -878,14 +908,16 @@ namespace madbfs::rpc
         auto n1 = co_await async::read_exact<u8>(socket, buffer);
         HANDLE_ERROR(n1, buffer.size(), "failed to read request payload");
 
-        auto req = parse_request(buffer, header.proc);
+        auto req = parse_request(buffer, buffer, header.proc);    // use the same buffer for the output buffer
         co_return req ? Expect<Request>{ std::move(*req) } : Unexpect{ Status::bad_message };
     }
 
-    AExpect<Response> receive_response(Socket& socket, Vec<u8>& buffer, ResponseHeader header)
+    AExpect<Response> receive_response(Socket& socket, Vec<u8>& buffer, ResponseHeader header, Request req)
     {
         if (header.status != Status{}) {
             co_return Unexpect{ header.status };
+        } else if (header.proc != req.proc()) {
+            co_return Unexpect{ Errc::bad_message };
         }
 
         buffer.resize(header.size);
@@ -893,7 +925,7 @@ namespace madbfs::rpc
         auto n1 = co_await async::read_exact<u8>(socket, buffer);
         HANDLE_ERROR(n1, buffer.size(), "failed to read response payload");
 
-        auto resp = parse_response(buffer, header.proc);
+        auto resp = parse_response(buffer, req);
         co_return resp ? Expect<Response>{ *resp } : Unexpect{ Status::bad_message };
     }
 }

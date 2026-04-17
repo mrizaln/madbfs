@@ -315,13 +315,13 @@ namespace madbfs
          * @param req Operation request.
          */
         template <rpc::IsRequest Req>
-        AExpect<rpc::ToResp<Req>> send_req_with_reconnection(Vec<u8>& buf, Req req)
+        AExpect<rpc::ToResp<Req>> send_req_with_reconnection(Req req)
         {
             constexpr auto max_attempts = 5uz;
 
             auto attempt = 0uz;
             while (attempt++ < max_attempts) {
-                auto resp = co_await m_transport->send_req(buf, std::move(req));
+                auto resp = co_await m_transport->send_req(std::move(req));
                 if (resp) {
                     co_return resp;
                 }

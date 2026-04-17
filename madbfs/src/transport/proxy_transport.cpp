@@ -226,7 +226,7 @@ namespace madbfs::transport
         });
     }
 
-    AExpect<rpc::Response> ProxyTransport::send(Vec<u8>& buffer, rpc::Request req)
+    AExpect<rpc::Response> ProxyTransport::send(rpc::Request req)
     {
         if (not m_running) {
             co_return Unexpect{ Errc::resource_unavailable_try_again };
@@ -236,7 +236,7 @@ namespace madbfs::transport
         auto promise = saf::promise<Expect<rpc::Response>>{ co_await async::current_executor() };
         auto future  = promise.get_future();
 
-        m_requests.emplace(id, Promise{ buffer, std::move(promise) });
+        m_requests.emplace(id, Promise{ req, std::move(promise) });
 
         if (auto res = co_await m_channel.async_send({}, { id, req }); not res) {
             log_e(__func__, "failed to send payload to channel: {}", res.error().message());
@@ -248,7 +248,7 @@ namespace madbfs::transport
         co_return co_await future.async_extract();
     }
 
-    AExpect<rpc::Response> ProxyTransport::send(Vec<u8>& buffer, rpc::Request req, Milliseconds timeout)
+    AExpect<rpc::Response> ProxyTransport::send(rpc::Request req, Milliseconds timeout)
     {
         if (not m_running) {
             co_return Unexpect{ Errc::resource_unavailable_try_again };
@@ -258,7 +258,7 @@ namespace madbfs::transport
         auto promise = saf::promise<Expect<rpc::Response>>{ co_await async::current_executor() };
         auto future  = promise.get_future();
 
-        m_requests.emplace(id, Promise{ buffer, std::move(promise) });
+        m_requests.emplace(id, Promise{ req, std::move(promise) });
 
         if (auto res = co_await m_channel.async_send({}, { id, req }); not res) {
             log_e(__func__, "failed to send payload to channel: {}", res.error().message());
@@ -304,6 +304,8 @@ namespace madbfs::transport
 
     AExpect<void> ProxyTransport::response_receive()
     {
+        auto payload_buf = Vec<u8>{};
+
         while (m_running) {
             auto header = co_await rpc::receive_response_header(m_socket);
             if (not header) {
@@ -313,15 +315,15 @@ namespace madbfs::transport
 
             log_d(__func__, "RESP RECV {} [{}]", header->id.inner(), rpc::to_string(header->proc));
 
-            auto req = m_requests.extract(header->id);
-            if (req.empty()) {
+            auto entry = m_requests.extract(header->id);
+            if (entry.empty()) {
                 log_e(__func__, "response incoming for id {} but no promise", header->id.inner());
                 std::ignore = async::discard(m_socket, header->size);
                 continue;
             }
 
-            auto& [buf, res] = req.mapped();
-            res.set_value(co_await rpc::receive_response(m_socket, buf, *header));
+            auto& [req, res] = entry.mapped();
+            res.set_value(co_await rpc::receive_response(m_socket, payload_buf, *header, req));
         }
 
         co_return Expect<void>{};
