@@ -75,6 +75,15 @@ namespace madbfs::tree
         Expect<void> symlink(path::Path path, Str target);
 
         /**
+         * @brief Set a new TTL for file tree nodes.
+         *
+         * @param ttl New TTl value (set to `std::nullopt` to disable)
+         *
+         * @return Old TTL value.
+         */
+        Opt<Seconds> set_ttl(Opt<Seconds> ttl);
+
+        /**
          * @brief Get root node.
          */
         const Node& root() const { return m_root; }
@@ -85,15 +94,6 @@ namespace madbfs::tree
          * If expiration is not enabled it will return `std::nullopt`.
          */
         Opt<Seconds> ttl() const { return m_ttl; }
-
-        /**
-         * @brief Set a new TTL for file tree nodes.
-         *
-         * @param ttl New TTl value (set to `std::nullopt` to disable)
-         *
-         * @return Old TTL value.
-         */
-        Opt<Seconds> set_ttl(Opt<Seconds> ttl) { return std::exchange(m_ttl, ttl); }
 
     private:
         /**
@@ -126,6 +126,13 @@ namespace madbfs::tree
          * @param path Path to the corresponding file on remote.
          */
         AExpect<void> update(Node& node, path::Path path);
+
+        /**
+         * @brief Visit all nodes while doing operation on them.
+         *
+         * @param func The opeartion to be applied on each of the node.
+         */
+        void walk(std::function<void(Node&)> func);
 
         /**
          * @brief Helper function to create context for node operations.

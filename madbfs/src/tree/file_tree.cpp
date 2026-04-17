@@ -5,6 +5,8 @@
 
 #include <madbfs-common/log.hpp>
 
+#include <fmt/std.h>
+
 namespace madbfs::tree
 {
     FileTree::FileTree(Connection& connection, data::Cache& cache, Opt<Seconds> ttl)
@@ -205,6 +207,24 @@ namespace madbfs::tree
         }
 
         co_return Expect<void>{};
+    }
+
+    void FileTree::walk(std::function<void(Node&)> func)
+    {
+        auto stack = Vec<Node*>{ &m_root };
+
+        while (not stack.empty()) {
+            auto node = stack.back();
+            stack.pop_back();
+
+            func(*node);
+
+            if (auto list = node->list(); list) {
+                for (const auto& node : list->get()) {
+                    stack.push_back(node.get());
+                }
+            }
+        }
     }
 
     AExpect<void> FileTree::readdir(path::Path path, Filler filler)
@@ -532,5 +552,21 @@ namespace madbfs::tree
         return traverse(path.parent_path())
             .and_then(proj(&Node::symlink, path.filename(), target))
             .transform(sink_void);
+    }
+
+    Opt<Seconds> FileTree::set_ttl(Opt<Seconds> ttl)
+    {
+        auto old = std::exchange(m_ttl, ttl);
+        if (old == ttl) {
+            return old;
+        }
+
+        // on change from ttl off to ttl on, sets all nodes expiration to that new ttl
+        // on change from ttl on to ttl off, sets all nodes expiration to never
+
+        log_i(__func__, "ttl changed [{} -> {}] resetting expirations", old, ttl);
+        walk([=](Node& node) { node.expires_after(ttl.value_or(Seconds::max())); });
+
+        return old;
     }
 }
