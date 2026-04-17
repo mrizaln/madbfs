@@ -315,7 +315,7 @@ namespace madbfs
          * @param req Operation request.
          */
         template <rpc::IsRequest Req>
-        AExpect<rpc::ToResp<Req>> send_req_with_reconnection(Req req)
+        AExpect<rpc::ToResp<Req>> send_req(Req req)
         {
             constexpr auto max_attempts = 5uz;
 
