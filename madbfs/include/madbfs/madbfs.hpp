@@ -1,5 +1,6 @@
 #pragma once
 
+#include "madbfs/args.hpp"
 #include "madbfs/connection.hpp"
 #include "madbfs/tree/file_tree.hpp"
 
@@ -23,14 +24,13 @@ namespace madbfs
     {
     public:
         Madbfs(
-            struct fuse*    fuse,
-            Opt<path::Path> server,
-            u16             port,
-            usize           max_pages,
-            usize           page_size,
-            Str             mount_point,
-            Opt<Seconds>    ttl,
-            Opt<Seconds>    timeout
+            struct fuse*     fuse,
+            args::Connection connection,
+            usize            max_pages,
+            usize            page_size,
+            Str              mount_point,
+            Opt<Seconds>     ttl,
+            Opt<Seconds>     timeout
         );
 
         ~Madbfs();
@@ -54,16 +54,9 @@ namespace madbfs
          * @brief Prepare and create connection to device.
          *
          * @param ctx Async context.
-         * @param server Server binary path.
-         * @param port Port on which the server will be ran on.
-         *
-         * @return New connection.
-         *
-         * If the server binary path is set, this function will attempt to create a `ServerConnection` and
-         * then fall back to `AdbConnection` if the connection failed. If it is not set, it will immediately
-         * cerate `AdbConnection` instead. The returned value will never be null.
+         * @param connection Conneciton type to be used (transport).
          */
-        static Connection prepare_connection(async::Context& ctx, Opt<path::Path> server, u16 port);
+        static Connection prepare_connection(async::Context& ctx, args::Connection connection);
 
         /**
          * @brief Create an IPC server.
@@ -116,9 +109,7 @@ namespace madbfs
         async::Timer    m_reaper_timer;
         net::signal_set m_signal;
 
-        String          m_mountpoint;
-        Opt<path::Path> m_server_path;
-        u16             m_server_port;
-        Opt<Seconds>    m_timeout;
+        String       m_mountpoint;
+        Opt<Seconds> m_timeout;
     };
 }

@@ -62,7 +62,7 @@ namespace
 
         // push server executable to device
         if (auto res = co_await cmd::exec({ "adb", "push", *server, serv_file }); not res) {
-            log_e(__func__, "failed to push 'madbfs-server' to device: {}", err_msg(res.error()));
+            log_e(__func__, "failed to push '{}' to device: {}", serv_file, err_msg(res.error()));
             co_return Unexpect{ res.error() };
         }
 

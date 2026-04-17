@@ -116,13 +116,12 @@ namespace madbfs::operations
         auto* args = static_cast<args::ParsedOpt*>(::fuse_get_context()->private_data);
         assert(args != nullptr and "data should not be empty!");
 
-        if (args->server and not args->server->is_absolute()) {
-            log_c(__func__, "server path is not absolute when it should! ignoring");
-            args->server.reset();
+        if (auto server = args->connection.as<args::connection::Server>(); server) {
+            if (not server->path.is_absolute()) {
+                log_c(__func__, "server path is not absolute when it should! ignoring");
+                args->connection = args::connection::NoServer{ .port = server->port };
+            }
         }
-
-        auto server_semi = args->server.and_then([](const auto& f) { return path::create(f.c_str()); });
-        auto server      = server_semi.transform(proj(&path::SemiPath::path));
 
         auto cache_size = args->cachesize * 1024 * 1024;
         auto page_size  = args->pagesize * 1024;
@@ -131,7 +130,7 @@ namespace madbfs::operations
         auto timeout    = args->timeout < 1 ? std::nullopt : Opt<Seconds>{ args->timeout };
         auto fuse       = ::fuse_get_context()->fuse;
 
-        return new Madbfs{ fuse, server, args->port, page_size, max_pages, args->mount, ttl, timeout };
+        return new Madbfs{ fuse, args->connection, page_size, max_pages, args->mount, ttl, timeout };
     }
 
     void destroy(void* private_data) noexcept

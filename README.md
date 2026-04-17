@@ -235,6 +235,7 @@ Options for madbfs:
                              (will still attempt to connect to specified port)
                              (fall back to adb shell calls if connection failed)
                              (useful for debugging the server)
+    --adb-only             don't launch server and don't try to connect
 
 Options for libfuse:
     -h   --help            print help
@@ -292,9 +293,9 @@ In order to use the proxy transport, `madbfs` needs to be able to find the `madb
 - Place it in the same directory as `madbfs` program, or
 - Specify explicitly the path of the file using `--server` option.
 
-If you want the filesystem to use `adb` transport instead then you can use `--no-server` flag. This flag prevents `madbfs` from pushing the server into your phone and running it.
+If you want the filesystem to use only use `adb` transport, use `--adb-only` flag. This flag prevents `madbfs` from pushing the server into your phone and running it. If you rather want to manually run the server yourself (for debugging) for example, use `--no-server` flag instead.
 
-The proxy communicates with `madbfs` over TCP enabled by port forwarding and by default it will listen on port `12345`. If you find this port to be not suitable for your use you can always specify it with `--port` option.
+The proxy communicates with `madbfs` over TCP enabled by port forwarding and by default it will listen on port `23237` (`adbfs` on dial pad). If you find this port to be not suitable for your use you can always specify it with `--port` option.
 
 ### Cache size
 

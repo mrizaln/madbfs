@@ -140,17 +140,20 @@ namespace madbfs
 
 namespace madbfs
 {
-    Connection Madbfs::prepare_connection(async::Context& ctx, Opt<path::Path> server, u16 port)
+    Connection Madbfs::prepare_connection(async::Context& ctx, args::Connection connection)
     {
-        // if (server) {
-        //     return Connection{ ctx, connection_strategy::Proxy{ server->owned(), port } };
-        // } else {
-        //     return Connection{ ctx, connection_strategy::Adb{} };
-        // }
-
-        return Connection{
-            ctx, connection_strategy::Proxy{ server ? Opt{ server->owned() } : std::nullopt, port }
-        };
+        return connection.visit(Overload{
+            [&](args::connection::AdbOnly) {
+                return Connection{ ctx, connection_strategy::Adb{} };    //
+            },
+            [&](args::connection::NoServer c) {
+                return Connection{ ctx, connection_strategy::Proxy{ std::nullopt, c.port } };
+            },
+            [&](args::connection::Server c) {
+                auto path = path::create(c.path.c_str()).transform([](auto p) { return p.path.owned(); });
+                return Connection{ ctx, connection_strategy::Proxy{ path, c.port } };
+            },
+        });
     }
 
     Opt<ipc::Server> Madbfs::create_ipc(async::Context& ctx)
@@ -194,20 +197,19 @@ namespace madbfs
     }
 
     Madbfs::Madbfs(
-        struct fuse*    fuse,
-        Opt<path::Path> server,
-        u16             port,
-        usize           page_size,
-        usize           max_pages,
-        Str             mountpoint,
-        Opt<Seconds>    ttl,
-        Opt<Seconds>    timeout
+        struct fuse*     fuse,
+        args::Connection connection,
+        usize            page_size,
+        usize            max_pages,
+        Str              mountpoint,
+        Opt<Seconds>     ttl,
+        Opt<Seconds>     timeout
     )
         : m_fuse{ fuse }
         , m_async_ctx{}
         , m_work_guard{ m_async_ctx.get_executor() }
         , m_work_thread{ [this] { work_thread_function(m_async_ctx); } }
-        , m_connection{ prepare_connection(m_async_ctx, server, port) }
+        , m_connection{ prepare_connection(m_async_ctx, connection) }
         , m_cache{ m_connection, page_size, max_pages }
         , m_tree{ m_connection, m_cache, ttl }
         , m_ipc{ create_ipc(m_async_ctx) }
@@ -215,8 +217,6 @@ namespace madbfs
         , m_reaper_timer{ m_async_ctx }
         , m_signal{ m_async_ctx, SIGINT, SIGTERM }
         , m_mountpoint{ mountpoint }
-        , m_server_path{ server }
-        , m_server_port{ port }
         , m_timeout{ timeout }
     {
         if (m_ipc) {
