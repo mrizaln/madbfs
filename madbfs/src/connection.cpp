@@ -1,6 +1,5 @@
 #include "madbfs/connection.hpp"
 
-#include "madbfs/cmd.hpp"
 #include "madbfs/path.hpp"
 #include "madbfs/transport/adb_transport.hpp"
 #include "madbfs/transport/null_transport.hpp"
@@ -26,16 +25,17 @@ namespace
             co_return custom->create();
         }
         case ConnectionStrategy::index_of<conn::Proxy>(): {
-            auto proxy     = strat.as<conn::Proxy>();
-            auto transport = co_await transport::ProxyTransport::create(proxy->server, proxy->port);
-            if (transport) {
+            const auto& [server, port] = *strat.as<conn::Proxy>();
+            if (auto transport = co_await transport::ProxyTransport::create(server, port); transport) {
                 co_return std::move(*transport);
             }
             [[fallthrough]];
         }
         case ConnectionStrategy::index_of<conn::Adb>(): {
-            auto exec = co_await async::current_executor();
-            co_return std::make_unique<transport::AdbTransport>(exec);
+            if (auto transport = co_await transport::AdbTransport::create(); transport) {
+                co_return std::move(*transport);
+            }
+            [[fallthrough]];
         }
         case ConnectionStrategy::index_of<conn::Null>(): [[fallthrough]];
         default: co_return std::make_unique<transport::NullTransport>(Errc::not_connected);
@@ -59,8 +59,7 @@ namespace
             co_return co_await transport::ProxyTransport::create(proxy->server, proxy->port);
         }
         case ConnectionStrategy::index_of<conn::Adb>(): {
-            auto exec = co_await async::current_executor();
-            co_return std::make_unique<transport::AdbTransport>(exec);
+            co_return co_await transport::AdbTransport::create();
         }
         case ConnectionStrategy::index_of<conn::Null>(): [[fallthrough]];
         default: co_return std::make_unique<transport::NullTransport>(Errc::not_connected);
@@ -342,64 +341,5 @@ namespace madbfs
         }
 
         co_return std::nullopt;
-    }
-}
-
-namespace madbfs
-{
-    Str to_string(DeviceStatus status)
-    {
-        switch (status) {
-        case DeviceStatus::Device: return "device";
-        case DeviceStatus::Emulator: return "emulator";
-        case DeviceStatus::Offline: return "offline";
-        case DeviceStatus::Unauthorized: return "unauthorized";
-        case DeviceStatus::Unknown: return "unknown";
-        }
-        return "Unknown";
-    }
-
-    AExpect<void> start_adb_server()
-    {
-        auto res = co_await cmd::exec({ "adb", "start-server" });
-        co_return res.transform(sink_void);
-    }
-
-    AExpect<Vec<Device>> list_adb_devices()
-    {
-        auto res = co_await cmd::exec({ "adb", "devices" });
-
-        if (not res.has_value()) {
-            co_return Unexpect{ res.error() };
-        }
-
-        auto devices = Vec<Device>{};
-
-        auto line_splitter = util::StringSplitter{ *res, { '\n' } };
-        std::ignore        = line_splitter.next();    // skip the first line
-
-        while (auto str = line_splitter.next()) {
-            auto splitter = util::StringSplitter{ *str, { " \t" } };
-
-            auto serial_str = splitter.next();
-            auto status_str = splitter.next();
-
-            if (not serial_str.has_value() or not status_str.has_value()) {
-                continue;
-            }
-
-            auto status = DeviceStatus::Unknown;
-
-            // clang-format off
-            if      (*status_str == "offline")      status = DeviceStatus::Offline;
-            else if (*status_str == "unauthorized") status = DeviceStatus::Unauthorized;
-            else if (*status_str == "emulator")     status = DeviceStatus::Emulator;
-            else if (*status_str == "device")       status = DeviceStatus::Device;
-            // clang-format on
-
-            devices.emplace_back(String{ *serial_str }, status);
-        }
-
-        co_return devices;
     }
 }

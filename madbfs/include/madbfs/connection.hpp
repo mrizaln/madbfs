@@ -348,48 +348,4 @@ namespace madbfs
 
         Opt<saf::shared_future<Errc>> m_reconnection;
     };
-
-    /**
-     * @enum DeviceStatus
-     *
-     * @brief Represent the status of device connected through adb.
-     */
-    enum class DeviceStatus
-    {
-        Device,
-        Emulator,
-        Offline,
-        Unauthorized,
-        Unknown,
-    };
-
-    /**
-     * @class Device
-     *
-     * @brief Device information connected through adb.
-     */
-    struct Device
-    {
-        String       serial;
-        DeviceStatus status;
-    };
-
-    /**
-     * @brief Get human readable description of DeviceStatus.
-     *
-     * The string lifetime is static.
-     */
-    Str to_string(DeviceStatus status);
-
-    /**
-     * @brief Start connection with the devices.
-     *
-     * Starts adb server.
-     */
-    AExpect<void> start_adb_server();
-
-    /**
-     * @brief List connected devices.
-     */
-    AExpect<Vec<Device>> list_adb_devices();
 }
