@@ -360,11 +360,6 @@ namespace madbfs::data
          */
         AExpect<void> flush_at(u64 fd, Page& page, Id id);
 
-        /**
-         * @brief Loop for clearing stale fds and free lookup entries.
-         */
-        Await<void> reaper();
-
         Connection& m_connection;
 
         Lru       m_lru;           // most recently used is at the front

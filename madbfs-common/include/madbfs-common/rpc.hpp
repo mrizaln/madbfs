@@ -138,8 +138,8 @@ namespace madbfs::rpc
     {
         // clang-format off
         struct Stat;
-        struct Listdir       { Vec<Pair<Str, Stat>> entries; };
-        struct Readlink      { Str target; };
+        struct Listdir       { Vec<Pair<Str, Stat>> entries; };     // uses corresponding `req::Listdir` buf
+        struct Readlink      { Str target; };                       // uses corresponding `req::Readlink` buf 
         struct Mknod         { };
         struct Mkdir         { };
         struct Unlink        { };
@@ -150,7 +150,7 @@ namespace madbfs::rpc
         struct CopyFileRange { usize size; };
         struct Open          { u64 fd; };
         struct Close         { };
-        struct Read          { Span<const u8> read; };
+        struct Read          { Span<const u8> read; };              // uses corresponding `req::Read` out
         struct Write         { usize size; };
         struct Ping          { u64 num; };
         // clang-format on
@@ -241,26 +241,24 @@ namespace madbfs::rpc
      */
     AExpect<void> handshake(Socket& sock);
 
-    // TODO: comments
-
     /**
-     * @brief [TODO:description]
+     * @brief Serialize then send request through socket.
      *
-     * @param socket [TODO:parameter]
-     * @param buffer [TODO:parameter]
-     * @param request [TODO:parameter]
-     * @param id [TODO:parameter]
+     * @param socket The socket in which the serialized request will be sent.
+     * @param buffer Storage for serialization.
+     * @param request The request to be sent.
+     * @param id Unique request identifier.
      */
     AExpect<void> send_request(Socket& socket, Vec<u8>& buffer, Request request, Id id);
 
     /**
-     * @brief [TODO:description]
+     * @brief Serialize then send response through socket.
      *
-     * @param socket [TODO:parameter]
-     * @param buffer [TODO:parameter]
-     * @param proc [TODO:parameter]
-     * @param response [TODO:parameter]
-     * @param id [TODO:parameter]
+     * @param socket The socket in which the serialized request will be sent.
+     * @param buffer Storage for serialization.
+     * @param proc Response procedure.
+     * @param response Response data for the procedure.
+     * @param id Response Unique response identifier.
      */
     AExpect<void> send_response(
         Socket&               socket,
@@ -271,25 +269,25 @@ namespace madbfs::rpc
     );
 
     /**
-     * @brief [TODO:description]
+     * @brief Read request header from socket.
      *
-     * @param socket [TODO:parameter]
+     * @param socket The socket to be read from.
      */
     AExpect<RequestHeader> receive_request_header(Socket& socket);
 
     /**
-     * @brief [TODO:description]
+     * @brief Read response header from socket.
      *
-     * @param socket [TODO:parameter]
+     * @param socket The socket to be read from.
      */
     AExpect<ResponseHeader> receive_response_header(Socket& socket);
 
     /**
-     * @brief [TODO:description]
+     * @brief Read request payload with information from the header.
      *
-     * @param socket [TODO:parameter]
-     * @param buffer [TODO:parameter]
-     * @param header [TODO:parameter]
+     * @param socket The socket to be read from.
+     * @param buffer Storage for request payload.
+     * @param header Valid request header.
      *
      * The `buffer` is both used for receiving the payload and for output buffer to be filled later for some
      * procedures. The `buffer` must live long enough for any user that uses the resulting request.
@@ -297,12 +295,12 @@ namespace madbfs::rpc
     AExpect<Request> receive_request(Socket& socket, Vec<u8>& buffer, RequestHeader header);
 
     /**
-     * @brief [TODO:description]
+     * @brief Read response payload with information from the header.
      *
-     * @param socket [TODO:parameter]
-     * @param buffer [TODO:parameter]
-     * @param header [TODO:parameter]
-     * @param req [TODO:parameter]
+     * @param socket The socket to be read from.
+     * @param buffer Storage for response payload.
+     * @param header Valid request header.
+     * @param req Associated request struct for the response.
      *
      * The `req` is required since some procedures have an output buffer (for string/bytes data). To prevent
      * unnecessary copy, the function will fill the data directly into the output buffer. The lifetime of the

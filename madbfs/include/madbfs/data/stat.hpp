@@ -75,6 +75,9 @@ namespace madbfs::data
         return remote.mtime.tv_sec - host.mtime.tv_sec > tolerance_sec;
     }
 
+    /**
+     * @brief File open mode.
+     */
     enum class OpenMode : u8
     {
         Read      = 0,

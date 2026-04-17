@@ -227,6 +227,14 @@ namespace madbfs::async
         }
     }
 
+    /**
+     * @brief Spawn coroutine with timeout.
+     *
+     * @param awaitable Coroutine to be awaited.
+     * @param time Duration before the coroutine is cancelled.
+     *
+     * @return The result of the coroutine if completed within timeout, else `std::nullopt`;
+     */
     template <typename T>
     AExpect<ToUnit<T>> timeout(AExpect<T>&& awaitable, Milliseconds time)
     {
@@ -249,6 +257,8 @@ namespace madbfs::async
      * @brief Spawn coroutine with timeout.
      *
      * @param awaitable Coroutine to be awaited.
+     * @param time Duration before the coroutine is cancelled.
+     * @param on_timeout Function to be called on timeout.
      *
      * @return The result of the coroutine if completed within timeout, else `std::nullopt`;
      */

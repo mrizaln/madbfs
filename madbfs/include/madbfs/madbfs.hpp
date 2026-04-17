@@ -88,8 +88,17 @@ namespace madbfs
          */
         Await<boost::json::value> ipc_handler(ipc::FsOp op);
 
+        /**
+         * @brief Watch connection status.
+         *
+         * This coroutine will attempt to reconnect the connection or optimize it based on the status of the
+         * connection.
+         */
         Await<void> watchdog();
 
+        /**
+         * @brief Clean unused real file descriptors from cache.
+         */
         Await<void> reaper();
 
         struct fuse* m_fuse;
