@@ -10,6 +10,7 @@ target_sources(
   madbfs-lib
   PRIVATE
     src/madbfs.cpp
+    src/args.cpp
     src/adb.cpp
     src/cmd.cpp
     src/operations.cpp
