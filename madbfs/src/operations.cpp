@@ -153,18 +153,18 @@ namespace madbfs::operations
     {
         log_i(__func__, "{:?}", path);
 
-        auto maybe_stat = ok_or(path::create(path), Errc::operation_not_supported).and_then([](path::Path p) {
+        auto named_stat = ok_or(path::create(path), Errc::operation_not_supported).and_then([](path::Path p) {
             return invoke_tree(&FileTree::getattr, p);
         });
-        if (not maybe_stat.has_value()) {
-            return fuse_err(__func__, path)(maybe_stat.error());
+        if (not named_stat.has_value()) {
+            return fuse_err(__func__, path)(named_stat.error());
         }
 
-        const auto& stat = maybe_stat->get();
+        const auto& [id, stat] = *named_stat;
 
         std::memset(stbuf, 0, sizeof(struct stat));
 
-        stbuf->st_ino     = static_cast<ino_t>(stat.id.inner());
+        stbuf->st_ino     = static_cast<ino_t>(id.inner());
         stbuf->st_mode    = stat.mode;
         stbuf->st_nlink   = stat.links;
         stbuf->st_uid     = stat.uid;

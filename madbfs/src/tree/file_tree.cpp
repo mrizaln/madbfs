@@ -343,9 +343,13 @@ namespace madbfs::tree
         co_return Expect<void>{};
     }
 
-    AExpect<Ref<const data::Stat>> FileTree::getattr(path::Path path)
+    AExpect<data::NamedStat> FileTree::getattr(path::Path path)
     {
-        co_return (co_await traverse_or_build(path)).and_then(&Node::stat);
+        co_return (co_await traverse_or_build(path)).and_then([](Node& node) {
+            return node.stat().transform([id = node.id()](const data::Stat& stat) {
+                return data::NamedStat{ .id = id, .stat = stat };
+            });
+        });
     }
 
     AExpect<Str> FileTree::readlink(path::Path path)

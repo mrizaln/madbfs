@@ -6,6 +6,11 @@
 
 #include <atomic>
 
+namespace madbfs::tree
+{
+    class Node;
+}
+
 namespace madbfs::data
 {
     /**
@@ -16,7 +21,7 @@ namespace madbfs::data
     class Id
     {
     public:
-        friend struct Stat;
+        friend ::madbfs::tree::Node;
 
         Id() = default;
         u64 inner() const { return m_inner; }
@@ -45,7 +50,6 @@ namespace madbfs::data
      */
     struct Stat
     {
-        Id       id    = Id::incr();
         nlink_t  links = 1;
         off_t    size  = 0;
         timespec mtime = {};    // last modification time (only seconds part is used)
@@ -54,6 +58,17 @@ namespace madbfs::data
         mode_t   mode  = 0;    // -rwxrwxrwx
         uid_t    uid   = 0;
         gid_t    gid   = 0;
+    };
+
+    /**
+     * @class NamedStat
+     *
+     * @brief File status information and its unique identifier.
+     */
+    struct NamedStat
+    {
+        data::Id   id;
+        data::Stat stat;
     };
 
     /**

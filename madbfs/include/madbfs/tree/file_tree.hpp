@@ -42,8 +42,8 @@ namespace madbfs::tree
 
         // fuse oprations
         // --------------
-        AExpect<void>                  readdir(path::Path path, Filler filler);
-        AExpect<Ref<const data::Stat>> getattr(path::Path path);
+        AExpect<void>            readdir(path::Path path, Filler filler);
+        AExpect<data::NamedStat> getattr(path::Path path);
 
         AExpect<Str>       readlink(path::Path path);
         AExpect<Ref<Node>> mknod(path::Path path, mode_t mode, dev_t dev);

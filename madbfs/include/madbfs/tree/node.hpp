@@ -229,6 +229,7 @@ namespace madbfs::tree
         Node(Str name, Node* parent, data::Stat stat, File value)
             : m_parent{ parent }
             , m_name{ name }
+            , m_id{ data::Id::incr() }
             , m_stat{ std::move(stat) }
             , m_value{ std::move(value) }
         {
@@ -240,7 +241,7 @@ namespace madbfs::tree
         Node(const Node&)            = delete;
         Node& operator=(const Node&) = delete;
 
-        data::Id id() const { return m_stat.id; };
+        data::Id id() const { return m_id; };
 
         void set_name(Str name) { m_name = name; }
         void set_parent(Node* parent) { m_parent = parent; }
@@ -538,6 +539,7 @@ namespace madbfs::tree
 
         Node*      m_parent     = nullptr;
         String     m_name       = {};
+        data::Id   m_id         = {};
         data::Stat m_stat       = {};
         Timepoint  m_expiration = Timepoint::max();
         File       m_value;
