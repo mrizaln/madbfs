@@ -104,7 +104,7 @@ namespace madbfs::data
 
             bool dirty = false;
 
-            bool is_free()
+            bool is_free() const
             {
                 return pages.empty()          //
                    and reader == 0            //

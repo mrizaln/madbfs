@@ -236,7 +236,8 @@ namespace madbfs::transport
         auto promise = saf::promise<Expect<rpc::Response>>{ co_await async::current_executor() };
         auto future  = promise.get_future();
 
-        m_requests.emplace(id, Promise{ req, std::move(promise) });
+        auto [_, ok] = m_requests.try_emplace(id, req, std::move(promise));
+        assert(ok and "id is always incremented, insertion should always happens");
 
         if (auto res = co_await m_channel.async_send({}, { id, req }); not res) {
             log_e(__func__, "failed to send payload to channel: {}", res.error().message());
@@ -258,7 +259,8 @@ namespace madbfs::transport
         auto promise = saf::promise<Expect<rpc::Response>>{ co_await async::current_executor() };
         auto future  = promise.get_future();
 
-        m_requests.emplace(id, Promise{ req, std::move(promise) });
+        auto [_, ok] = m_requests.try_emplace(id, req, std::move(promise));
+        assert(ok and "id is always incremented, insertion should always happens");
 
         if (auto res = co_await m_channel.async_send({}, { id, req }); not res) {
             log_e(__func__, "failed to send payload to channel: {}", res.error().message());

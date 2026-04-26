@@ -85,7 +85,7 @@ namespace madbfs::data
     AExpect<void> Cache::hint_open(Id id, path::Path path, data::OpenMode mode)
     {
         // only adding new entry, actual open will be performed on read/write
-        log_d(__func__, "[id={}|mode={}]", id.inner(), std::to_underlying(mode));
+        log_d(__func__, "[id={}|mode={}] {:?} ", id.inner(), std::to_underlying(mode), path);
 
         auto& entry = new_lookup(id, path).get();
         if (entry.path.str() != path.str()) {
@@ -477,7 +477,7 @@ namespace madbfs::data
 
     Ref<Cache::LookupEntry> Cache::new_lookup(Id id, path::Path path)
     {
-        auto [it, _] = m_table.emplace(id, LookupEntry{ .pages = {}, .path = path.owned() });
+        auto [it, _] = m_table.try_emplace(id, std::map<usize, Lru::iterator>{}, path.owned());
         return std::ref(it->second);
     }
 

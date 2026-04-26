@@ -29,8 +29,19 @@ namespace madbfs::server
             }
 
             // buffer must live until the request handled by `handle_request()`
-            auto [it, _] = m_requests.emplace(header->id, Promise{ .buf = {}, .proc = header->proc });
+            auto [it, ok] = m_requests.try_emplace(header->id, Vec<u8>{}, header->proc);
             log_d(__func__, "new request [{}] [{}]", header->id.inner(), to_string(header->proc));
+            if (not ok) {
+                log_w(
+                    __func__,
+                    "duplicate request with same id [{}] (old: {} vs new: {}), ignored",
+                    header->id.inner(),
+                    to_string(it->second.proc),
+                    to_string(header->proc)
+                );
+                std::ignore = co_await rpc::receive_request(m_socket, it->second.buf, *header);
+                continue;
+            }
 
             auto req = co_await rpc::receive_request(m_socket, it->second.buf, *header);
             if (not req) {

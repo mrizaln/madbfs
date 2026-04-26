@@ -302,12 +302,12 @@ namespace madbfs::rpc
      * @param header Valid request header.
      * @param req Associated request struct for the response.
      *
-     * The `req` is required since some procedures have an output buffer (for string/bytes data). To prevent
-     * unnecessary copy, the function will fill the data directly into the output buffer. The lifetime of the
-     * output buffer of the request is tied to the response and the request.
-     *
-     * The `buffer` is required for parsing non-string/non-bytes payloads, it may be destroyed/reused
+     * The `buffer` is required for receiving and parsing the Response payload, it may be destroyed/reused
      * immediately after this function returns.
+     *
+     * The `req` is required since some procedures have an output buffer (for string/bytes data). The function
+     * will copy the data into the output buffer after received. The lifetime of the output buffer of the
+     * request is tied to the response and the request.
      */
     AExpect<Response> receive_response(Socket& socket, Vec<u8>& buffer, ResponseHeader header, Request req);
 }
