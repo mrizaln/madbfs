@@ -712,16 +712,18 @@ namespace madbfs::data
             }
         }
 
-        auto data = std::make_unique<char[]>(m_page_size);
-        auto read = page.read({ data.get(), m_page_size }, 0);
-        page.set_dirty(false);
-
-        auto span = Span{ data.get(), read };
-        auto res  = co_await on_flush(fd, span, static_cast<off_t>(page.key().index * m_page_size));
-        if (not res) {
-            co_return Unexpect{ res.error() };
+        auto written = 0uz;
+        while (written < page.size()) {
+            auto span = page.buf().subspan(written);
+            auto off  = page.key().index * m_page_size + written;
+            auto res  = co_await on_flush(fd, span, static_cast<off_t>(off));
+            if (not res) {
+                co_return Unexpect{ res.error() };
+            }
+            written += *res;
         }
 
+        page.set_dirty(false);
         co_return Expect<void>{};
     }
 }
