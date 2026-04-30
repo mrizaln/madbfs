@@ -53,7 +53,7 @@ namespace madbfs
 
         Await<json::value> handle(ipc::op::ExpireStat)
         {
-            auto count = madbfs.tree().expires_all();
+            auto count = madbfs.filesystem().expires_all();
             co_return json::value{ { "count", count } };
         }
 

@@ -6,7 +6,7 @@
 
 #include <atomic>
 
-namespace madbfs::tree
+namespace madbfs
 {
     class Node;
 }
@@ -21,7 +21,7 @@ namespace madbfs::data
     class Id
     {
     public:
-        friend ::madbfs::tree::Node;
+        friend ::madbfs::Node;
 
         Id() = default;
         u64 inner() const { return m_inner; }

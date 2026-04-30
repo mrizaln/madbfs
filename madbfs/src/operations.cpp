@@ -20,20 +20,20 @@ namespace
     /**
      * @brief Interface sync code of FUSE with async code of madbfs on the tree access using future.
      *
-     * @param fn The member function of `FileTree`.
+     * @param fn The member function of `Filesystem`.
      * @param args Arguments to be passed into the member function.
      *
      * @return The return value of the member function.
      */
     template <typename Ret, typename... Args>
     Ret invoke_tree(
-        madbfs::Await<Ret> (madbfs::tree::FileTree::*fn)(Args...),
+        madbfs::Await<Ret> (madbfs::Filesystem::*fn)(Args...),
         std::type_identity_t<Args>... args
     ) noexcept
     {
         auto& data = get_data();
         auto& ctx  = data.async_ctx();
-        auto& tree = data.tree();
+        auto& tree = data.filesystem();
 
         try {
             auto coro = (tree.*fn)(std::forward<Args>(args)...);
@@ -101,8 +101,6 @@ namespace
 
 namespace madbfs::operations
 {
-    using tree::FileTree;
-
     void* init(fuse_conn_info* conn, fuse_config*) noexcept
     {
         if (conn->want & FUSE_CAP_ATOMIC_O_TRUNC) {
@@ -154,7 +152,7 @@ namespace madbfs::operations
         log_i(__func__, "{:?}", path);
 
         auto named_stat = ok_or(path::create(path), Errc::operation_not_supported).and_then([](path::Path p) {
-            return invoke_tree(&FileTree::getattr, p);
+            return invoke_tree(&Filesystem::getattr, p);
         });
         if (not named_stat.has_value()) {
             return fuse_err(__func__, path)(named_stat.error());
@@ -184,7 +182,7 @@ namespace madbfs::operations
         log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](path::Path p) { return invoke_tree(&FileTree::readlink, p); })
+            .and_then([](path::Path p) { return invoke_tree(&Filesystem::readlink, p); })
             .and_then([&](Str target) -> Expect<void> {
                 if (target.size() < 1) {
                     return Unexpect{ Errc::invalid_argument };
@@ -219,7 +217,7 @@ namespace madbfs::operations
         log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([=](path::Path p) { return invoke_tree(&FileTree::mknod, p, mode, dev); })
+            .and_then([=](path::Path p) { return invoke_tree(&Filesystem::mknod, p, mode, dev); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -229,7 +227,7 @@ namespace madbfs::operations
         log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([=](path::Path p) { return invoke_tree(&FileTree::mkdir, p, mode | S_IFDIR); })
+            .and_then([=](path::Path p) { return invoke_tree(&Filesystem::mkdir, p, mode | S_IFDIR); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -239,7 +237,7 @@ namespace madbfs::operations
         log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](path::Path p) { return invoke_tree(&FileTree::unlink, p); })
+            .and_then([](path::Path p) { return invoke_tree(&Filesystem::unlink, p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -249,7 +247,7 @@ namespace madbfs::operations
         log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](path::Path p) { return invoke_tree(&FileTree::rmdir, p); })
+            .and_then([](path::Path p) { return invoke_tree(&Filesystem::rmdir, p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -269,7 +267,7 @@ namespace madbfs::operations
             return fuse_err(__func__, to)(Errc::operation_not_supported);
         }
 
-        return invoke_tree(&FileTree::rename, *from_path, *to_path, flags)
+        return invoke_tree(&Filesystem::rename, *from_path, *to_path, flags)
             .transform_error(fuse_err(__func__, from))
             .error_or(0);
     }
@@ -279,7 +277,7 @@ namespace madbfs::operations
         log_i(__func__, "[size={}] {:?}", size, path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return invoke_tree(&FileTree::truncate, p, size); })
+            .and_then([&](path::Path p) { return invoke_tree(&Filesystem::truncate, p, size); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -289,7 +287,7 @@ namespace madbfs::operations
         log_i(__func__, "{:?} [flags={:#08o}]", path, fi->flags);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return invoke_tree(&FileTree::open, p, fi->flags); })
+            .and_then([&](path::Path p) { return invoke_tree(&Filesystem::open, p, fi->flags); })
             .transform([&](u64 fd) { fi->fh = fd; })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
@@ -300,7 +298,7 @@ namespace madbfs::operations
         log_i(__func__, "[offset={}|size={}] {:?}", offset, size, path);
 
         auto res = ok_or(path::create(path), Errc::operation_not_supported).and_then([&](path::Path p) {
-            return invoke_tree(&FileTree::read, p, fi->fh, { buf, size }, offset);
+            return invoke_tree(&Filesystem::read, p, fi->fh, { buf, size }, offset);
         });
         return res.has_value() ? static_cast<i32>(res.value()) : fuse_err(__func__, path)(res.error());
     }
@@ -310,7 +308,7 @@ namespace madbfs::operations
         log_i(__func__, "[offset={}|size={}] {:?}", offset, size, path);
 
         auto res = ok_or(path::create(path), Errc::operation_not_supported).and_then([&](path::Path p) {
-            return invoke_tree(&FileTree::write, p, fi->fh, { buf, size }, offset);
+            return invoke_tree(&Filesystem::write, p, fi->fh, { buf, size }, offset);
         });
         return res.has_value() ? static_cast<i32>(res.value()) : fuse_err(__func__, path)(res.error());
     }
@@ -320,7 +318,7 @@ namespace madbfs::operations
         log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return invoke_tree(&FileTree::flush, p, fi->fh); })
+            .and_then([&](path::Path p) { return invoke_tree(&Filesystem::flush, p, fi->fh); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -330,7 +328,7 @@ namespace madbfs::operations
         log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return invoke_tree(&FileTree::release, p, fi->fh); })
+            .and_then([&](path::Path p) { return invoke_tree(&Filesystem::release, p, fi->fh); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -349,7 +347,7 @@ namespace madbfs::operations
         const auto fill = [&](const char* name) { filler(buf, name, nullptr, 0, FUSE_FILL_DIR_PLUS); };
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return invoke_tree(&FileTree::readdir, p, fill); })
+            .and_then([&](path::Path p) { return invoke_tree(&Filesystem::readdir, p, fill); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -364,7 +362,7 @@ namespace madbfs::operations
         log_i(__func__, "{:?}", path);
 
         return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return invoke_tree(&FileTree::utimens, p, tv[0], tv[1]); })
+            .and_then([&](path::Path p) { return invoke_tree(&Filesystem::utimens, p, tv[0], tv[1]); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -393,7 +391,7 @@ namespace madbfs::operations
             return fuse_err(__func__, out_path)(Errc::operation_not_supported);
         }
 
-        auto op  = &FileTree::copy_file_range;
+        auto op  = &Filesystem::copy_file_range;
         auto res = invoke_tree(op, *in, in_fi->fh, in_off, *out, out_fi->fh, out_off, size);
         return res ? static_cast<isize>(res.value()) : fuse_err(__func__, in_path)(res.error());
     }

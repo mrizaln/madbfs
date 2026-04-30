@@ -12,14 +12,10 @@
 namespace madbfs
 {
     class Connection;
-}
-
-namespace madbfs::tree
-{
     class Node;
 }
 
-namespace madbfs::tree::node
+namespace madbfs::node
 {
     class Regular;
     class Directory;
@@ -201,7 +197,7 @@ namespace madbfs::tree::node
     };
 }
 
-namespace madbfs::tree
+namespace madbfs
 {
     using File = Var<node::Regular, node::Directory, node::Link, node::Other, node::Error>;
 
@@ -550,7 +546,7 @@ namespace madbfs::tree
 // template implementation
 // -----------------------
 
-namespace madbfs::tree
+namespace madbfs
 {
     template <typename T>
     bool Node::is() const

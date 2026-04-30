@@ -1,15 +1,15 @@
-#include "madbfs/tree/file_tree.hpp"
+#include "madbfs/filesystem.hpp"
 
 #include "madbfs/connection.hpp"
-#include "madbfs/tree/node.hpp"
+#include "madbfs/node.hpp"
 
 #include <madbfs-common/log.hpp>
 
 #include <fmt/std.h>
 
-namespace madbfs::tree
+namespace madbfs
 {
-    FileTree::FileTree(Connection& connection, data::Cache& cache, Opt<Seconds> ttl)
+    Filesystem::Filesystem(Connection& connection, data::Cache& cache, Opt<Seconds> ttl)
         : m_root{ "/", nullptr, {}, node::Directory{} }
         , m_connection{ connection }
         , m_cache{ cache }
@@ -17,7 +17,7 @@ namespace madbfs::tree
     {
     }
 
-    AExpect<Ref<Node>> FileTree::build(Node& parent, path::Path path)
+    AExpect<Ref<Node>> Filesystem::build(Node& parent, path::Path path)
     {
         const auto name = path.filename();
 
@@ -50,7 +50,7 @@ namespace madbfs::tree
         }
     }
 
-    AExpect<Ref<Node>> FileTree::build_directory(Node& parent, path::Path path)
+    AExpect<Ref<Node>> Filesystem::build_directory(Node& parent, path::Path path)
     {
         const auto name = path.filename();
 
@@ -74,7 +74,7 @@ namespace madbfs::tree
         co_return build_then_expire(name, *stat, node::Directory{});
     }
 
-    Expect<Ref<Node>> FileTree::traverse(path::Path path)
+    Expect<Ref<Node>> Filesystem::traverse(path::Path path)
     {
         if (path.is_root()) {
             return m_root;
@@ -93,7 +93,7 @@ namespace madbfs::tree
         return *current;
     }
 
-    AExpect<Ref<Node>> FileTree::traverse_or_build(path::Path path)
+    AExpect<Ref<Node>> Filesystem::traverse_or_build(path::Path path)
     {
         if (path.is_root()) {
             // workaround to initialize root stat on getattr
@@ -145,7 +145,7 @@ namespace madbfs::tree
         co_return co_await build(*current, current_path);
     }
 
-    AExpect<void> FileTree::update(Node& node, path::Path path)
+    AExpect<void> Filesystem::update(Node& node, path::Path path)
     {
         log_d(__func__, "{:?}", path);
 
@@ -209,7 +209,7 @@ namespace madbfs::tree
         co_return Expect<void>{};
     }
 
-    void FileTree::walk(std::function<void(Node&)> func)
+    void Filesystem::walk(std::function<void(Node&)> func)
     {
         auto stack = Vec<Node*>{ &m_root };
 
@@ -227,7 +227,7 @@ namespace madbfs::tree
         }
     }
 
-    AExpect<void> FileTree::readdir(path::Path path, Filler filler)
+    AExpect<void> Filesystem::readdir(path::Path path, Filler filler)
     {
         auto parent = &m_root;
 
@@ -343,7 +343,7 @@ namespace madbfs::tree
         co_return Expect<void>{};
     }
 
-    AExpect<data::NamedStat> FileTree::getattr(path::Path path)
+    AExpect<data::NamedStat> Filesystem::getattr(path::Path path)
     {
         co_return (co_await traverse_or_build(path)).and_then([](Node& node) {
             return node.stat().transform([id = node.id()](const data::Stat& stat) {
@@ -352,12 +352,12 @@ namespace madbfs::tree
         });
     }
 
-    AExpect<Str> FileTree::readlink(path::Path path)
+    AExpect<Str> Filesystem::readlink(path::Path path)
     {
         co_return (co_await traverse_or_build(path)).and_then(&Node::readlink);
     }
 
-    AExpect<Ref<Node>> FileTree::mknod(path::Path path, mode_t mode, dev_t dev)
+    AExpect<Ref<Node>> Filesystem::mknod(path::Path path, mode_t mode, dev_t dev)
     {
         auto parent = path.parent_path();
         auto node   = co_await traverse_or_build(parent);
@@ -367,7 +367,7 @@ namespace madbfs::tree
         co_return co_await node->get().mknod(make_context(path), mode, dev);
     }
 
-    AExpect<Ref<Node>> FileTree::mkdir(path::Path path, mode_t mode)
+    AExpect<Ref<Node>> Filesystem::mkdir(path::Path path, mode_t mode)
     {
         auto parent = path.parent_path();
         auto node   = co_await traverse_or_build(parent);
@@ -377,7 +377,7 @@ namespace madbfs::tree
         co_return co_await node->get().mkdir(make_context(path), mode);
     }
 
-    AExpect<void> FileTree::unlink(path::Path path)
+    AExpect<void> Filesystem::unlink(path::Path path)
     {
         auto parent = path.parent_path();
         auto node   = co_await traverse_or_build(parent);
@@ -387,7 +387,7 @@ namespace madbfs::tree
         co_return co_await node->get().unlink(make_context(path));
     }
 
-    AExpect<void> FileTree::rmdir(path::Path path)
+    AExpect<void> Filesystem::rmdir(path::Path path)
     {
         auto parent = path.parent_path();
         auto node   = co_await traverse_or_build(parent);
@@ -397,7 +397,7 @@ namespace madbfs::tree
         co_return co_await node->get().rmdir(make_context(path));
     }
 
-    AExpect<void> FileTree::rename(path::Path from, path::Path to, u32 flags)
+    AExpect<void> Filesystem::rename(path::Path from, path::Path to, u32 flags)
     {
         // I don't think root can be moved, :P
         if (from.is_root()) {
@@ -458,7 +458,7 @@ namespace madbfs::tree
         co_return Expect<void>{};
     }
 
-    AExpect<void> FileTree::truncate(path::Path path, off_t size)
+    AExpect<void> Filesystem::truncate(path::Path path, off_t size)
     {
         auto node = co_await traverse_or_build(path);
         if (not node) {
@@ -467,7 +467,7 @@ namespace madbfs::tree
         co_return co_await node->get().truncate(make_context(path), size);
     }
 
-    AExpect<u64> FileTree::open(path::Path path, int flags)
+    AExpect<u64> Filesystem::open(path::Path path, int flags)
     {
         auto node = co_await traverse_or_build(path);
         if (not node) {
@@ -476,7 +476,7 @@ namespace madbfs::tree
         co_return co_await node->get().open(make_context(path), flags);
     }
 
-    AExpect<usize> FileTree::read(path::Path path, u64 fd, Span<char> out, off_t offset)
+    AExpect<usize> Filesystem::read(path::Path path, u64 fd, Span<char> out, off_t offset)
     {
         auto node = co_await traverse_or_build(path);
         if (not node) {
@@ -485,7 +485,7 @@ namespace madbfs::tree
         co_return co_await node->get().read(make_context(path), fd, out, offset);
     }
 
-    AExpect<usize> FileTree::write(path::Path path, u64 fd, Str in, off_t offset)
+    AExpect<usize> Filesystem::write(path::Path path, u64 fd, Str in, off_t offset)
     {
         auto node = co_await traverse_or_build(path);
         if (not node) {
@@ -494,7 +494,7 @@ namespace madbfs::tree
         co_return co_await node->get().write(make_context(path), fd, in, offset);
     }
 
-    AExpect<void> FileTree::flush(path::Path path, u64 fd)
+    AExpect<void> Filesystem::flush(path::Path path, u64 fd)
     {
         auto node = co_await traverse_or_build(path);
         if (not node) {
@@ -503,7 +503,7 @@ namespace madbfs::tree
         co_return co_await node->get().flush(make_context(path), fd);
     }
 
-    AExpect<void> FileTree::release(path::Path path, u64 fd)
+    AExpect<void> Filesystem::release(path::Path path, u64 fd)
     {
         auto node = co_await traverse_or_build(path);
         if (not node) {
@@ -512,7 +512,7 @@ namespace madbfs::tree
         co_return co_await node->get().release(make_context(path), fd);
     }
 
-    AExpect<usize> FileTree::copy_file_range(
+    AExpect<usize> Filesystem::copy_file_range(
         path::Path in_path,
         u64        in_fd,
         off_t      in_off,
@@ -542,7 +542,7 @@ namespace madbfs::tree
         });
     }
 
-    AExpect<void> FileTree::utimens(path::Path path, timespec atime, timespec mtime)
+    AExpect<void> Filesystem::utimens(path::Path path, timespec atime, timespec mtime)
     {
         auto node = co_await traverse_or_build(path);
         if (not node) {
@@ -551,14 +551,14 @@ namespace madbfs::tree
         co_return co_await node->get().utimens(make_context(path), atime, mtime);
     }
 
-    Expect<void> FileTree::symlink(path::Path path, Str target)
+    Expect<void> Filesystem::symlink(path::Path path, Str target)
     {
         return traverse(path.parent_path())
             .and_then(proj(&Node::symlink, path.filename(), target))
             .transform(sink_void);
     }
 
-    Opt<Seconds> FileTree::set_ttl(Opt<Seconds> ttl)
+    Opt<Seconds> Filesystem::set_ttl(Opt<Seconds> ttl)
     {
         auto old = std::exchange(m_ttl, ttl);
         if (old == ttl) {
@@ -573,7 +573,7 @@ namespace madbfs::tree
 
         return old;
     }
-    usize FileTree::expires_all()
+    usize Filesystem::expires_all()
     {
         auto count = 0uz;
         walk([&](Node& node) { ++count, node.expires_after(Seconds{ 0 }); });

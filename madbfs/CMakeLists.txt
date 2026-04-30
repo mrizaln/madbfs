@@ -9,19 +9,18 @@ add_library(madbfs-lib STATIC)
 target_sources(
   madbfs-lib
   PRIVATE
-    src/madbfs.cpp
-    src/args.cpp
     src/adb.cpp
+    src/args.cpp
     src/cmd.cpp
+    src/connection.cpp
+    src/data/cache.cpp
+    src/filesystem.cpp
+    src/madbfs.cpp
+    src/node.cpp
     src/operations.cpp
     src/path.cpp
-    src/connection.cpp
     src/transport/adb_transport.cpp
     src/transport/proxy_transport.cpp
-    src/data/cache.cpp
-    src/tree/file_tree.cpp
-    src/tree/node.cpp
-    src/tree/node.cpp
 )
 target_link_libraries(
   madbfs-lib

@@ -1,8 +1,8 @@
-#include "madbfs/tree/node.hpp"
+#include "madbfs/node.hpp"
 
 #include "madbfs/connection.hpp"
 
-namespace madbfs::tree::node
+namespace madbfs::node
 {
     Regular::Mode Regular::open(u64 fd, int flags)
     {
@@ -29,7 +29,7 @@ namespace madbfs::tree::node
     }
 }
 
-namespace madbfs::tree::node
+namespace madbfs::node
 {
     u64 Directory::NodeHash::operator()(const Uniq<Node>& node) const
     {
@@ -93,7 +93,7 @@ namespace madbfs::tree::node
     }
 }
 
-namespace madbfs::tree
+namespace madbfs
 {
     Expect<Ref<const data::Stat>> Node::stat() const
     {

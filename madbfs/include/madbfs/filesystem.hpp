@@ -1,7 +1,7 @@
 #pragma once
 
 #include "madbfs/path.hpp"
-#include "madbfs/tree/node.hpp"
+#include "madbfs/node.hpp"
 
 #include <functional>
 
@@ -10,28 +10,28 @@ namespace madbfs
     class Connection;
 }
 
-namespace madbfs::tree
+namespace madbfs
 {
     /**
-     * @class FileTree
+     * @class Filesystem
      *
-     * @brief A class representing a file tree structure.
+     * @brief A class representing the filesystem and its tree structure.
      *
      * This data structure is a Trie
      */
-    class FileTree
+    class Filesystem
     {
     public:
         using Filler = std::move_only_function<void(const char* name)>;
 
-        FileTree(Connection& connection, data::Cache& cache, Opt<Seconds> ttl);
-        ~FileTree() = default;
+        Filesystem(Connection& connection, data::Cache& cache, Opt<Seconds> ttl);
+        ~Filesystem() = default;
 
-        FileTree(Node&& root)            = delete;
-        FileTree& operator=(Node&& root) = delete;
+        Filesystem(Node&& root)            = delete;
+        Filesystem& operator=(Node&& root) = delete;
 
-        FileTree(const Node& root)            = delete;
-        FileTree& operator=(const Node& root) = delete;
+        Filesystem(const Node& root)            = delete;
+        Filesystem& operator=(const Node& root) = delete;
 
         /**
          * @brief Get a node by the given path.
