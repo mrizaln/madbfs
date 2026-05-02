@@ -14,6 +14,7 @@ target_sources(
     src/cmd.cpp
     src/connection.cpp
     src/data/cache.cpp
+    src/file_handle_store.cpp
     src/filesystem.cpp
     src/madbfs.cpp
     src/node.cpp
