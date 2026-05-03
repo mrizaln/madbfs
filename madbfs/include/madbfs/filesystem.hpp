@@ -1,7 +1,8 @@
 #pragma once
 
-#include "madbfs/path.hpp"
+#include "madbfs/file_handle_store.hpp"
 #include "madbfs/node.hpp"
+#include "madbfs/path.hpp"
 
 #include <functional>
 
@@ -24,7 +25,22 @@ namespace madbfs
     public:
         using Filler = std::move_only_function<void(const char* name)>;
 
-        Filesystem(Connection& connection, data::Cache& cache, Opt<Seconds> ttl);
+        /**
+         * @brief Create a new filesystem.
+         *
+         * @param connection Reference to active conneciton to device.
+         * @param page_size Cache page size.
+         * @param max_pages Maximum number of pages to be saved on the cache.
+         * @param ttl Filesystem node's stat expiration time before re-fetching.
+         */
+        Filesystem(Connection& connection, usize page_size, usize max_pages, Opt<Seconds> ttl);
+
+        /**
+         * @brief Destroy filesystem.
+         *
+         * You must call `stop()` before destruction. Any asynchronous operation that is still happening may
+         * not be stopped correctly otherwise.
+         */
         ~Filesystem() = default;
 
         Filesystem(Node&& root)            = delete;
@@ -51,14 +67,14 @@ namespace madbfs
         AExpect<void>      unlink(path::Path path);
         AExpect<void>      rmdir(path::Path path);
         AExpect<void>      rename(path::Path from, path::Path to, u32 flags);
+        AExpect<void>      utimens(path::Path path, timespec atime, timespec mtime);
+        AExpect<void>      truncate(path::Path path, off_t size);
 
-        AExpect<void>  truncate(path::Path path, off_t size);
         AExpect<u64>   open(path::Path path, int flags);
-        AExpect<usize> read(path::Path path, u64 fd, Span<char> out, off_t offset);
-        AExpect<usize> write(path::Path path, u64 fd, Str in, off_t offset);
-        AExpect<void>  flush(path::Path path, u64 fd);
-        AExpect<void>  release(path::Path path, u64 fd);
-        AExpect<void>  utimens(path::Path path, timespec atime, timespec mtime);
+        AExpect<usize> read(u64 fd, Span<char> out, off_t offset);
+        AExpect<usize> write(u64 fd, Str in, off_t offset);
+        AExpect<void>  flush(u64 fd);
+        AExpect<void>  release(u64 fd);
 
         AExpect<usize> copy_file_range(
             path::Path in_path,
@@ -75,7 +91,14 @@ namespace madbfs
         Expect<void> symlink(path::Path path, Str target);
 
         /**
-         * @brief Set a new TTL for file tree nodes.
+         * @brief Shut down the filesystem and stop every async operation.
+         *
+         * Call this before destructor. This is needed to do proper flushing for the `Cache`.
+         */
+        Await<void> shutdown();
+
+        /**
+         * @brief Set a new TTL for file system nodes.
          *
          * @param ttl New TTl value (set to `std::nullopt` to disable)
          *
@@ -89,6 +112,15 @@ namespace madbfs
         usize expires_all();
 
         /**
+         * @brief Get cache structure.
+         */
+        template <typename Self>
+        auto&& cache(this Self&& self)
+        {
+            return std::forward_like<Self>(self.m_cache);
+        }
+
+        /**
          * @brief Get root node.
          */
         const Node& root() const { return m_root; }
@@ -99,6 +131,8 @@ namespace madbfs
          * If expiration is not enabled it will return `std::nullopt`.
          */
         Opt<Seconds> ttl() const { return m_ttl; }
+
+        FileHandleStore& handles() { return m_handles; }
 
     private:
         /**
@@ -154,11 +188,14 @@ namespace madbfs
             };
         }
 
-        Node             m_root;
-        Connection&      m_connection;
-        data::Cache&     m_cache;
+        Connection& m_connection;
+
+        Node            m_root;
+        data::Cache     m_cache;
+        FileHandleStore m_handles;
+
+        Opt<Seconds>     m_ttl              = std::nullopt;
         std::atomic<u64> m_fd_counter       = 0;
         bool             m_root_initialized = false;
-        Opt<Seconds>     m_ttl              = std::nullopt;
     };
 }

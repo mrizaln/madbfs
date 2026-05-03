@@ -9,10 +9,10 @@
 
 namespace madbfs
 {
-    Filesystem::Filesystem(Connection& connection, data::Cache& cache, Opt<Seconds> ttl)
-        : m_root{ "/", nullptr, {}, node::Directory{} }
-        , m_connection{ connection }
-        , m_cache{ cache }
+    Filesystem::Filesystem(Connection& connection, usize page_size, usize max_pages, Opt<Seconds> ttl)
+        : m_connection{ connection }
+        , m_root{ "/", nullptr, {}, node::Directory{} }
+        , m_cache{ m_connection, page_size, max_pages }
         , m_ttl{ ttl }
     {
     }
@@ -458,6 +458,15 @@ namespace madbfs
         co_return Expect<void>{};
     }
 
+    AExpect<void> Filesystem::utimens(path::Path path, timespec atime, timespec mtime)
+    {
+        auto node = co_await traverse_or_build(path);
+        if (not node) {
+            co_return Unexpect{ node.error() };
+        }
+        co_return co_await node->get().utimens(make_context(path), atime, mtime);
+    }
+
     AExpect<void> Filesystem::truncate(path::Path path, off_t size)
     {
         auto node = co_await traverse_or_build(path);
@@ -473,43 +482,45 @@ namespace madbfs
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().open(make_context(path), flags);
+        auto mode = static_cast<data::OpenMode>(O_ACCMODE & flags);
+        co_return (co_await node->get().open(make_context(path), mode)).transform([&] {
+            return m_handles.store(&node->get(), mode);
+        });
     }
 
-    AExpect<usize> Filesystem::read(path::Path path, u64 fd, Span<char> out, off_t offset)
+    AExpect<usize> Filesystem::read(u64 fd, Span<char> out, off_t offset)
     {
-        auto node = co_await traverse_or_build(path);
-        if (not node) {
-            co_return Unexpect{ node.error() };
+        if (auto node = m_handles.find(fd, data::OpenMode::Read); node) {
+            co_return co_await node->read(make_context({}), fd, out, offset);
         }
-        co_return co_await node->get().read(make_context(path), fd, out, offset);
+        co_return Unexpect{ Errc::bad_file_descriptor };
     }
 
-    AExpect<usize> Filesystem::write(path::Path path, u64 fd, Str in, off_t offset)
+    AExpect<usize> Filesystem::write(u64 fd, Str in, off_t offset)
     {
-        auto node = co_await traverse_or_build(path);
-        if (not node) {
-            co_return Unexpect{ node.error() };
+        if (auto node = m_handles.find(fd, data::OpenMode::Write); node) {
+            co_return co_await node->write(make_context({}), fd, in, offset);
         }
-        co_return co_await node->get().write(make_context(path), fd, in, offset);
+        co_return Unexpect{ Errc::bad_file_descriptor };
     }
 
-    AExpect<void> Filesystem::flush(path::Path path, u64 fd)
+    AExpect<void> Filesystem::flush(u64 fd)
     {
-        auto node = co_await traverse_or_build(path);
-        if (not node) {
-            co_return Unexpect{ node.error() };
+        if (auto [node, _] = m_handles.find(fd); node) {
+            co_return co_await node->flush(make_context({}));
         }
-        co_return co_await node->get().flush(make_context(path), fd);
+        co_return Unexpect{ Errc::bad_file_descriptor };
     }
 
-    AExpect<void> Filesystem::release(path::Path path, u64 fd)
+    AExpect<void> Filesystem::release(u64 fd)
     {
-        auto node = co_await traverse_or_build(path);
-        if (not node) {
-            co_return Unexpect{ node.error() };
+        if (auto [node, mode] = m_handles.release(fd); node) {
+            co_return (co_await node->release(make_context({}), mode)).transform_error([&](Errc err) {
+                m_handles.store(node, mode);    // if fail, do I need to store it again?
+                return err;
+            });
         }
-        co_return co_await node->get().release(make_context(path), fd);
+        co_return Unexpect{ Errc::bad_file_descriptor };
     }
 
     AExpect<usize> Filesystem::copy_file_range(
@@ -523,8 +534,8 @@ namespace madbfs
     )
     {
         // just in-case they have dirty pages
-        std::ignore = co_await flush(in_path, in_fd);
-        std::ignore = co_await flush(out_path, out_fd);
+        std::ignore = co_await flush(in_fd);
+        std::ignore = co_await flush(out_fd);
 
         auto node = traverse(out_path);    // path must exist
         if (not node) {
@@ -542,20 +553,16 @@ namespace madbfs
         });
     }
 
-    AExpect<void> Filesystem::utimens(path::Path path, timespec atime, timespec mtime)
-    {
-        auto node = co_await traverse_or_build(path);
-        if (not node) {
-            co_return Unexpect{ node.error() };
-        }
-        co_return co_await node->get().utimens(make_context(path), atime, mtime);
-    }
-
     Expect<void> Filesystem::symlink(path::Path path, Str target)
     {
         return traverse(path.parent_path())
             .and_then(proj(&Node::symlink, path.filename(), target))
             .transform(sink_void);
+    }
+
+    Await<void> Filesystem::shutdown()
+    {
+        co_await m_cache.shutdown();
     }
 
     Opt<Seconds> Filesystem::set_ttl(Opt<Seconds> ttl)
@@ -573,6 +580,7 @@ namespace madbfs
 
         return old;
     }
+
     usize Filesystem::expires_all()
     {
         auto count = 0uz;
