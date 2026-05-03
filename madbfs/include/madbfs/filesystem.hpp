@@ -183,7 +183,6 @@ namespace madbfs
             return {
                 .connection = m_connection,
                 .cache      = m_cache,
-                .fd_counter = m_fd_counter,
                 .path       = path,
             };
         }
@@ -194,8 +193,7 @@ namespace madbfs
         Cache           m_cache;
         FileHandleStore m_handles;
 
-        Opt<Seconds>     m_ttl              = std::nullopt;
-        std::atomic<u64> m_fd_counter       = 0;
-        bool             m_root_initialized = false;
+        Opt<Seconds> m_ttl              = std::nullopt;
+        bool         m_root_initialized = false;
     };
 }

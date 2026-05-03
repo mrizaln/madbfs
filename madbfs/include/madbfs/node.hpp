@@ -168,7 +168,6 @@ namespace madbfs
         {
             Connection&       connection;
             Cache&            cache;
-            std::atomic<u64>& fd_counter;
             const path::Path& path;    // path for connection
         };
 
