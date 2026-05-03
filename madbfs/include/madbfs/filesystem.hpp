@@ -58,8 +58,8 @@ namespace madbfs
 
         // fuse oprations
         // --------------
-        AExpect<void>            readdir(path::Path path, Filler filler);
-        AExpect<data::NamedStat> getattr(path::Path path);
+        AExpect<void>      readdir(path::Path path, Filler filler);
+        AExpect<NamedStat> getattr(path::Path path);
 
         AExpect<Str>       readlink(path::Path path);
         AExpect<Ref<Node>> mknod(path::Path path, mode_t mode, dev_t dev);
@@ -191,7 +191,7 @@ namespace madbfs
         Connection& m_connection;
 
         Node            m_root;
-        data::Cache     m_cache;
+        Cache           m_cache;
         FileHandleStore m_handles;
 
         Opt<Seconds>     m_ttl              = std::nullopt;

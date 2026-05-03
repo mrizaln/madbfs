@@ -195,7 +195,7 @@ namespace madbfs
         auto generator = [](Vec<u8> buf, Vec<Pair<Str, rpc::resp::Stat>> entries) -> Gen<ParsedStat> {
             for (const auto& [name, stat] : entries) {
                 co_yield ParsedStat{
-                    .stat = data::Stat {
+                    .stat = Stat{
                         .links = stat.links,
                         .size  = stat.size,
                         .mtime = stat.mtime,
@@ -213,12 +213,12 @@ namespace madbfs
         co_return generator(std::move(buf), std::move(resp).value().entries);
     }
 
-    AExpect<data::Stat> Connection::stat(path::Path path)
+    AExpect<Stat> Connection::stat(path::Path path)
     {
         auto req = rpc::req::Stat{ .path = path };
 
         co_return (co_await send_req(req)).transform([](rpc::resp::Stat resp) {
-            return data::Stat{
+            return Stat{
                 .links = resp.links,
                 .size  = resp.size,
                 .mtime = resp.mtime,
@@ -302,7 +302,7 @@ namespace madbfs
         co_return (co_await send_req(req)).transform(proj(&rpc::resp::CopyFileRange::size));
     }
 
-    AExpect<u64> Connection::open(path::Path path, data::OpenMode mode)
+    AExpect<u64> Connection::open(path::Path path, OpenMode mode)
     {
         auto req = rpc::req::Open{ .path = path, .mode = static_cast<rpc::OpenMode>(mode) };
         co_return (co_await send_req(req)).transform(proj(&rpc::resp::Open::fd));

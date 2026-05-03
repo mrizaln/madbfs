@@ -1,6 +1,6 @@
 #pragma once
 
-#include "madbfs/data/stat.hpp"
+#include "madbfs/stat.hpp"
 
 namespace madbfs
 {
@@ -11,8 +11,8 @@ namespace madbfs
 {
     struct FileHandle
     {
-        Node*          node;
-        data::OpenMode mode;
+        Node*    node;
+        OpenMode mode;
     };
 
     class FileHandleStore
@@ -39,7 +39,7 @@ namespace madbfs
          *
          * The complexity of the operation is constant.
          */
-        Node* find(u64 fd, data::OpenMode mode);
+        Node* find(u64 fd, OpenMode mode);
 
         /**
          * @brief Store `Node` pointer into file handle store.
@@ -51,7 +51,7 @@ namespace madbfs
          *
          * The complexity of the opration is linear (depends on number of handles before finding a hole).
          */
-        u64 store(Node* node, data::OpenMode mode);
+        u64 store(Node* node, OpenMode mode);
 
         /**
          * @brief Release the associated node of file descriptor from the file handle store.
@@ -70,7 +70,7 @@ namespace madbfs
         usize size() const { return m_nodes.size(); }
 
     private:
-        std::vector<Node*>          m_nodes;
-        std::vector<data::OpenMode> m_modes;
+        std::vector<Node*>    m_nodes;
+        std::vector<OpenMode> m_modes;
     };
 }

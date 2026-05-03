@@ -1,8 +1,8 @@
 #pragma once
 
-#include "madbfs/data/cache.hpp"
-#include "madbfs/data/stat.hpp"
+#include "madbfs/cache.hpp"
 #include "madbfs/path.hpp"
+#include "madbfs/stat.hpp"
 
 #include <atomic>
 #include <functional>
@@ -167,15 +167,15 @@ namespace madbfs
         struct Context
         {
             Connection&       connection;
-            data::Cache&      cache;
+            Cache&            cache;
             std::atomic<u64>& fd_counter;
             const path::Path& path;    // path for connection
         };
 
-        Node(Str name, Node* parent, data::Stat stat, File value)
+        Node(Str name, Node* parent, Stat stat, File value)
             : m_parent{ parent }
             , m_name{ name }
-            , m_id{ data::Id::incr() }
+            , m_id{ Id::incr() }
             , m_stat{ std::move(stat) }
             , m_value{ std::move(value) }
         {
@@ -187,17 +187,17 @@ namespace madbfs
         Node(const Node&)            = delete;
         Node& operator=(const Node&) = delete;
 
-        data::Id id() const { return m_id; };
+        Id id() const { return m_id; };
 
         void set_name(Str name) { m_name = name; }
         void set_parent(Node* parent) { m_parent = parent; }
-        void set_stat(data::Stat stat) { m_stat = stat; }
+        void set_stat(Stat stat) { m_stat = stat; }
 
         Str         name() const { return m_name; }
         Node*       parent() const { return m_parent; }
         const File& value() const { return m_value; }
 
-        Expect<Ref<const data::Stat>> stat() const;
+        Expect<Ref<const Stat>> stat() const;
 
         /**
          * @brief Set expiration from current time + duration.
@@ -290,7 +290,7 @@ namespace madbfs
          * operating on the file on the device itself, this function just modify the nodes. This function
          * assume that the build process won't overwrite any node.
          */
-        Expect<Ref<Node>> build(Str name, data::Stat stat, File file);
+        Expect<Ref<Node>> build(Str name, Stat stat, File file);
 
         /**
          * @brief Extract a child node.
@@ -382,7 +382,7 @@ namespace madbfs
          * @param context Context needed to communicate with device and local.
          * @param mode file open mode.
          */
-        AExpect<void> open(Context context, data::OpenMode mode);
+        AExpect<void> open(Context context, OpenMode mode);
 
         /**
          * @brief Read data from file.
@@ -422,7 +422,7 @@ namespace madbfs
          *
          * @param context Context needed to communicate with device and local.
          */
-        AExpect<void> release(Context context, data::OpenMode mode);
+        AExpect<void> release(Context context, OpenMode mode);
 
         /**
          * @brief Update the timestamps of a file.
@@ -480,12 +480,12 @@ namespace madbfs
             return as<node::Regular>();
         }
 
-        Node*      m_parent     = nullptr;
-        String     m_name       = {};
-        data::Id   m_id         = {};
-        data::Stat m_stat       = {};
-        Timepoint  m_expiration = Timepoint::max();
-        File       m_value;
+        Node*     m_parent     = nullptr;
+        String    m_name       = {};
+        Id        m_id         = {};
+        Stat      m_stat       = {};
+        Timepoint m_expiration = Timepoint::max();
+        File      m_value;
     };
 }
 

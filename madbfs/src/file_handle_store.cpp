@@ -9,19 +9,19 @@ namespace madbfs
         return fd < m_nodes.size() ? FileHandle{ m_nodes[fd], m_modes[fd] } : FileHandle{};
     }
 
-    Node* FileHandleStore::find(u64 fd, data::OpenMode mode)
+    Node* FileHandleStore::find(u64 fd, OpenMode mode)
     {
         if (fd >= m_nodes.size()) {
             return nullptr;
         }
 
-        auto ok   = m_modes[fd] == mode or m_modes[fd] == data::OpenMode::ReadWrite;
+        auto ok   = m_modes[fd] == mode or m_modes[fd] == OpenMode::ReadWrite;
         auto node = m_nodes[fd];
 
         return node and ok ? node : nullptr;
     }
 
-    u64 FileHandleStore::store(Node* node, data::OpenMode mode)
+    u64 FileHandleStore::store(Node* node, OpenMode mode)
     {
         if (auto found = sr::find(m_nodes, nullptr); found != m_nodes.end()) {
             auto dist     = static_cast<usize>(found - m_nodes.begin());

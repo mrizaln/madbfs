@@ -21,7 +21,7 @@ namespace madbfs
     {
         const auto name = path.filename();
 
-        auto build_then_expire = [&](Str name, data::Stat stat, File file) {
+        auto build_then_expire = [&](Str name, Stat stat, File file) {
             return parent    //
                 .build(name, std::move(stat), std::move(file))
                 .transform([&](Node& node) {
@@ -54,7 +54,7 @@ namespace madbfs
     {
         const auto name = path.filename();
 
-        auto build_then_expire = [&](Str name, data::Stat stat, File file) {
+        auto build_then_expire = [&](Str name, Stat stat, File file) {
             return parent    //
                 .build(name, std::move(stat), std::move(file))
                 .transform([&](Node& node) {
@@ -343,11 +343,11 @@ namespace madbfs
         co_return Expect<void>{};
     }
 
-    AExpect<data::NamedStat> Filesystem::getattr(path::Path path)
+    AExpect<NamedStat> Filesystem::getattr(path::Path path)
     {
         co_return (co_await traverse_or_build(path)).and_then([](Node& node) {
-            return node.stat().transform([id = node.id()](const data::Stat& stat) {
-                return data::NamedStat{ .id = id, .stat = stat };
+            return node.stat().transform([id = node.id()](const Stat& stat) {
+                return NamedStat{ .id = id, .stat = stat };
             });
         });
     }
@@ -482,7 +482,7 @@ namespace madbfs
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        auto mode = static_cast<data::OpenMode>(O_ACCMODE & flags);
+        auto mode = static_cast<OpenMode>(O_ACCMODE & flags);
         co_return (co_await node->get().open(make_context(path), mode)).transform([&] {
             return m_handles.store(&node->get(), mode);
         });
@@ -490,7 +490,7 @@ namespace madbfs
 
     AExpect<usize> Filesystem::read(u64 fd, Span<char> out, off_t offset)
     {
-        if (auto node = m_handles.find(fd, data::OpenMode::Read); node) {
+        if (auto node = m_handles.find(fd, OpenMode::Read); node) {
             co_return co_await node->read(make_context({}), fd, out, offset);
         }
         co_return Unexpect{ Errc::bad_file_descriptor };
@@ -498,7 +498,7 @@ namespace madbfs
 
     AExpect<usize> Filesystem::write(u64 fd, Str in, off_t offset)
     {
-        if (auto node = m_handles.find(fd, data::OpenMode::Write); node) {
+        if (auto node = m_handles.find(fd, OpenMode::Write); node) {
             co_return co_await node->write(make_context({}), fd, in, offset);
         }
         co_return Unexpect{ Errc::bad_file_descriptor };
@@ -547,7 +547,7 @@ namespace madbfs
             co_return Unexpect{ copied.error() };
         }
 
-        co_return (co_await m_connection.stat(out_path)).and_then([&](data::Stat new_stat) {
+        co_return (co_await m_connection.stat(out_path)).and_then([&](Stat new_stat) {
             node->get().set_stat(new_stat);
             return copied;
         });

@@ -1,4 +1,4 @@
-#include "madbfs/data/cache.hpp"
+#include "madbfs/cache.hpp"
 
 #include "madbfs/connection.hpp"
 
@@ -7,14 +7,14 @@
 
 namespace
 {
-    auto scoped_increment(madbfs::i64& counter)
+    madbfs::util::Deferred auto scoped_increment(madbfs::i64& counter)
     {
         ++counter;
         return madbfs::util::defer([&] { --counter; });
     }
 }
 
-namespace madbfs::data
+namespace madbfs
 {
     Page::Page(PageKey key, Uniq<char[]> buf, u32 size, u32 page_size)
         : m_key{ key }
@@ -73,7 +73,7 @@ namespace madbfs::data
     }
 }
 
-namespace madbfs::data
+namespace madbfs
 {
     Cache::Cache(Connection& connection, usize page_size, usize max_pages)
         : m_connection{ connection }
@@ -82,7 +82,7 @@ namespace madbfs::data
     {
     }
 
-    AExpect<void> Cache::hint_open(Id id, path::Path path, data::OpenMode mode)
+    AExpect<void> Cache::hint_open(Id id, path::Path path, OpenMode mode)
     {
         // only adding new entry, actual open will be performed on read/write
         log_d(__func__, "[id={}|mode={}] {:?} ", id.inner(), std::to_underlying(mode), path);
@@ -96,8 +96,8 @@ namespace madbfs::data
         const auto prev_reader = entry.reader;
         const auto prev_writer = entry.writer;
 
-        entry.reader += mode == data::OpenMode::Read or mode == data::OpenMode::ReadWrite;
-        entry.writer += mode == data::OpenMode::Write or mode == data::OpenMode::ReadWrite;
+        entry.reader += mode == OpenMode::Read or mode == OpenMode::ReadWrite;
+        entry.writer += mode == OpenMode::Write or mode == OpenMode::ReadWrite;
 
         // see note on clean_stale_fds() function body regarding m_stale_fds
 
@@ -113,7 +113,7 @@ namespace madbfs::data
         co_return Expect<void>{};
     }
 
-    AExpect<void> Cache::hint_close(Id id, data::OpenMode mode)
+    AExpect<void> Cache::hint_close(Id id, OpenMode mode)
     {
         // only mark id's fd as stale on empty reader/writer, actual close performed on clean_stale_fds()
         log_d(__func__, "[id={}|mode={}]", id.inner(), std::to_underlying(mode));
@@ -126,8 +126,8 @@ namespace madbfs::data
 
         auto& entry = may_entry->get();
 
-        auto reader_decr = mode == data::OpenMode::Read or mode == data::OpenMode::ReadWrite;
-        auto writer_decr = mode == data::OpenMode::Write or mode == data::OpenMode::ReadWrite;
+        auto reader_decr = mode == OpenMode::Read or mode == OpenMode::ReadWrite;
+        auto writer_decr = mode == OpenMode::Write or mode == OpenMode::ReadWrite;
 
         if ((reader_decr and entry.reader == 0) or (writer_decr and entry.writer == 0)) {
             log_e(__func__, "[{}] closed too many times", id.inner());
@@ -223,7 +223,7 @@ namespace madbfs::data
         log_d(__func__, "flush: start [id={}|idx={}]", id.inner(), pages | sv::keys);
 
         if (auto& e = entry->get(); not e.write_fd) {
-            auto fd = co_await m_connection.open(e.path, data::OpenMode::Write);
+            auto fd = co_await m_connection.open(e.path, OpenMode::Write);
             if (not fd) {
                 co_return Unexpect{ fd.error() };
             }
@@ -521,7 +521,7 @@ namespace madbfs::data
                 auto write_incr_lock = scoped_increment(entry->get().write_inflight);
 
                 if (auto& e = entry->get(); not e.write_fd) {
-                    auto fd = co_await m_connection.open(e.path, data::OpenMode::Write);
+                    auto fd = co_await m_connection.open(e.path, OpenMode::Write);
                     if (not fd) {
                         log_c(__func__, "force push [id={}|idx={}] can't open file", id.inner(), idx);
                         continue;
@@ -568,7 +568,7 @@ namespace madbfs::data
         if (page_entry == entry.pages.end()) {
             // cache miss
             if (not entry.read_fd) {
-                auto fd = co_await m_connection.open(entry.path, data::OpenMode::Read);
+                auto fd = co_await m_connection.open(entry.path, OpenMode::Read);
                 if (not fd) {
                     co_return Unexpect{ fd.error() };
                 }
@@ -711,6 +711,9 @@ namespace madbfs::data
                 co_return Unexpect{ err };
             }
         }
+
+        // TODO: maybe add queue as well like m_read_queue to prevent data being written by other operations
+        // before flush finish?
 
         auto written = 0uz;
         while (written < page.size()) {

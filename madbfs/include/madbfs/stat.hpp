@@ -11,7 +11,7 @@ namespace madbfs
     class Node;
 }
 
-namespace madbfs::data
+namespace madbfs
 {
     /**
      * @class CacheId
@@ -67,8 +67,8 @@ namespace madbfs::data
      */
     struct NamedStat
     {
-        data::Id   id;
-        data::Stat stat;
+        Id   id;
+        Stat stat;
     };
 
     /**

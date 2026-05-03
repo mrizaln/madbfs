@@ -68,7 +68,7 @@ namespace madbfs::node
 
 namespace madbfs
 {
-    Expect<Ref<const data::Stat>> Node::stat() const
+    Expect<Ref<const Stat>> Node::stat() const
     {
         if (auto err = as<node::Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
@@ -174,7 +174,7 @@ namespace madbfs
             .transform([&](node::Directory& dir) { return std::ref(dir.children()); });
     }
 
-    Expect<Ref<Node>> Node::build(Str name, data::Stat stat, File file)
+    Expect<Ref<Node>> Node::build(Str name, Stat stat, File file)
     {
         if (auto err = as<node::Error>(); err.has_value()) {
             return Unexpect{ err->get().error };
@@ -225,7 +225,7 @@ namespace madbfs
 
             // dummy stat for symlink based on
             // lrw-r--r--  root root 21 2024-10-05 09:19:29.000000000 +0700 /sdcard -> /storage/self/primary
-            auto stat = data::Stat{
+            auto stat = Stat{
                 .links = 1,
                 .size  = 21,
                 .mtime = time,
@@ -268,7 +268,7 @@ namespace madbfs
         }
 
         co_return (co_await context.connection.stat(context.path))
-            .and_then([&](data::Stat stat) {
+            .and_then([&](Stat stat) {
                 auto node = std::make_unique<Node>(name, this, std::move(stat), node::Regular{});
                 return dir.insert(std::move(node), overwrite);
             })
@@ -303,7 +303,7 @@ namespace madbfs
         }
 
         co_return (co_await context.connection.stat(context.path))
-            .and_then([&](data::Stat stat) {
+            .and_then([&](Stat stat) {
                 auto node = std::make_unique<Node>(name, this, std::move(stat), node::Directory{});
                 return dir.insert(std::move(node), overwrite);
             })
@@ -396,7 +396,7 @@ namespace madbfs
         co_return Expect<void>{};
     }
 
-    AExpect<void> Node::open(Context context, data::OpenMode mode)
+    AExpect<void> Node::open(Context context, OpenMode mode)
     {
         if (auto file = regular_file_prelude(); not file) {
             co_return Unexpect{ file.error() };
@@ -451,7 +451,7 @@ namespace madbfs
         });
     }
 
-    AExpect<void> Node::release(Context context, data::OpenMode mode)
+    AExpect<void> Node::release(Context context, OpenMode mode)
     {
         auto file = regular_file_prelude();
         if (not file) {
@@ -480,7 +480,7 @@ namespace madbfs
         if (auto res = co_await context.connection.utimens(context.path, atime, mtime); not res) {
             co_return Unexpect{ res.error() };
         }
-        co_return (co_await context.connection.stat(context.path)).transform([&](data::Stat stat) {
+        co_return (co_await context.connection.stat(context.path)).transform([&](Stat stat) {
             m_stat = std::move(stat);
         });
     }

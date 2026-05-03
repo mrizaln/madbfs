@@ -11,9 +11,9 @@ target_sources(
   PRIVATE
     src/adb.cpp
     src/args.cpp
+    src/cache.cpp
     src/cmd.cpp
     src/connection.cpp
-    src/data/cache.cpp
     src/file_handle_store.cpp
     src/filesystem.cpp
     src/madbfs.cpp
