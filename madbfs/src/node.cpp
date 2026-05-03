@@ -4,33 +4,6 @@
 
 namespace madbfs::node
 {
-    Regular::Mode Regular::open(u64 fd, int flags)
-    {
-        assert(not is_open(fd));
-        auto mode = static_cast<Mode>(O_ACCMODE & flags);
-        m_open_fds.emplace_back(fd, mode);
-        return mode;
-    }
-
-    Opt<Regular::Mode> Regular::close(u64 fd)
-    {
-        if (auto entry = sr::find(m_open_fds, fd, &Entry::fd); entry != m_open_fds.end()) {
-            return m_open_fds.erase(entry)->mode;
-        }
-        return std::nullopt;
-    }
-
-    bool Regular::check(u64 fd, Mode mode) const
-    {
-        if (auto entry = sr::find(m_open_fds, fd, &Entry::fd); entry != m_open_fds.end()) {
-            return entry->mode == Mode::ReadWrite or entry->mode == mode;
-        }
-        return false;
-    }
-}
-
-namespace madbfs::node
-{
     u64 Directory::NodeHash::operator()(const Uniq<Node>& node) const
     {
         return (*this)(node->name());
@@ -115,7 +88,7 @@ namespace madbfs
     bool Node::expired() const
     {
         // prevent expiration if the file is dirty
-        if (auto file = as<node::Regular>(); file and file->get().is_dirty()) {
+        if (auto file = as<node::Regular>(); file and file->get().dirty) {
             return false;
         }
         return SteadyClock::now() > m_expiration;
@@ -423,37 +396,20 @@ namespace madbfs
         co_return Expect<void>{};
     }
 
-    AExpect<u64> Node::open(Context context, int flags)
+    AExpect<void> Node::open(Context context, data::OpenMode mode)
     {
-        auto may_file = regular_file_prelude();
-        if (not may_file) {
-            co_return Unexpect{ may_file.error() };
+        if (auto file = regular_file_prelude(); not file) {
+            co_return Unexpect{ file.error() };
         }
-        auto& file = may_file->get();
-
-        auto fd   = context.fd_counter.fetch_add(1, std::memory_order::relaxed) + 1;
-        auto mode = file.open(fd, flags);
 
         // send hint to cache to prepare a real fd that can be used for further operations
-        auto res = co_await context.cache.hint_open(id(), context.path, mode);
-        if (not res) {
-            file.close(fd);
-            co_return Unexpect{ res.error() };
-        }
-
-        co_return fd;
+        co_return co_await context.cache.hint_open(id(), context.path, mode);
     }
 
     AExpect<usize> Node::read(Context context, u64 fd, Span<char> out, off_t offset)
     {
-        auto may_file = regular_file_prelude();
-        if (not may_file) {
-            co_return Unexpect{ may_file.error() };
-        }
-        auto& file = may_file->get();
-
-        if (not file.check(fd, data::OpenMode::Read)) {
-            co_return Unexpect{ Errc::bad_file_descriptor };
+        if (auto file = regular_file_prelude(); not file) {
+            co_return Unexpect{ file.error() };
         }
 
         co_return (co_await context.cache.read(id(), out, offset)).transform([&](usize ret) {
@@ -464,17 +420,12 @@ namespace madbfs
 
     AExpect<usize> Node::write(Context context, u64 fd, Str in, off_t offset)
     {
-        auto may_file = regular_file_prelude();
-        if (not may_file) {
-            co_return Unexpect{ may_file.error() };
-        }
-        auto& file = may_file->get();
-
-        if (not file.check(fd, data::OpenMode::Write)) {
-            co_return Unexpect{ Errc::bad_file_descriptor };
+        if (auto file = regular_file_prelude(); not file) {
+            co_return Unexpect{ file.error() };
+        } else {
+            file->get().dirty = true;
         }
 
-        file.set_dirty(true);
         co_return (co_await context.cache.write(id(), in, offset)).transform([&](usize ret) {
             // the file size is defined as offset + size from last write if it's higher than previous size
             // NOTE: this may be different for sparse files but I don't think Android has it
@@ -485,51 +436,39 @@ namespace madbfs
         });
     }
 
-    AExpect<void> Node::flush(Context context, u64 fd)
+    AExpect<void> Node::flush(Context context)
     {
-        auto may_file = regular_file_prelude();
-        if (not may_file) {
-            co_return Unexpect{ may_file.error() };
-        }
-        auto& file = may_file->get();
-
-        if (not file.is_open(fd)) {
-            co_return Unexpect{ Errc::bad_file_descriptor };
-        }
-        if (not file.is_dirty()) {
+        auto file = regular_file_prelude();
+        if (not file) {
+            co_return Unexpect{ file.error() };
+        } else if (not file->get().dirty) {
             co_return Expect<void>{};    // no write, do nothing
         }
 
         co_return (co_await context.cache.flush(id())).transform([&] {
             refresh_stat(timespec_omit, timespec_now);
-            file.set_dirty(false);
+            file->get().dirty = false;
         });
     }
 
-    AExpect<void> Node::release(Context context, u64 fd)
+    AExpect<void> Node::release(Context context, data::OpenMode mode)
     {
-        auto may_file = regular_file_prelude();
-        if (not may_file) {
-            co_return Unexpect{ may_file.error() };
-        }
-        auto& file = may_file->get();
-
-        auto mode = file.close(fd);
-        if (not mode) {
-            co_return Unexpect{ Errc::bad_file_descriptor };
+        auto file = regular_file_prelude();
+        if (not file) {
+            co_return Unexpect{ file.error() };
         }
 
-        if (file.is_dirty()) {
+        if (file->get().dirty) {
             if (auto res = co_await context.cache.flush(id()); not res) {
                 co_return Unexpect{ res.error() };
             }
 
             refresh_stat(timespec_omit, timespec_now);
-            file.set_dirty(false);
+            file->get().dirty = false;
         }
 
         // send hint to cache to close its associated fd for this node if exist
-        if (auto res = co_await context.cache.hint_close(id(), *mode); not res) {
+        if (auto res = co_await context.cache.hint_close(id(), mode); not res) {
             co_return Unexpect{ res.error() };
         }
 

@@ -4,7 +4,6 @@
 #include "madbfs/data/stat.hpp"
 #include "madbfs/path.hpp"
 
-#include <algorithm>
 #include <atomic>
 #include <functional>
 #include <unordered_set>
@@ -17,7 +16,7 @@ namespace madbfs
 
 namespace madbfs::node
 {
-    class Regular;
+    struct Regular;
     class Directory;
     struct Link;
     struct Other;
@@ -28,58 +27,9 @@ namespace madbfs::node
      *
      * @brief Represent a regular file.
      */
-    class Regular
+    struct Regular
     {
-    public:
-        friend Node;
-
-        using Mode = data::OpenMode;
-
-        struct Entry
-        {
-            u64  fd;
-            Mode mode;
-        };
-
-        Regular() = default;
-
-        /**
-         * @brief Insert `fd` into list of open files.
-         *
-         * @param fd File descriptor.
-         * @param flags Open flags.
-         *
-         * @return What the file current access mode after opening.
-         */
-        Mode open(u64 fd, int flags);
-
-        /**
-         * @brief Remove `fd` from list of open files.
-         *
-         * @param fd File descriptor.
-         *
-         * @return True if `fd` actually removed, false if fd can't be found.
-         */
-        Opt<Mode> close(u64 fd);
-
-        /**
-         * @brief Check the mode of the file.
-         *
-         * @param fd File descriptor.
-         * @param mode Mode to be checked.
-         *
-         * @return The function checks whether the fd can be operated on the least possible mode.
-         */
-        bool check(u64 fd, Mode mode) const;
-
-        bool is_open(u64 fd) const { return sr::find(m_open_fds, fd, &Entry::fd) != m_open_fds.end(); }
-        bool has_open_fds() const { return not m_open_fds.empty(); }
-        bool is_dirty() const { return m_dirty; }
-        void set_dirty(bool val) { m_dirty = val; }
-
-    private:
-        Vec<Entry> m_open_fds = {};
-        bool       m_dirty    = false;
+        bool dirty = false;
     };
 
     /**
@@ -430,11 +380,9 @@ namespace madbfs
          * @brief Open file.
          *
          * @param context Context needed to communicate with device and local.
-         * @param flags Open mode flags.
-         *
-         * @return File descriptor.
+         * @param mode file open mode.
          */
-        AExpect<u64> open(Context context, int flags);
+        AExpect<void> open(Context context, data::OpenMode mode);
 
         /**
          * @brief Read data from file.
@@ -464,18 +412,17 @@ namespace madbfs
          * @brief Flush buffer of the file.
          *
          * @param context Context needed to communicate with device and local.
-         * @param fd File descriptor.
          *
          * Basically forcing writing to the file itself instead of to the buffer in memory.
          */
-        AExpect<void> flush(Context context, u64 fd);
+        AExpect<void> flush(Context context);
 
         /**
          * @brief Release file.
          *
          * @param context Context needed to communicate with device and local.
          */
-        AExpect<void> release(Context context, u64 fd);
+        AExpect<void> release(Context context, data::OpenMode mode);
 
         /**
          * @brief Update the timestamps of a file.
