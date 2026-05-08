@@ -15,6 +15,15 @@ namespace madbfs
         OpenMode mode;
     };
 
+    /**
+     * @class FileHandleStore
+     *
+     * @brief Storage for open file handles.
+     *
+     * The lifetime of the nodes pointed to by this store should be at the very least from `store()` to
+     * `release()`. If you can't guarantee that the node pointed to can't live til `release()`, `erase()`
+     * them.
+     */
     class FileHandleStore
     {
     public:
@@ -63,6 +72,17 @@ namespace madbfs
          * The complexity of the operation is constant.
          */
         FileHandle release(u64 fd);
+
+        /**
+         * @brief Erase any pointer to node.
+         *
+         * @param node The pointer to the node.
+         *
+         * @return Number of file handle erased.
+         *
+         * Iterate the store and erase any handles that has this node pointed by them.
+         */
+        usize erase(Node* node);
 
         FRange auto iter() { return sv::zip(m_nodes, m_modes); }
         FRange auto iter() const { return sv::zip(std::as_const(m_nodes), std::as_const(m_modes)); }

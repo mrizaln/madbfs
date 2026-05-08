@@ -158,7 +158,7 @@ namespace madbfs
         if (not new_stat) {
             auto err = new_stat.error();
             if (err != Errc::not_connected and err != Errc::timed_out) {
-                node.mutate(node::Error{ err });
+                co_await mutate_and_invalidate(node, node::Error{ err });
                 node.expires_after(m_ttl.value_or(Seconds::max()));
             }
             co_return Unexpect{ err };
@@ -172,36 +172,36 @@ namespace madbfs
         }
 
         log_w(__func__, "  changed: {:?}", path);
-        co_await m_cache.invalidate_one(node.id(), false);    // maybe conditionally flush?
 
         switch (new_stat->mode & S_IFMT) {
         case S_IFREG: {
-            // TODO: if the file type is unchanged but the data is changed, we need to choose whether to
-            // prioritize data from the host or the remote. maybe add a policy on the VFS itself so the user
-            // can choose what suits them best.
             node.set_stat(*new_stat);
-            node.mutate(node::Regular{});
+            co_await mutate_and_invalidate(node, node::Regular{});    // invalidate currently held data
             node.expires_after(m_ttl.value_or(Seconds::max()));
         } break;
         case S_IFDIR: {
-            if (S_ISDIR(old_stat->get().mode)) {
+            if (S_ISDIR(old_stat->get().mode)) {    // previously directory
                 node.set_stat(*new_stat);
-                node.set_synced(false);
+                node.set_synced(false);    // don't mutate, force rescan
+                node.expires_after(m_ttl.value_or(Seconds::max()));
+            } else {
+                node.set_stat(*new_stat);
+                co_await mutate_and_invalidate(node, node::Directory{});    // not directory, becomes one
                 node.expires_after(m_ttl.value_or(Seconds::max()));
             }
         } break;
         case S_IFLNK: {
             if (auto target = co_await m_connection.readlink(path); target) {
                 node.set_stat(*new_stat);
-                node.mutate(node::Link{ std::move(target).value() });
+                co_await mutate_and_invalidate(node, node::Link{ std::move(target).value() });
             } else {
-                node.mutate(node::Error{ target.error() });
+                co_await mutate_and_invalidate(node, node::Error{ target.error() });
             }
             node.expires_after(m_ttl.value_or(Seconds::max()));
         } break;
         default: {
             node.set_stat(*new_stat);
-            node.mutate(node::Other{});
+            co_await mutate_and_invalidate(node, node::Other{});
             node.expires_after(m_ttl.value_or(Seconds::max()));
         } break;
         }
@@ -209,9 +209,9 @@ namespace madbfs
         co_return Expect<void>{};
     }
 
-    void Filesystem::walk(std::function<void(Node&)> func)
+    void Filesystem::walk(Node& start, std::function<void(Node&)> func)
     {
-        auto stack = Vec<Node*>{ &m_root };
+        auto stack = Vec<Node*>{ &start };
 
         while (not stack.empty()) {
             auto node = stack.back();
@@ -224,6 +224,25 @@ namespace madbfs
                     stack.push_back(node.get());
                 }
             }
+        }
+    }
+
+    Await<void> Filesystem::mutate_and_invalidate(Node& node, File file)
+    {
+        auto old = node.mutate(std::move(file));
+
+        if (auto dir = std::get_if<node::Directory>(&old)) {
+            auto nodes = std::vector<Node*>{};
+            for (const auto& node : dir->children()) {
+                walk(*node, [&](Node& n) { m_handles.erase(&n), nodes.push_back(&n); });
+            }
+            for (auto node : nodes) {
+                co_await m_cache.invalidate_one(node->id(), false);    // maybe flush? child might not change
+            }
+            m_handles.erase(&node);
+        } else if (std::get_if<node::Regular>(&old)) {
+            co_await m_cache.invalidate_one(node.id(), false);    // no flush needed since the file changed
+            m_handles.erase(&node);
         }
     }
 
@@ -302,17 +321,17 @@ namespace madbfs
                     if (auto child_stat = child.stat(); not child_stat) {    // Error node
                         log_d(__func__, "[{:?}]   changed: {:?}", parent->name(), name);
 
+                        auto file = co_await build_file(name, stat.mode);
                         child.set_stat(std::move(stat));
-                        child.mutate(co_await build_file(name, stat.mode));
+                        co_await mutate_and_invalidate(child, std::move(file));
                         child.expires_after(m_ttl.value_or(Seconds::max()));
                     } else if (child.expired() and detect_modification(child_stat->get(), stat)) {
                         log_d(__func__, "[{:?}]   changed: {:?}", parent->name(), name);
 
+                        auto file = co_await build_file(name, stat.mode);
                         child.set_stat(std::move(stat));
-                        child.mutate(co_await build_file(name, stat.mode));
+                        co_await mutate_and_invalidate(child, std::move(file));
                         child.expires_after(m_ttl.value_or(Seconds::max()));
-
-                        co_await m_cache.invalidate_one(child.id(), false);    // should I flush?
                     }
 
                     log_d(__func__, "[{:?}] unchanged: {:?}", parent->name(), name);
@@ -384,7 +403,9 @@ namespace madbfs
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        co_return co_await node->get().unlink(make_context(path));
+        co_return (co_await node->get().unlink(make_context(path))).transform([&](Uniq<Node> node) {
+            m_handles.erase(node.get());
+        });
     }
 
     AExpect<void> Filesystem::rmdir(path::Path path)
@@ -453,6 +474,7 @@ namespace madbfs
             assert(res->second == nullptr);    // has extracted before
         } else if (overwritten.second != nullptr) {
             co_await m_cache.invalidate_one(overwritten.second->id(), false);
+            m_handles.erase(overwritten.second.get());
         }
 
         co_return Expect<void>{};
@@ -576,7 +598,7 @@ namespace madbfs
         // on change from ttl on to ttl off, sets all nodes expiration to never
 
         log_i(__func__, "ttl changed [{} -> {}] resetting expirations", old, ttl);
-        walk([=](Node& node) { node.expires_after(ttl.value_or(Seconds::max())); });
+        walk(m_root, [=](Node& node) { node.expires_after(ttl.value_or(Seconds::max())); });
 
         return old;
     }
@@ -584,7 +606,7 @@ namespace madbfs
     usize Filesystem::expires_all()
     {
         auto count = 0uz;
-        walk([&](Node& node) { ++count, node.expires_after(Seconds{ 0 }); });
+        walk(m_root, [&](Node& node) { ++count, node.expires_after(Seconds{ 0 }); });
         return count;
     }
 }

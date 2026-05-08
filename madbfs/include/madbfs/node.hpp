@@ -77,9 +77,12 @@ namespace madbfs::node
          * @brief Erase a file by its name.
          *
          * @param name The file name.
-         * @return True if file deleted, false if the file does not exist.
+         *
+         * @return The erased node, else `std::nullopt` if not exists
+         *
+         * This function is semantically the same with `extract()`.
          */
-        bool erase(Str name);
+        Opt<Uniq<Node>> erase(Str name);
 
         /**
          * @brief Add a new node.
@@ -99,6 +102,10 @@ namespace madbfs::node
          * @brief Extract a node.
          *
          * @param name The name of the node.
+         *
+         * @return The node or `Errc::no_such_file_or_directory`
+         *
+         * This function is semantically the same with `erase()`.
          */
         Expect<Uniq<Node>> extract(Str name);
 
@@ -353,7 +360,7 @@ namespace madbfs
          *
          * @param context Context needed to communicate with device and local.
          */
-        AExpect<void> unlink(Context context);
+        AExpect<Uniq<Node>> unlink(Context context);
 
         /**
          * @brief Remove a child node by its name (Directory).

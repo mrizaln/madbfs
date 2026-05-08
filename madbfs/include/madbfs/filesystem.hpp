@@ -171,7 +171,19 @@ namespace madbfs
          *
          * @param func The opeartion to be applied on each of the node.
          */
-        void walk(std::function<void(Node&)> func);
+        void walk(Node& start, std::function<void(Node&)> func);
+
+        /**
+         * @brief Replace the node variant with the new one while invalidating the current one.
+         *
+         * @param node Node to be mutated.
+         * @param file The new variant of the node.
+         *
+         * Invlidate here means removing the children (recursive) references from `Cache` as well as from
+         * `FileHandleStore` if the node is a directory. The funciton will remove references of the node if
+         * it is a regular file.
+         */
+        Await<void> mutate_and_invalidate(Node& node, File file);
 
         /**
          * @brief Helper function to create context for node operations.

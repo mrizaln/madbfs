@@ -32,13 +32,12 @@ namespace madbfs::node
         return Unexpect{ Errc::no_such_file_or_directory };
     }
 
-    bool Directory::erase(Str name)
+    Opt<Uniq<Node>> Directory::erase(Str name)
     {
         if (auto found = m_children.find(name); found != m_children.end()) {
-            m_children.erase(found);
-            return true;
+            return std::move(m_children.extract(found).value());
         }
-        return false;
+        return std::nullopt;
     }
 
     Expect<Pair<Ref<Node>, Uniq<Node>>> Directory::insert(Uniq<Node> node, bool overwrite)
@@ -310,26 +309,26 @@ namespace madbfs
             .transform([&](auto&& pair) { return pair.first; });
     }
 
-    AExpect<void> Node::unlink(Context context)
+    AExpect<Uniq<Node>> Node::unlink(Context context)
     {
         if (auto err = as<node::Error>(); err.has_value()) {
             co_return Unexpect{ err->get().error };
         }
 
-        auto res = as<node::Directory>().and_then([&](node::Directory& dir) -> Expect<void> {
+        auto erased = as<node::Directory>().and_then([&](node::Directory& dir) -> Expect<Uniq<Node>> {
             auto name = context.path.filename();
-            return dir.find(name).and_then([&](Node& node) -> Expect<void> {
+            return dir.find(name).and_then([&](Node& node) -> Expect<Uniq<Node>> {
                 if (node.is<node::Directory>()) {
                     return Unexpect{ Errc::is_a_directory };
                 }
-                auto success = dir.erase(name);
-                assert(success);
-                return {};
+                auto erased = dir.erase(name);
+                assert(erased.has_value());
+                return std::move(erased).value();
             });
         });
 
-        if (not res) {
-            co_return Unexpect{ res.error() };
+        if (not erased) {
+            co_return Unexpect{ erased.error() };
         }
 
         if (auto res = co_await context.connection.unlink(context.path); not res) {
@@ -337,7 +336,7 @@ namespace madbfs
         }
 
         co_await context.cache.invalidate_one(id(), false);
-        co_return Expect<void>{};
+        co_return erased;
     }
 
     AExpect<void> Node::rmdir(Context context)

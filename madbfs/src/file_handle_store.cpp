@@ -52,4 +52,16 @@ namespace madbfs
                  ? FileHandle{ std::exchange(m_nodes[fd], {}), std::exchange(m_modes[fd], {}) }
                  : FileHandle{};
     }
+
+    usize FileHandleStore::erase(Node* node)
+    {
+        auto count = 0uz;
+        for (auto& v : m_nodes) {
+            if (v == node) {
+                v = nullptr;
+                ++count;
+            }
+        }
+        return count;
+    }
 }
