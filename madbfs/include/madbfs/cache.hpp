@@ -1,13 +1,12 @@
 #pragma once
 
-#include "madbfs/data/stat.hpp"
 #include "madbfs/path.hpp"
+#include "madbfs/stat.hpp"
 
 #include <madbfs-common/async/async.hpp>
 
 #include <saf.hpp>
 
-#include <cassert>
 #include <list>
 #include <map>
 #include <unordered_map>
@@ -17,7 +16,7 @@ namespace madbfs
     class Connection;
 }
 
-namespace madbfs::data
+namespace madbfs
 {
     /**
      * @class PageKey
@@ -135,7 +134,7 @@ namespace madbfs::data
          * and the mode can upgraded from O_RDONLY or O_WRONLY to O_RDRW the file will be closed then reopened
          * with the O_RDRW mode.
          */
-        AExpect<void> hint_open(Id id, path::Path path, data::OpenMode mode);
+        AExpect<void> hint_open(Id id, path::Path path, OpenMode mode);
 
         /**
          * @brief Close the associated fd to real file for this node.
@@ -144,7 +143,7 @@ namespace madbfs::data
          *
          * Unlike `hint_open()` this function will immediately close the file descriptor to the real file.
          */
-        AExpect<void> hint_close(Id id, data::OpenMode mode);
+        AExpect<void> hint_close(Id id, OpenMode mode);
 
         /**
          * @brief Read bytes from file with desired id at an offset into buffer.

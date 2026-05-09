@@ -6,12 +6,12 @@
 
 #include <atomic>
 
-namespace madbfs::tree
+namespace madbfs
 {
     class Node;
 }
 
-namespace madbfs::data
+namespace madbfs
 {
     /**
      * @class CacheId
@@ -21,7 +21,7 @@ namespace madbfs::data
     class Id
     {
     public:
-        friend ::madbfs::tree::Node;
+        friend ::madbfs::Node;
 
         Id() = default;
         u64 inner() const { return m_inner; }
@@ -67,8 +67,8 @@ namespace madbfs::data
      */
     struct NamedStat
     {
-        data::Id   id;
-        data::Stat stat;
+        Id   id;
+        Stat stat;
     };
 
     /**

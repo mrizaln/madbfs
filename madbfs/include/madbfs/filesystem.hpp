@@ -1,7 +1,11 @@
 #pragma once
 
+#include "madbfs/cache.hpp"
+#include "madbfs/file_handle_store.hpp"
+#include "madbfs/node.hpp"
 #include "madbfs/path.hpp"
-#include "madbfs/tree/node.hpp"
+
+#include <madbfs-common/async/async.hpp>
 
 #include <functional>
 
@@ -10,28 +14,43 @@ namespace madbfs
     class Connection;
 }
 
-namespace madbfs::tree
+namespace madbfs
 {
     /**
-     * @class FileTree
+     * @class Filesystem
      *
-     * @brief A class representing a file tree structure.
+     * @brief A class representing the filesystem and its tree structure.
      *
      * This data structure is a Trie
      */
-    class FileTree
+    class Filesystem
     {
     public:
         using Filler = std::move_only_function<void(const char* name)>;
 
-        FileTree(Connection& connection, data::Cache& cache, Opt<Seconds> ttl);
-        ~FileTree() = default;
+        /**
+         * @brief Create a new filesystem.
+         *
+         * @param connection Reference to active conneciton to device.
+         * @param page_size Cache page size.
+         * @param max_pages Maximum number of pages to be saved on the cache.
+         * @param ttl Filesystem node's stat expiration time before re-fetching.
+         */
+        Filesystem(Connection& connection, usize page_size, usize max_pages, Opt<Seconds> ttl);
 
-        FileTree(Node&& root)            = delete;
-        FileTree& operator=(Node&& root) = delete;
+        /**
+         * @brief Destroy filesystem.
+         *
+         * You must call `stop()` before destruction. Any asynchronous operation that is still happening may
+         * not be stopped correctly otherwise.
+         */
+        ~Filesystem() = default;
 
-        FileTree(const Node& root)            = delete;
-        FileTree& operator=(const Node& root) = delete;
+        Filesystem(Node&& root)            = delete;
+        Filesystem& operator=(Node&& root) = delete;
+
+        Filesystem(const Node& root)            = delete;
+        Filesystem& operator=(const Node& root) = delete;
 
         /**
          * @brief Get a node by the given path.
@@ -42,8 +61,8 @@ namespace madbfs::tree
 
         // fuse oprations
         // --------------
-        AExpect<void>            readdir(path::Path path, Filler filler);
-        AExpect<data::NamedStat> getattr(path::Path path);
+        AExpect<void>      readdir(path::Path path, Filler filler);
+        AExpect<NamedStat> getattr(path::Path path);
 
         AExpect<Str>       readlink(path::Path path);
         AExpect<Ref<Node>> mknod(path::Path path, mode_t mode, dev_t dev);
@@ -51,14 +70,14 @@ namespace madbfs::tree
         AExpect<void>      unlink(path::Path path);
         AExpect<void>      rmdir(path::Path path);
         AExpect<void>      rename(path::Path from, path::Path to, u32 flags);
+        AExpect<void>      utimens(path::Path path, timespec atime, timespec mtime);
+        AExpect<void>      truncate(path::Path path, off_t size);
 
-        AExpect<void>  truncate(path::Path path, off_t size);
         AExpect<u64>   open(path::Path path, int flags);
-        AExpect<usize> read(path::Path path, u64 fd, Span<char> out, off_t offset);
-        AExpect<usize> write(path::Path path, u64 fd, Str in, off_t offset);
-        AExpect<void>  flush(path::Path path, u64 fd);
-        AExpect<void>  release(path::Path path, u64 fd);
-        AExpect<void>  utimens(path::Path path, timespec atime, timespec mtime);
+        AExpect<usize> read(u64 fd, Span<char> out, off_t offset);
+        AExpect<usize> write(u64 fd, Str in, off_t offset);
+        AExpect<void>  flush(u64 fd);
+        AExpect<void>  release(u64 fd);
 
         AExpect<usize> copy_file_range(
             path::Path in_path,
@@ -75,7 +94,14 @@ namespace madbfs::tree
         Expect<void> symlink(path::Path path, Str target);
 
         /**
-         * @brief Set a new TTL for file tree nodes.
+         * @brief Shut down the filesystem and stop every async operation.
+         *
+         * Call this before destructor. This is needed to do proper flushing for the `Cache`.
+         */
+        Await<void> shutdown();
+
+        /**
+         * @brief Set a new TTL for file system nodes.
          *
          * @param ttl New TTl value (set to `std::nullopt` to disable)
          *
@@ -89,6 +115,15 @@ namespace madbfs::tree
         usize expires_all();
 
         /**
+         * @brief Get cache structure.
+         */
+        template <typename Self>
+        auto&& cache(this Self&& self)
+        {
+            return std::forward_like<Self>(self.m_cache);
+        }
+
+        /**
          * @brief Get root node.
          */
         const Node& root() const { return m_root; }
@@ -99,6 +134,8 @@ namespace madbfs::tree
          * If expiration is not enabled it will return `std::nullopt`.
          */
         Opt<Seconds> ttl() const { return m_ttl; }
+
+        FileHandleStore& handles() { return m_handles; }
 
     private:
         /**
@@ -137,28 +174,27 @@ namespace madbfs::tree
          *
          * @param func The opeartion to be applied on each of the node.
          */
-        void walk(std::function<void(Node&)> func);
+        void walk(Node& start, std::function<void(Node&)> func);
 
         /**
-         * @brief Helper function to create context for node operations.
+         * @brief Replace the node variant with the new one while invalidating the current one.
          *
-         * @param path Path of the node operated on.
+         * @param node Node to be mutated.
+         * @param file The new variant of the node.
+         *
+         * Invlidate here means removing the children (recursive) references from `Cache` as well as from
+         * `FileHandleStore` if the node is a directory. The funciton will remove references of the node if
+         * it is a regular file.
          */
-        Node::Context make_context(const path::Path& path)
-        {
-            return {
-                .connection = m_connection,
-                .cache      = m_cache,
-                .fd_counter = m_fd_counter,
-                .path       = path,
-            };
-        }
+        Await<void> mutate_and_invalidate(Node& node, File file);
 
-        Node             m_root;
-        Connection&      m_connection;
-        data::Cache&     m_cache;
-        std::atomic<u64> m_fd_counter       = 0;
-        bool             m_root_initialized = false;
-        Opt<Seconds>     m_ttl              = std::nullopt;
+        Connection& m_connection;
+
+        Node            m_root;
+        Cache           m_cache;
+        FileHandleStore m_handles;
+
+        Opt<Seconds> m_ttl              = std::nullopt;
+        bool         m_root_initialized = false;
     };
 }

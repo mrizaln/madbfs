@@ -2,7 +2,7 @@
 
 #include "madbfs/args.hpp"
 #include "madbfs/connection.hpp"
-#include "madbfs/tree/file_tree.hpp"
+#include "madbfs/filesystem.hpp"
 
 #include <madbfs-common/ipc.hpp>
 
@@ -41,9 +41,8 @@ namespace madbfs
         Madbfs(const Madbfs&)            = delete;
         Madbfs& operator=(const Madbfs&) = delete;
 
-        tree::FileTree&    tree() { return m_tree; }
-        async::Context&    async_ctx() { return m_async_ctx; }
-        const data::Cache& cache() const { return m_cache; }
+        Filesystem&     fs() { return m_fs; }
+        async::Context& ctx() { return m_async_ctx; }
 
         Str mountpoint() const { return m_mountpoint; }
 
@@ -101,8 +100,7 @@ namespace madbfs
         std::jthread     m_work_thread;
 
         Connection       m_connection;
-        data::Cache      m_cache;
-        tree::FileTree   m_tree;
+        Filesystem       m_fs;
         Opt<ipc::Server> m_ipc;
 
         async::Timer    m_watchdog_timer;

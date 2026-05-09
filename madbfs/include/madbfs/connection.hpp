@@ -1,7 +1,7 @@
 #pragma once
 
-#include "madbfs/data/stat.hpp"
 #include "madbfs/path.hpp"
+#include "madbfs/stat.hpp"
 #include "madbfs/transport/transport.hpp"
 
 #include <madbfs-common/async/async.hpp>
@@ -27,8 +27,8 @@ namespace madbfs
      */
     struct ParsedStat
     {
-        data::Stat stat;
-        Str        name;
+        Stat stat;
+        Str  name;
     };
 
     namespace connection_strategy
@@ -177,7 +177,7 @@ namespace madbfs
          *
          * @return The stat of the file or directory.
          */
-        AExpect<data::Stat> stat(path::Path path);
+        AExpect<Stat> stat(path::Path path);
 
         /**
          * @brief Get the real file pointed by a symlink.
@@ -271,7 +271,7 @@ namespace madbfs
          * @param path Path to the file on the device.
          * @param mode Mode in which the file will be opened.
          */
-        AExpect<u64> open(path::Path path, data::OpenMode mode);
+        AExpect<u64> open(path::Path path, OpenMode mode);
 
         /**
          * @brief Close a file descriptor.
