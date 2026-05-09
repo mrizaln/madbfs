@@ -381,7 +381,7 @@ namespace madbfs
     {
         co_return (co_await traverse_or_build(path))
             .and_then([](Node& node) { return node.as<node::Link>(true); })
-            .transform([](node::Link& link) { return link.target; });
+            .transform([](node::Link& link) { return Str{ link.target }; });
     }
 
     AExpect<Ref<Node>> Filesystem::mknod(path::Path path, mode_t mode, dev_t dev)
