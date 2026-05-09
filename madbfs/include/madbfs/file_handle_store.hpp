@@ -85,7 +85,7 @@ namespace madbfs
         usize erase(Node* node);
 
         FRange auto iter() { return sv::zip(m_nodes, m_modes); }
-        FRange auto iter() const { return sv::zip(std::as_const(m_nodes), std::as_const(m_modes)); }
+        FRange auto iter() const { return sv::zip(m_nodes, m_modes); }
 
         usize size() const { return m_nodes.size(); }
 

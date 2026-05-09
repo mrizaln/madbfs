@@ -67,14 +67,6 @@ namespace madbfs::node
 
 namespace madbfs
 {
-    Expect<Ref<const Stat>> Node::stat() const
-    {
-        if (auto err = as<node::Error>(); err.has_value()) {
-            return Unexpect{ err->get().error };
-        }
-        return m_stat;
-    }
-
     void Node::expires_after(Seconds duration)
     {
         if (duration == Seconds::max()) {
@@ -164,15 +156,6 @@ namespace madbfs
         return as<node::Directory>().and_then(proj(&node::Directory::find, name));
     }
 
-    Expect<Ref<node::Directory::List>> Node::list()
-    {
-        if (auto err = as<node::Error>(); err.has_value()) {
-            return Unexpect{ err->get().error };
-        }
-        return as<node::Directory>()    //
-            .transform([&](node::Directory& dir) { return std::ref(dir.children()); });
-    }
-
     Expect<Ref<Node>> Node::build(Str name, Stat stat, File file)
     {
         if (auto err = as<node::Error>(); err.has_value()) {
@@ -187,309 +170,31 @@ namespace madbfs
             .transform([](auto&& pair) { return pair.first; });
     }
 
-    Expect<Uniq<Node>> Node::extract(Str name)
+    Expect<Ref<node::Regular>> Node::regular_file_prelude()
     {
-        if (auto err = as<node::Error>(); err.has_value()) {
-            return Unexpect{ err->get().error };
-        }
-        return as<node::Directory>().and_then(proj(&node::Directory::extract, name));
+        // NOTE: reading/writing special files (excluding symlink) is not possible by FUSE alone. One
+        // can present them by disguising it as regular files though.
+        //
+        // read: - https://github.com/rpodgorny/unionfs-fuse/issues/66
+        //       - https://github.com/libfuse/libfuse/issues/182
+
+        using Ret = Expect<Ref<node::Regular>>;
+
+        // clang-format off
+        auto overload = Overload{
+            [](node::Regular&   reg) -> Ret { return reg;                                             },
+            [](node::Directory&    ) -> Ret { return Unexpect{ Errc::is_a_directory };                },
+            [](node::Link&         ) -> Ret { return Unexpect{ Errc::too_many_symbolic_link_levels }; },  // mimick open(2) when no O_NOFOLLOW
+            [](node::Other&        ) -> Ret { return Unexpect{ Errc::operation_not_supported };       },
+            [](node::Error&     err) -> Ret { return Unexpect{ err.error };                           },
+        };
+        // clang-format on
+
+        return std::visit(overload, m_value);
     }
 
-    Expect<Pair<Ref<Node>, Uniq<Node>>> Node::insert(Uniq<Node> node, bool overwrite)
+    Expect<Ref<node::Directory>> Node::directory_prelude()
     {
-        if (auto err = as<node::Error>(); err.has_value()) {
-            return Unexpect{ err->get().error };
-        }
-        return as<node::Directory>().and_then(proj(&node::Directory::insert, std::move(node), overwrite));
-    }
-
-    Expect<Ref<Node>> Node::symlink(Str name, Str target)
-    {
-        if (auto err = as<node::Error>(); err.has_value()) {
-            return Unexpect{ err->get().error };
-        }
-        return as<node::Directory>().and_then([&](node::Directory& dir) -> Expect<Ref<Node>> {
-            if (dir.find(name).has_value()) {
-                return Unexpect{ Errc::file_exists };
-            }
-
-            // NOTE: we can't really make a symlink on android from adb (unless rooted device iirc), so this
-            // operation actually not creating any link on the adb device, just on the in-memory filetree.
-
-            auto now  = SystemClock::now().time_since_epoch();
-            auto sec  = std::chrono::duration_cast<Seconds>(now);
-            auto nsec = std::chrono::duration_cast<Nanoseconds>(now - sec);
-
-            auto time = timespec{ .tv_sec = sec.count(), .tv_nsec = nsec.count() };
-
-            // dummy stat for symlink based on
-            // lrw-r--r--  root root 21 2024-10-05 09:19:29.000000000 +0700 /sdcard -> /storage/self/primary
-            auto stat = Stat{
-                .links = 1,
-                .size  = 21,
-                .mtime = time,
-                .atime = time,
-                .ctime = time,
-                .mode  = S_IFLNK | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,    // mode: "lrw-r--r--"
-                .uid   = 0,
-                .gid   = 0,
-            };
-
-            auto node = std::make_unique<Node>(name, this, std::move(stat), node::Link{ String{ target } });
-            return dir.insert(std::move(node), false).transform([&](auto&& pair) { return pair.first; });
-        });
-    }
-
-    AExpect<Ref<Node>> Node::mknod(Context context, mode_t mode, dev_t dev)
-    {
-        if (auto err = as<node::Error>(); err.has_value()) {
-            co_return Unexpect{ err->get().error };
-        }
-
-        auto may_dir = as<node::Directory>();
-        if (not may_dir) {
-            co_return Unexpect{ may_dir.error() };
-        }
-
-        auto& dir  = may_dir->get();
-        auto  name = context.path.filename();
-
-        auto overwrite = false;
-        if (auto node = dir.find(name); node.has_value()) {
-            if (not node->get().is<node::Error>()) {
-                co_return Unexpect{ Errc::file_exists };
-            }
-            overwrite = true;
-        }
-
-        if (auto created = co_await context.connection.mknod(context.path, mode, dev); not created) {
-            co_return Unexpect{ created.error() };
-        }
-
-        co_return (co_await context.connection.stat(context.path))
-            .and_then([&](Stat stat) {
-                auto node = std::make_unique<Node>(name, this, std::move(stat), node::Regular{});
-                return dir.insert(std::move(node), overwrite);
-            })
-            .transform([&](auto&& pair) { return pair.first; });
-    }
-
-    AExpect<Ref<Node>> Node::mkdir(Context context, mode_t mode)
-    {
-        if (auto err = as<node::Error>(); err.has_value()) {
-            co_return Unexpect{ err->get().error };
-        }
-
-        auto may_dir = as<node::Directory>();
-        if (not may_dir) {
-            co_return Unexpect{ may_dir.error() };
-        }
-
-        auto& dir  = may_dir->get();
-        auto  name = context.path.filename();
-
-        auto overwrite = false;
-        if (auto node = dir.find(name); node.has_value()) {
-            if (not node->get().is<node::Error>()) {
-                co_return Unexpect{ Errc::file_exists };
-            }
-            overwrite = true;
-        }
-
-        auto may_mkdir = co_await context.connection.mkdir(context.path, mode);
-        if (not may_mkdir) {
-            co_return Unexpect{ may_mkdir.error() };
-        }
-
-        co_return (co_await context.connection.stat(context.path))
-            .and_then([&](Stat stat) {
-                auto node = std::make_unique<Node>(name, this, std::move(stat), node::Directory{});
-                return dir.insert(std::move(node), overwrite);
-            })
-            .transform([&](auto&& pair) { return pair.first; });
-    }
-
-    AExpect<Uniq<Node>> Node::unlink(Context context)
-    {
-        if (auto err = as<node::Error>(); err.has_value()) {
-            co_return Unexpect{ err->get().error };
-        }
-
-        auto erased = as<node::Directory>().and_then([&](node::Directory& dir) -> Expect<Uniq<Node>> {
-            auto name = context.path.filename();
-            return dir.find(name).and_then([&](Node& node) -> Expect<Uniq<Node>> {
-                if (node.is<node::Directory>()) {
-                    return Unexpect{ Errc::is_a_directory };
-                }
-                auto erased = dir.erase(name);
-                assert(erased.has_value());
-                return std::move(erased).value();
-            });
-        });
-
-        if (not erased) {
-            co_return Unexpect{ erased.error() };
-        }
-
-        if (auto res = co_await context.connection.unlink(context.path); not res) {
-            co_return Unexpect{ res.error() };
-        }
-
-        co_await context.cache.invalidate_one(id(), false);
-        co_return erased;
-    }
-
-    AExpect<void> Node::rmdir(Context context)
-    {
-        if (auto err = as<node::Error>(); err.has_value()) {
-            co_return Unexpect{ err->get().error };
-        }
-
-        auto name = context.path.filename();
-
-        auto res = as<node::Directory>().and_then([&](node::Directory& dir) {
-            return dir.find(name).and_then([&](Node& node) {
-                return node.as<node::Directory>().and_then(
-                    [&](node::Directory& target) -> Expect<Ref<node::Directory>> {
-                        if (not target.children().empty()) {
-                            for (const auto& child : target.children()) {
-                                if (not child->is<node::Error>()) {
-                                    Unexpect{ Errc::directory_not_empty };
-                                }
-                            }
-                        }
-                        return Expect<Ref<node::Directory>>{ dir };
-                    }
-                );
-            });
-        });
-
-        if (not res) {
-            co_return Unexpect{ res.error() };
-        }
-
-        co_return (co_await context.connection.rmdir(context.path)).transform([&] {
-            res->get().erase(name);
-        });
-    }
-
-    AExpect<void> Node::truncate(Context context, off_t size)
-    {
-        if (auto may_file = regular_file_prelude(); not may_file) {
-            co_return Unexpect{ may_file.error() };
-        }
-
-        if (auto res = co_await context.connection.truncate(context.path, size); not res) {
-            co_return Unexpect{ res.error() };
-        }
-
-        auto old_size = static_cast<usize>(m_stat.size);
-        auto new_size = static_cast<usize>(size);
-
-        // error from Cache::truncate are from eviction only, which should not matter for this file
-        std::ignore = co_await context.cache.truncate(id(), old_size, new_size);
-
-        m_stat.size = size;
-        refresh_stat({ .tv_sec = 0, .tv_nsec = UTIME_OMIT }, { .tv_sec = 0, .tv_nsec = UTIME_NOW });
-
-        co_return Expect<void>{};
-    }
-
-    AExpect<void> Node::open(Context context, OpenMode mode)
-    {
-        if (auto file = regular_file_prelude(); not file) {
-            co_return Unexpect{ file.error() };
-        }
-
-        // send hint to cache to prepare a real fd that can be used for further operations
-        co_return co_await context.cache.hint_open(id(), context.path, mode);
-    }
-
-    AExpect<usize> Node::read(Context context, u64 fd, Span<char> out, off_t offset)
-    {
-        if (auto file = regular_file_prelude(); not file) {
-            co_return Unexpect{ file.error() };
-        }
-
-        co_return (co_await context.cache.read(id(), out, offset)).transform([&](usize ret) {
-            refresh_stat(timespec_now, timespec_omit);
-            return ret;
-        });
-    }
-
-    AExpect<usize> Node::write(Context context, u64 fd, Str in, off_t offset)
-    {
-        if (auto file = regular_file_prelude(); not file) {
-            co_return Unexpect{ file.error() };
-        } else {
-            file->get().dirty = true;
-        }
-
-        co_return (co_await context.cache.write(id(), in, offset)).transform([&](usize ret) {
-            // the file size is defined as offset + size from last write if it's higher than previous size
-            // NOTE: this may be different for sparse files but I don't think Android has it
-            auto new_size = offset + static_cast<off_t>(ret);
-            m_stat.size   = std::max(m_stat.size, new_size);
-            refresh_stat(timespec_omit, timespec_now);
-            return ret;
-        });
-    }
-
-    AExpect<void> Node::flush(Context context)
-    {
-        auto file = regular_file_prelude();
-        if (not file) {
-            co_return Unexpect{ file.error() };
-        } else if (not file->get().dirty) {
-            co_return Expect<void>{};    // no write, do nothing
-        }
-
-        co_return (co_await context.cache.flush(id())).transform([&] {
-            refresh_stat(timespec_omit, timespec_now);
-            file->get().dirty = false;
-        });
-    }
-
-    AExpect<void> Node::release(Context context, OpenMode mode)
-    {
-        auto file = regular_file_prelude();
-        if (not file) {
-            co_return Unexpect{ file.error() };
-        }
-
-        if (file->get().dirty) {
-            if (auto res = co_await context.cache.flush(id()); not res) {
-                co_return Unexpect{ res.error() };
-            }
-
-            refresh_stat(timespec_omit, timespec_now);
-            file->get().dirty = false;
-        }
-
-        // send hint to cache to close its associated fd for this node if exist
-        if (auto res = co_await context.cache.hint_close(id(), mode); not res) {
-            co_return Unexpect{ res.error() };
-        }
-
-        co_return Expect<void>{};
-    }
-
-    AExpect<void> Node::utimens(Context context, timespec atime, timespec mtime)
-    {
-        if (auto res = co_await context.connection.utimens(context.path, atime, mtime); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        co_return (co_await context.connection.stat(context.path)).transform([&](Stat stat) {
-            m_stat = std::move(stat);
-        });
-    }
-
-    Expect<Str> Node::readlink()
-    {
-        auto link = as<node::Link>();
-        if (not link) {
-            return Unexpect{ link.error() };
-        }
-        return link->get().target;
+        return as<node::Directory>();
     }
 }

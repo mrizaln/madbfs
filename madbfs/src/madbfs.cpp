@@ -324,7 +324,7 @@ namespace madbfs
             auto pred  = [](auto&& v) { return std::get<0>(v) == nullptr; };
             auto empty = static_cast<usize>(sr::count_if(handles.iter(), pred));
 
-            log_w(__func__, "file handles [cap={:>40d}|open={:>40d}|null={:>40d}]", cap, cap - empty, empty);
+            log_i(__func__, "file handles [cap={:>04d}|open={:>04d}|unused={:>04d}]", cap, cap - empty, empty);
         }
     }
 }

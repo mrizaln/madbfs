@@ -1,6 +1,5 @@
 #pragma once
 
-#include "madbfs/cache.hpp"
 #include "madbfs/path.hpp"
 #include "madbfs/stat.hpp"
 
@@ -158,9 +157,6 @@ namespace madbfs
 {
     using File = Var<node::Regular, node::Directory, node::Link, node::Other, node::Error>;
 
-    constexpr auto timespec_now  = timespec{ .tv_sec = 0, .tv_nsec = UTIME_NOW };
-    constexpr auto timespec_omit = timespec{ .tv_sec = 0, .tv_nsec = UTIME_OMIT };
-
     /**
      * @class Node
      *
@@ -170,13 +166,6 @@ namespace madbfs
     {
     public:
         using Timepoint = SteadyClock::time_point;
-
-        struct Context
-        {
-            Connection&       connection;
-            Cache&            cache;
-            const path::Path& path;    // path for connection
-        };
 
         Node(Str name, Node* parent, Stat stat, File value)
             : m_parent{ parent }
@@ -198,12 +187,13 @@ namespace madbfs
         void set_name(Str name) { m_name = name; }
         void set_parent(Node* parent) { m_parent = parent; }
         void set_stat(Stat stat) { m_stat = stat; }
+        void set_size(off_t size) { m_stat.size = size; }
 
         Str         name() const { return m_name; }
         Node*       parent() const { return m_parent; }
         const File& value() const { return m_value; }
 
-        Expect<Ref<const Stat>> stat() const;
+        const Stat& stat() const { return m_stat; }
 
         /**
          * @brief Set expiration from current time + duration.
@@ -224,14 +214,6 @@ namespace madbfs
          * @return Old file variant.
          */
         File mutate(File file);
-
-        /**
-         * @brief Get Error ptr value if the variant is an Error.
-         *
-         * This function is different from `as<Error>` since it's intended for use outside of Node. It will
-         * return nullptr if the Node is not an Error instance.
-         */
-        const node::Error* as_error() const;
 
         /**
          * @brief Build path from node.
@@ -266,9 +248,6 @@ namespace madbfs
          */
         void set_synced(bool synced);
 
-        // operations on Directory
-        // -----------------------
-
         /**
          * @brief Traverse into child node.
          *
@@ -277,11 +256,6 @@ namespace madbfs
          * @return The child node.
          */
         Expect<Ref<Node>> traverse(Str name) const;
-
-        /**
-         * @brief List children of this node (only works on Directory else return error).
-         */
-        Expect<Ref<node::Directory::List>> list();
 
         /**
          * @brief Create a new node without any call to connection or cache with this node as its parent.
@@ -299,192 +273,34 @@ namespace madbfs
         Expect<Ref<Node>> build(Str name, Stat stat, File file);
 
         /**
-         * @brief Extract a child node.
-         *
-         * @param name The name of the node.
-         *
-         * @return The extracted node.
-         *
-         * Since it extracts a child node, it only works on Directory.
+         * @brief Get the regular file variant with various checks for other variants.
          */
-        Expect<Uniq<Node>> extract(Str name);
+        Expect<Ref<node::Regular>> regular_file_prelude();
 
         /**
-         * @brief Insert a node into another node.
-         *
-         * @param node The node to add.
-         * @param overwrite If true, overwrite the existing node with the same name.
-         *
-         * @return A pair containing the added node and overwriten node if overwrite happens.
-         *
-         * Since the insertion is basically adding a child node, it only works on Directory.
-         *
-         * - If insertion happen without overwrite, left will be non-null whereas right will be null.
-         * - If insertion happen with overwrite and flag enabled both will be non-null.
-         * - If overwrite happen when flag not enabled, error will be returned.
+         * @brief Get the directory variant with various checks for other variants.
          */
-        Expect<Pair<Ref<Node>, Uniq<Node>>> insert(Uniq<Node> node, bool overwrite);
+        Expect<Ref<node::Directory>> directory_prelude();
 
         /**
-         * @brief Create a new child node as Link.
+         * @brief Get Error ptr value if the variant is an Error.
          *
-         * @param name The name of the link.
-         * @param target The target of the link.
-         *
-         * @return The new link node.
+         * This function is different from `as<Error>` since it's intended for use outside of Node. It will
+         * return nullptr if the Node is not an Error instance.
          */
-        Expect<Ref<Node>> symlink(Str name, Str target);
-
-        /**
-         * @brief Create a new child node as Regular.
-         *
-         * @param context Context needed to communicate with device and local.
-         * @param mode File mode to use and the type of node to be created.
-         *
-         * @return The new regular file node.
-         */
-        AExpect<Ref<Node>> mknod(Context context, mode_t mode, dev_t dev);
-
-        /**
-         * @brief Create a new child node as Directory.
-         *
-         * @param context Context needed to communicate with device and local.
-         * @param mode The mode of the new directory.
-         *
-         * @return The new directory node.
-         */
-        AExpect<Ref<Node>> mkdir(Context context, mode_t mode);
-
-        /**
-         * @brief Remove a child node by its name (Regular or Directory).
-         *
-         * @param context Context needed to communicate with device and local.
-         */
-        AExpect<Uniq<Node>> unlink(Context context);
-
-        /**
-         * @brief Remove a child node by its name (Directory).
-         *
-         * @param context Context needed to communicate with device and local.
-         */
-        AExpect<void> rmdir(Context context);
-
-        // -----------------------
-
-        // operations on Regular
-        // -------------------------
-
-        /**
-         * @brief Truncate file.
-         *
-         * @param context Context needed to communicate with device and local.
-         * @param size The final size to truncate to.
-         */
-        AExpect<void> truncate(Context context, off_t size);
-
-        /**
-         * @brief Open file.
-         *
-         * @param context Context needed to communicate with device and local.
-         * @param mode file open mode.
-         */
-        AExpect<void> open(Context context, OpenMode mode);
-
-        /**
-         * @brief Read data from file.
-         *
-         * @param context Context needed to communicate with device and local.
-         * @param fd File descriptor.
-         * @param out The output of the data.
-         * @param offset Offset to the data to be read.
-         *
-         * @return The number of bytes read.
-         */
-        AExpect<usize> read(Context context, u64 fd, Span<char> out, off_t offset);
-
-        /**
-         * @brief Write data to file.
-         *
-         * @param context Context needed to communicate with device and local.
-         * @param fd File descriptor.
-         * @param in Data to be written.
-         * @param offset Offset of the write pointer.
-         *
-         * @return The number of bytes written.
-         */
-        AExpect<usize> write(Context context, u64 fd, Str in, off_t offset);
-
-        /**
-         * @brief Flush buffer of the file.
-         *
-         * @param context Context needed to communicate with device and local.
-         *
-         * Basically forcing writing to the file itself instead of to the buffer in memory.
-         */
-        AExpect<void> flush(Context context);
-
-        /**
-         * @brief Release file.
-         *
-         * @param context Context needed to communicate with device and local.
-         */
-        AExpect<void> release(Context context, OpenMode mode);
-
-        /**
-         * @brief Update the timestamps of a file.
-         *
-         * @param context Context needed to communicate with device and local.
-         */
-        AExpect<void> utimens(Context context, timespec atime, timespec mtime);
-
-        // -------------------------
-
-        // operations on Link
-        // ------------------
-
-        /**
-         * @brief Read a link.
-         */
-        Expect<Str> readlink();
-
-        // ------------------
-
-    private:
-        inline static std::atomic<u64> s_id_counter = 0;
+        const node::Error* as_error() const;
 
         template <typename T>
         bool is() const;
 
         template <typename T>
-        Expect<Ref<T>> as();
+        Expect<Ref<T>> as(bool check_error = false);
 
         template <typename T>
-        Expect<Ref<const T>> as() const;
+        Expect<Ref<const T>> as(bool check_error = false) const;
 
-        Expect<Ref<node::Regular>> regular_file_prelude()
-        {
-            if (is<node::Link>()) {
-                // ELOOP, mimicking open(2) behavior when O_NOFOLLOW option specified
-                return Unexpect{ Errc::too_many_symbolic_link_levels };
-            }
-
-            if (auto err = as<node::Error>(); err.has_value()) {
-                return Unexpect{ err->get().error };
-            }
-
-            if (is<node::Directory>()) {
-                return Unexpect{ Errc::is_a_directory };
-            } else if (is<node::Other>()) {
-                // NOTE: reading/writing special files (excluding symlink) is not possible by FUSE alone. One
-                // can present them by disguising it as regular files though.
-                //
-                // read: - https://github.com/rpodgorny/unionfs-fuse/issues/66
-                //       - https://github.com/libfuse/libfuse/issues/182
-                return Unexpect{ Errc::operation_not_supported };
-            }
-
-            return as<node::Regular>();
-        }
+    private:
+        inline static std::atomic<u64> s_id_counter = 0;
 
         Node*     m_parent     = nullptr;
         String    m_name       = {};
@@ -508,34 +324,32 @@ namespace madbfs
     }
 
     template <typename T>
-    Expect<Ref<T>> Node::as()
+    Expect<Ref<T>> Node::as(bool check_error)
     {
-        constexpr auto errc = [&] {
-            if constexpr (std::same_as<node::Directory, T>) {
-                return Errc::not_a_directory;
-            } else {
-                return Errc::invalid_argument;
+        if (check_error) {
+            if (auto* err = std::get_if<node::Error>(&m_value)) {
+                return Unexpect{ err->error };
             }
-        }();
+        }
         if (auto* val = std::get_if<T>(&m_value)) {
             return *val;
         }
+        auto errc = std::same_as<node::Directory, T> ? Errc::not_a_directory : Errc::invalid_argument;
         return Unexpect{ errc };
     }
 
     template <typename T>
-    Expect<Ref<const T>> Node::as() const
+    Expect<Ref<const T>> Node::as(bool check_error) const
     {
-        constexpr auto errc = [] {
-            if constexpr (std::same_as<node::Directory, T>) {
-                return Errc::not_a_directory;
-            } else {
-                return Errc::invalid_argument;
+        if (check_error) {
+            if (auto* err = std::get_if<node::Error>(&m_value)) {
+                return Unexpect{ err->error };
             }
-        }();
+        }
         if (auto* val = std::get_if<T>(&m_value)) {
             return *val;
         }
+        auto errc = std::same_as<node::Directory, T> ? Errc::not_a_directory : Errc::invalid_argument;
         return Unexpect{ errc };
     }
 }

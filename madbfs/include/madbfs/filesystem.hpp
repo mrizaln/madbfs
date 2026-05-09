@@ -1,8 +1,11 @@
 #pragma once
 
+#include "madbfs/cache.hpp"
 #include "madbfs/file_handle_store.hpp"
 #include "madbfs/node.hpp"
 #include "madbfs/path.hpp"
+
+#include <madbfs-common/async/async.hpp>
 
 #include <functional>
 
@@ -184,20 +187,6 @@ namespace madbfs
          * it is a regular file.
          */
         Await<void> mutate_and_invalidate(Node& node, File file);
-
-        /**
-         * @brief Helper function to create context for node operations.
-         *
-         * @param path Path of the node operated on.
-         */
-        Node::Context make_context(const path::Path& path)
-        {
-            return {
-                .connection = m_connection,
-                .cache      = m_cache,
-                .path       = path,
-            };
-        }
 
         Connection& m_connection;
 
