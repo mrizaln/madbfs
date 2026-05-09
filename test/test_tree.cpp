@@ -1,8 +1,8 @@
+#include "madbfs/filesystem.hpp"
 #include <madbfs-common/util/split.hpp>
 #include <madbfs/connection.hpp>
+#include <madbfs/node.hpp>
 #include <madbfs/path.hpp>
-#include <madbfs/tree/file_tree.hpp>
-#include <madbfs/tree/node.hpp>
 
 #include <boost/ut.hpp>
 #include <dtlx/dtlx.hpp>
@@ -71,11 +71,11 @@ constexpr auto expected_rm = R"(
 
 // NOTE: since there is no ordering guarantee from the VFS, this formatter just order them alphabetically
 template <>
-struct fmt::formatter<madbfs::tree::Node> : fmt::formatter<Str>
+struct fmt::formatter<madbfs::Node> : fmt::formatter<Str>
 {
-    auto format(const madbfs::tree::Node& node, auto&& ctx) const
+    auto format(const madbfs::Node& node, auto&& ctx) const
     {
-        using namespace madbfs::tree;
+        using namespace madbfs;
 
         auto print_impl = [&](this auto&& self, const Node* node, usize depth) -> void {
             if (node == nullptr) {
@@ -215,96 +215,14 @@ int main()
     spdlog::set_default_logger(spdlog::null_logger_mt("madbfs-test-tree"));
     // spdlog::set_level(spdlog::level::debug);
 
-    "constructed tree from raw node have same shape"_test = [&] {
-        using namespace madbfs::tree;
-
-        using madbfs::path::operator""_path;
-
-        auto context    = madbfs::async::Context{};
-        auto guard      = madbfs::net::make_work_guard(context);
-        auto thread     = std::jthread{ [&] { context.run(); } };
-        auto connection = madbfs::Connection{ context, mock::dummy_strategy };
-        auto cache      = madbfs::data::Cache{ connection, 64 * 1024, 1024 };
-        auto counter    = std::atomic<u64>{};
-
-        // NOTE: operations like mknod and mkdir only considers filename
-        // NOTE: full path only matter for connection and caching
-        auto dummy = madbfs::path::PathBuf{};
-        auto path  = madbfs::path::Path{};
-
-        auto make_context = [&](Str name) {
-            dummy.extend(name);
-            path = dummy.view();
-            return Node::Context{ connection, cache, counter, path };
-        };
-
-#define unwrap() transform_error([](auto e) { return raise_expect_error<Node*>(e); }).value()
-
-        auto coro = [&] -> madbfs::Await<void> {
-            auto root = Node{ "/", nullptr, {}, node::Directory{} };
-
-            Node& hello = (co_await root.mkdir(make_context("hello"), 0)).unwrap();
-
-            std::ignore = (co_await hello.mknod(make_context("world.txt"), 0, 0)).unwrap();
-            std::ignore = (co_await hello.mknod(make_context("foo.txt"), 0, 0)).unwrap();
-            std::ignore = (co_await hello.mknod(make_context("movie.mp4"), 0, 0)).unwrap();
-
-            Node& bar = (co_await hello.mkdir(make_context("bar"), 0)).unwrap();
-
-            std::ignore = (co_await bar.mknod(make_context("baz.txt"), 0, 0)).unwrap();
-            std::ignore = (co_await bar.mknod(make_context("qux.txt"), 0, 0)).unwrap();
-            std::ignore = (co_await bar.mknod(make_context("quux.txt"), 0, 0)).unwrap();
-
-            Node& bye = (co_await root.mkdir(make_context("bye"), 0)).unwrap();
-
-            std::ignore = (co_await bye.mknod(make_context("world.txt"), 0, 0)).unwrap();
-            std::ignore = (co_await bye.mknod(make_context("movie.mp4"), 0, 0)).unwrap();
-            std::ignore = (co_await bye.mknod(make_context("music.mp3"), 0, 0)).unwrap();
-
-            Node& family = (co_await bye.mkdir(make_context("family"), 0)).unwrap();
-
-            std::ignore = (co_await family.mknod(make_context("dad.txt"), 0, 0)).unwrap();
-            std::ignore = (co_await family.mknod(make_context("mom.txt"), 0, 0)).unwrap();
-
-            Node& friends = (co_await bye.mkdir(make_context("friends"), 0)).unwrap();
-
-            std::ignore = (co_await friends.mknod(make_context("bob.txt"), 0, 0)).unwrap();
-
-            Node& school = (co_await friends.mkdir(make_context("school"), 0)).unwrap();
-
-            std::ignore = (co_await school.mknod(make_context("kal'tsit.txt"), 0, 0)).unwrap();
-            std::ignore = (co_await school.mknod(make_context("closure.txt"), 0, 0)).unwrap();
-
-            Node& work = (co_await friends.mkdir(make_context("work"), 0)).unwrap();
-
-            Node& wife = (co_await work.mknod(make_context("loughshinny <3.txt"), 0, 0)).unwrap();
-
-            std::ignore = (co_await work.mknod(make_context("eblana?.mp4"), 0, 0)).unwrap();
-            std::ignore = school.symlink("hehe", work.build_path().str()).unwrap();
-            std::ignore = hello.symlink("wife", wife.build_path().str()).unwrap();
-            std::ignore = (co_await bye.mknod(make_context("theresa.txt"), 0, 0)).unwrap();
-
-            auto tree_str = fmt::format("\n{}", root);
-            expect(expected == tree_str) << diff_str(expected, tree_str);
-        };
-
-#undef unwrap
-
-        madbfs::async::block(context, coro());
-
-        guard.reset();
-        context.stop();
-    };
-
     "constructed FileTree have same shape"_test = [&] {
-        using namespace madbfs::tree;
+        using namespace madbfs;
 
         auto context    = madbfs::async::Context{};
         auto guard      = madbfs::net::make_work_guard(context);
         auto thread     = std::jthread{ [&] { context.run(); } };
         auto connection = madbfs::Connection{ context, mock::dummy_strategy };
-        auto cache      = madbfs::data::Cache{ connection, 64 * 1024, 1024 };
-        auto tree       = FileTree{ connection, cache, std::nullopt };
+        auto tree       = Filesystem{ connection, 64 * 1024, 1024, std::nullopt };
 
         using madbfs::path::operator""_path;
 
@@ -355,7 +273,7 @@ int main()
             auto dummy = bar.build_path();
             dummy.extend("dummy");
 
-            auto entries = bar.list()->get()                                         //
+            auto entries = bar.as<madbfs::node::Directory>(false)->get().children()
                          | sv::transform([](auto& node) { return node->name(); })    //
                          | sr::to<Vec<String>>();
 
