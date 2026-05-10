@@ -11,6 +11,19 @@
 constexpr auto timespec_now  = timespec{ .tv_sec = 0, .tv_nsec = UTIME_NOW };
 constexpr auto timespec_omit = timespec{ .tv_sec = 0, .tv_nsec = UTIME_OMIT };
 
+namespace
+{
+    // NOTE: Errc::not_connected, Errc::timed_out, and Errc::resource_unavailable_try_again should be
+    // considered an OK error since it can happen if the device is disconnected. The error should not be
+    // cached as node.
+    bool should_cache_error(madbfs::Errc err)
+    {
+        return err != std::errc::not_connected    //
+           and err != std::errc::timed_out        //
+           and err != std::errc::resource_unavailable_try_again;
+    }
+}
+
 namespace madbfs
 {
     Filesystem::Filesystem(Connection& connection, usize page_size, usize max_pages, Opt<Seconds> ttl)
@@ -26,18 +39,19 @@ namespace madbfs
         const auto name = path.filename();
 
         auto build_then_expire = [&](Str name, Stat stat, File file) {
-            return parent    //
-                .build(name, std::move(stat), std::move(file))
-                .transform([&](Node& node) {
-                    node.expires_after(m_ttl.value_or(Seconds::max()));
-                    return std::ref(node);
-                });
+            return parent.build(name, std::move(stat), std::move(file)).transform([&](Node& node) {
+                node.expires_after(m_ttl.value_or(Seconds::max()));
+                return std::ref(node);
+            });
         };
 
         auto stat = co_await m_connection.stat(path);
         if (not stat.has_value()) {
-            std::ignore = build_then_expire(name, {}, node::Error{ stat.error() });
-            co_return Unexpect{ stat.error() };
+            auto err = stat.error();
+            if (should_cache_error(err)) {
+                std::ignore = build_then_expire(name, {}, node::Error{ err });
+            }
+            co_return Unexpect{ err };
         }
 
         switch (stat->mode & S_IFMT) {
@@ -53,18 +67,19 @@ namespace madbfs
         const auto name = path.filename();
 
         auto build_then_expire = [&](Str name, Stat stat, File file) {
-            return parent    //
-                .build(name, std::move(stat), std::move(file))
-                .transform([&](Node& node) {
-                    node.expires_after(m_ttl.value_or(Seconds::max()));
-                    return std::ref(node);
-                });
+            return parent.build(name, std::move(stat), std::move(file)).transform([&](Node& node) {
+                node.expires_after(m_ttl.value_or(Seconds::max()));
+                return std::ref(node);
+            });
         };
 
         auto stat = co_await m_connection.stat(path);
         if (not stat.has_value()) {
-            std::ignore = build_then_expire(name, {}, node::Error{ stat.error() });
-            co_return Unexpect{ stat.error() };
+            auto err = stat.error();
+            if (should_cache_error(err)) {
+                std::ignore = build_then_expire(name, {}, node::Error{ err });
+            }
+            co_return Unexpect{ err };
         } else if ((stat->mode & S_IFMT) != S_IFDIR) {
             co_return Unexpect{ Errc::not_a_directory };
         }
@@ -150,12 +165,9 @@ namespace madbfs
         auto new_stat = co_await m_connection.stat(path);
         auto old_stat = node.stat();
 
-        // NOTE: Errc::not_connected and Errc::timed_out should be considered an OK error since it can happen
-        // if the device is disconnected. The error should not be saved into the node.
-
         if (not new_stat) {
             auto err = new_stat.error();
-            if (err != Errc::not_connected and err != Errc::timed_out) {
+            if (should_cache_error(err)) {
                 co_await mutate_and_invalidate(node, node::Error{ err });
                 node.expires_after(m_ttl.value_or(Seconds::max()));
             }

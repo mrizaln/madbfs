@@ -135,6 +135,9 @@ namespace madbfs
          */
         Opt<Seconds> ttl() const { return m_ttl; }
 
+        /**
+         * @brief Get open file handle store.
+         */
         FileHandleStore& handles() { return m_handles; }
 
     private:
