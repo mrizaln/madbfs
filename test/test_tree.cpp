@@ -273,7 +273,7 @@ int main()
             auto dummy = bar.build_path();
             dummy.extend("dummy");
 
-            auto entries = bar.as<madbfs::node::Directory>(false)->get().children()
+            auto entries = bar.as_directory()->get().children()
                          | sv::transform([](auto& node) { return node->name(); })    //
                          | sr::to<Vec<String>>();
 

@@ -79,7 +79,7 @@ namespace madbfs
     bool Node::expired() const
     {
         // prevent expiration if the file is dirty
-        if (auto file = as<node::Regular>(); file and file->get().dirty) {
+        if (auto file = as_regular(); file and file->get().dirty) {
             return false;
         }
         return SteadyClock::now() > m_expiration;
@@ -94,8 +94,7 @@ namespace madbfs
 
     const node::Error* Node::as_error() const
     {
-        auto err = as<node::Error>();
-        return err ? &err->get() : nullptr;
+        return std::get_if<node::Error>(&m_value);
     }
 
     path::PathBuf Node::build_path() const
@@ -145,56 +144,22 @@ namespace madbfs
 
     void Node::set_synced(bool synced)
     {
-        std::ignore = as<node::Directory>().transform(proj(&node::Directory::set_readdir, synced));
+        std::ignore = as_directory().transform(proj(&node::Directory::set_readdir, synced));
     }
 
     Expect<Ref<Node>> Node::traverse(Str name) const
     {
-        if (auto err = as<node::Error>(); err.has_value()) {
-            return Unexpect{ err->get().error };
-        }
-        return as<node::Directory>().and_then(proj(&node::Directory::find, name));
+        return as_directory().and_then(proj(&node::Directory::find, name));
     }
 
     Expect<Ref<Node>> Node::build(Str name, Stat stat, File file)
     {
-        if (auto err = as<node::Error>(); err.has_value()) {
-            return Unexpect{ err->get().error };
-        }
-        return as<node::Directory>()
+        return as_directory()
             .and_then(proj(
                 &node::Directory::insert,
                 std::make_unique<Node>(name, this, std::move(stat), std::move(file)),
                 false
             ))
             .transform([](auto&& pair) { return pair.first; });
-    }
-
-    Expect<Ref<node::Regular>> Node::regular_file_prelude()
-    {
-        // NOTE: reading/writing special files (excluding symlink) is not possible by FUSE alone. One
-        // can present them by disguising it as regular files though.
-        //
-        // read: - https://github.com/rpodgorny/unionfs-fuse/issues/66
-        //       - https://github.com/libfuse/libfuse/issues/182
-
-        using Ret = Expect<Ref<node::Regular>>;
-
-        // clang-format off
-        auto overload = Overload{
-            [](node::Regular&   reg) -> Ret { return reg;                                             },
-            [](node::Directory&    ) -> Ret { return Unexpect{ Errc::is_a_directory };                },
-            [](node::Link&         ) -> Ret { return Unexpect{ Errc::too_many_symbolic_link_levels }; },  // mimick open(2) when no O_NOFOLLOW
-            [](node::Other&        ) -> Ret { return Unexpect{ Errc::operation_not_supported };       },
-            [](node::Error&     err) -> Ret { return Unexpect{ err.error };                           },
-        };
-        // clang-format on
-
-        return std::visit(overload, m_value);
-    }
-
-    Expect<Ref<node::Directory>> Node::directory_prelude()
-    {
-        return as<node::Directory>();
     }
 }

@@ -163,7 +163,7 @@ namespace madbfs
         }
 
         // no change
-        if (not node.as_error() and not detect_modification(old_stat, *new_stat)) {
+        if (not node.is_error() and not detect_modification(old_stat, *new_stat)) {
             log_d(__func__, "unchanged: {:?}", path);
             node.expires_after(m_ttl.value_or(Seconds::max()));
             co_return Expect<void>{};
@@ -232,7 +232,7 @@ namespace madbfs
 
             func(*node);
 
-            if (auto dir = node->as<node::Directory>(); dir) {
+            if (auto dir = node->as_directory(); dir) {
                 for (const auto& node : dir->get().children()) {
                     stack.push_back(node.get());
                 }
@@ -252,7 +252,7 @@ namespace madbfs
             current = &maybe_node->get();
         }
 
-        auto current_dir = current->as<node::Directory>();
+        auto current_dir = current->as_directory();
         if (not current_dir) {
             co_return Unexpect{ current_dir.error() };
         }
@@ -307,7 +307,7 @@ namespace madbfs
                     }
 
                     auto& child = (**found);
-                    if (child.as_error()) {    // Error node
+                    if (child.is_error()) {    // Error node
                         log_d(__func__, "[{:?}]   changed: {:?}", current->name(), name);
 
                         auto file = co_await build_file(name, stat.mode);
@@ -343,7 +343,7 @@ namespace madbfs
         }
 
         for (const auto& node : std::as_const(list)) {
-            if (not node->as_error()) {
+            if (not node->is_error()) {
                 filler(node->name().data());
             }
         }
@@ -363,9 +363,7 @@ namespace madbfs
 
     AExpect<Str> Filesystem::readlink(path::Path path)
     {
-        auto link = (co_await traverse_or_build(path)).and_then([](Node& node) {
-            return node.as<node::Link>(true);
-        });
+        auto link = (co_await traverse_or_build(path)).and_then([](Node& node) { return node.as_link(); });
 
         if (not link) {
             co_return Unexpect{ link.error() };
@@ -387,7 +385,7 @@ namespace madbfs
     AExpect<Ref<Node>> Filesystem::mknod(path::Path path, mode_t mode, dev_t dev)
     {
         auto parent  = co_await traverse_or_build(path.parent_path());
-        auto may_dir = parent.and_then(&Node::directory_prelude);
+        auto may_dir = parent.and_then([](Node& node) { return node.as_directory(); });
 
         if (not may_dir) {
             co_return Unexpect{ may_dir.error() };
@@ -398,7 +396,7 @@ namespace madbfs
         auto  overwrite = false;
 
         if (auto node = dir.find(name); node) {
-            if (not node->get().is<node::Error>()) {
+            if (not node->get().is_error()) {
                 co_return Unexpect{ Errc::file_exists };
             }
             overwrite = true;
@@ -419,7 +417,7 @@ namespace madbfs
     AExpect<Ref<Node>> Filesystem::mkdir(path::Path path, mode_t mode)
     {
         auto parent  = co_await traverse_or_build(path.parent_path());
-        auto may_dir = parent.and_then(&Node::directory_prelude);
+        auto may_dir = parent.and_then([](Node& node) { return node.as_directory(); });
 
         if (not may_dir) {
             co_return Unexpect{ may_dir.error() };
@@ -430,7 +428,7 @@ namespace madbfs
         auto  overwrite = false;
 
         if (auto node = dir.find(name); node) {
-            if (not node->get().is<node::Error>()) {
+            if (not node->get().is_error()) {
                 co_return Unexpect{ Errc::file_exists };
             }
             overwrite = true;
@@ -451,7 +449,7 @@ namespace madbfs
     AExpect<void> Filesystem::unlink(path::Path path)
     {
         auto parent  = co_await traverse_or_build(path.parent_path());    // what if path is not traversed yet
-        auto may_dir = parent.and_then(&Node::directory_prelude);
+        auto may_dir = parent.and_then([](Node& node) { return node.as_directory(); });
 
         if (not may_dir) {
             co_return Unexpect{ may_dir.error() };
@@ -461,7 +459,7 @@ namespace madbfs
         auto  name = path.filename();
 
         auto erased = dir.find(name).and_then([&](Node& node) -> Expect<Uniq<Node>> {
-            if (node.is<node::Directory>()) {
+            if (node.is_directory()) {
                 return Unexpect{ Errc::is_a_directory };
             }
             auto erased = dir.erase(name);
@@ -488,7 +486,7 @@ namespace madbfs
     AExpect<void> Filesystem::rmdir(path::Path path)
     {
         auto parent  = co_await traverse_or_build(path.parent_path());    // what if path is not traversed yet
-        auto may_dir = parent.and_then(&Node::directory_prelude);
+        auto may_dir = parent.and_then([](Node& node) { return node.as_directory(); });
 
         if (not may_dir) {
             co_return Unexpect{ may_dir.error() };
@@ -497,14 +495,14 @@ namespace madbfs
         auto& dir  = may_dir->get();
         auto  name = path.filename();
 
-        auto target = dir.find(name).and_then([](Node& target) { return target.as<node::Directory>(true); });
+        auto target = dir.find(name).and_then([](Node& target) { return target.as_directory(); });
         if (not target) {
             co_return Unexpect{ target.error() };
         }
 
         // disallow erasing if all the children is not Error
         if (const auto& children = target->get().children(); not children.empty()) {
-            if (not sr::all_of(children, [](const Uniq<Node>& node) { return node->is<node::Error>(); })) {
+            if (not sr::all_of(children, [](const Uniq<Node>& node) { return node->is_error(); })) {
                 co_return Unexpect{ Errc::directory_not_empty };
             }
         }
@@ -525,10 +523,10 @@ namespace madbfs
         }
 
         auto  from_parent = from_node->get().parent();
-        auto& from_dir    = from_parent->as<node::Directory>()->get();    // guarantee to be directory
+        auto& from_dir    = from_parent->as_directory()->get();    // guaranteed to be directory
 
         auto to_parent = co_await traverse_or_build(to.parent_path());
-        auto to_dir    = to_parent.and_then([](Node& node) { return node.directory_prelude(); });
+        auto to_dir    = to_parent.and_then([](Node& node) { return node.as_directory(); });
         if (not to_dir) {
             co_return Unexpect{ to_dir.error() };
         }
@@ -542,7 +540,7 @@ namespace madbfs
             }
         } else if ((flags & RENAME_NOREPLACE) != 0) {
             auto to_node = co_await traverse_or_build(to);
-            if (to_node.has_value() and to_node->get().as_error() == nullptr) {
+            if (to_node.has_value() and to_node->get().is_error()) {
                 co_return Unexpect{ Errc::file_exists };
             }
         }
@@ -594,7 +592,7 @@ namespace madbfs
     AExpect<void> Filesystem::truncate(path::Path path, off_t size)
     {
         auto may_node = co_await traverse_or_build(path);
-        auto may_file = may_node.and_then([](Node& node) { return node.regular_file_prelude(); });
+        auto may_file = may_node.and_then([](Node& node) { return node.as_regular(); });
 
         if (not may_file) {
             co_return Unexpect{ may_file.error() };
@@ -621,7 +619,7 @@ namespace madbfs
     AExpect<u64> Filesystem::open(path::Path path, int flags)
     {
         auto may_node = co_await traverse_or_build(path);
-        auto may_file = may_node.and_then([](Node& node) { return node.regular_file_prelude(); });
+        auto may_file = may_node.and_then([](Node& node) { return node.as_regular(); });
 
         if (not may_file) {
             co_return Unexpect{ may_file.error() };
@@ -656,7 +654,7 @@ namespace madbfs
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        auto may_file = node->regular_file_prelude();
+        auto may_file = node->as_regular();
         if (not may_file) [[unlikely]] {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
@@ -684,7 +682,7 @@ namespace madbfs
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        auto may_file = node->regular_file_prelude();
+        auto may_file = node->as_regular();
         if (not may_file) [[unlikely]] {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
@@ -707,7 +705,7 @@ namespace madbfs
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        auto may_file = node->regular_file_prelude();
+        auto may_file = node->as_regular();
         if (not may_file) [[unlikely]] {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
@@ -763,7 +761,7 @@ namespace madbfs
     Expect<void> Filesystem::symlink(path::Path path, Str target)
     {
         auto parent  = traverse(path.parent_path());
-        auto may_dir = parent.and_then(&Node::directory_prelude);
+        auto may_dir = parent.and_then([](Node& node) { return node.as_directory(); });
 
         if (not may_dir) {
             return Unexpect{ may_dir.error() };

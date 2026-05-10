@@ -3,6 +3,8 @@
 #include "madbfs/path.hpp"
 #include "madbfs/stat.hpp"
 
+#include <madbfs-common/util/copy_const.hpp>
+
 #include <atomic>
 #include <functional>
 #include <unordered_set>
@@ -274,30 +276,60 @@ namespace madbfs
 
         /**
          * @brief Get the regular file variant with various checks for other variants.
+         *
+         * @return The reference to Regular variant or error code if others.
+         *
+         * This function transparently translate Error node into error code.
          */
-        Expect<Ref<node::Regular>> regular_file_prelude();
+        template <typename Self>
+        Expect<Ref<util::CopyConst<node::Regular, Self>>> as_regular(this Self&& self);
 
         /**
          * @brief Get the directory variant with various checks for other variants.
+         *
+         * @return The reference to Directory variant or error code if others.
+         *
+         * This function transparently translate Error node into error code.
          */
-        Expect<Ref<node::Directory>> directory_prelude();
+        template <typename Self>
+        Expect<Ref<util::CopyConst<node::Directory, Self>>> as_directory(this Self&& self);
+
+        /**
+         * @brief Get the link variant with various checks for other variants.
+         *
+         * @return The reference to Link variant or error code if others.
+         *
+         * This function transparently translate Error node into error code.
+         */
+        template <typename Self>
+        Expect<Ref<util::CopyConst<node::Link, Self>>> as_link(this Self&& self);
 
         /**
          * @brief Get Error ptr value if the variant is an Error.
          *
-         * This function is different from `as<Error>` since it's intended for use outside of Node. It will
          * return nullptr if the Node is not an Error instance.
          */
         const node::Error* as_error() const;
 
-        template <typename T>
-        bool is() const;
+        /**
+         * @brief Check if node has Regular variant.
+         */
+        bool is_regular() const { return std::holds_alternative<node::Regular>(m_value); }
 
-        template <typename T>
-        Expect<Ref<T>> as(bool check_error = false);
+        /**
+         * @brief Check if node has Directory variant.
+         */
+        bool is_directory() const { return std::holds_alternative<node::Directory>(m_value); }
 
-        template <typename T>
-        Expect<Ref<const T>> as(bool check_error = false) const;
+        /**
+         * @brief Check if node has Link variant.
+         */
+        bool is_link() const { return std::holds_alternative<node::Link>(m_value); }
+
+        /**
+         * @brief Check if node has Error variant.
+         */
+        bool is_error() const { return std::holds_alternative<node::Error>(m_value); }
 
     private:
         inline static std::atomic<u64> s_id_counter = 0;
@@ -317,39 +349,66 @@ namespace madbfs
 
 namespace madbfs
 {
-    template <typename T>
-    bool Node::is() const
+    template <typename Self>
+    Expect<Ref<util::CopyConst<node::Regular, Self>>> Node::as_regular(this Self&& self)
     {
-        return std::holds_alternative<T>(m_value);
+        // NOTE: reading/writing special files (excluding symlink) is not possible by FUSE alone. One
+        // can present them by disguising it as regular files though.
+        //
+        // read: - https://github.com/rpodgorny/unionfs-fuse/issues/66
+        //       - https://github.com/libfuse/libfuse/issues/182
+
+        using Ret = Expect<Ref<util::CopyConst<node::Regular, Self>>>;
+        using Reg = util::CopyConst<node::Regular, Self>;
+
+        // clang-format off
+        auto overload = Overload{
+            [](            Reg&       reg) -> Ret { return reg;                                             },
+            [](const node::Directory&    ) -> Ret { return Unexpect{ Errc::is_a_directory };                },
+            [](const node::Link&         ) -> Ret { return Unexpect{ Errc::too_many_symbolic_link_levels }; },  // mimick open(2) when no O_NOFOLLOW
+            [](const node::Other&        ) -> Ret { return Unexpect{ Errc::operation_not_supported };       },
+            [](const node::Error&     err) -> Ret { return Unexpect{ err.error };                           },
+        };
+        // clang-format on
+
+        return std::visit(overload, std::forward_like<Self>(self.m_value));
     }
 
-    template <typename T>
-    Expect<Ref<T>> Node::as(bool check_error)
+    template <typename Self>
+    Expect<Ref<util::CopyConst<node::Directory, Self>>> Node::as_directory(this Self&& self)
     {
-        if (check_error) {
-            if (auto* err = std::get_if<node::Error>(&m_value)) {
-                return Unexpect{ err->error };
-            }
-        }
-        if (auto* val = std::get_if<T>(&m_value)) {
-            return *val;
-        }
-        auto errc = std::same_as<node::Directory, T> ? Errc::not_a_directory : Errc::invalid_argument;
-        return Unexpect{ errc };
+        using Ret = Expect<Ref<util::CopyConst<node::Directory, Self>>>;
+        using Dir = util::CopyConst<node::Directory, Self>;
+
+        // clang-format off
+        auto overload = Overload{
+            [](const node::Regular&    ) -> Ret { return Unexpect{ Errc::not_a_directory }; },
+            [](            Dir&     dir) -> Ret { return dir;                               },
+            [](const node::Link&       ) -> Ret { return Unexpect{ Errc::not_a_directory }; },
+            [](const node::Other&      ) -> Ret { return Unexpect{ Errc::not_a_directory }; },
+            [](const node::Error&   err) -> Ret { return Unexpect{ err.error };             },
+        };
+        // clang-format on
+
+        return std::visit(overload, std::forward_like<Self>(self.m_value));
     }
 
-    template <typename T>
-    Expect<Ref<const T>> Node::as(bool check_error) const
+    template <typename Self>
+    Expect<Ref<util::CopyConst<node::Link, Self>>> Node::as_link(this Self&& self)
     {
-        if (check_error) {
-            if (auto* err = std::get_if<node::Error>(&m_value)) {
-                return Unexpect{ err->error };
-            }
-        }
-        if (auto* val = std::get_if<T>(&m_value)) {
-            return *val;
-        }
-        auto errc = std::same_as<node::Directory, T> ? Errc::not_a_directory : Errc::invalid_argument;
-        return Unexpect{ errc };
+        using Ret  = Expect<Ref<util::CopyConst<node::Link, Self>>>;
+        using Link = util::CopyConst<node::Link, Self>;
+
+        // clang-format off
+        auto overload = Overload{
+            [](const node::Regular&       ) -> Ret { return Unexpect{ Errc::invalid_argument }; },
+            [](const node::Directory&     ) -> Ret { return Unexpect{ Errc::invalid_argument }; },
+            [](            Link&      link) -> Ret { return link;                               },
+            [](const node::Other&         ) -> Ret { return Unexpect{ Errc::invalid_argument }; },
+            [](const node::Error&      err) -> Ret { return Unexpect{ err.error };              },
+        };
+        // clang-format on
+
+        return std::visit(overload, std::forward_like<Self>(self.m_value));
     }
 }
