@@ -26,7 +26,7 @@ constexpr auto expected = R"(
             - bob.txt
             - school/
                 - closure.txt
-                - hehe    ->    /bye/friends/work
+                - hehe  ->  /bye/friends/work
                 - kal'tsit.txt
             - work/
                 - eblana?.mp4
@@ -42,7 +42,7 @@ constexpr auto expected = R"(
             - qux.txt
         - foo.txt
         - movie.mp4
-        - wife    ->    /bye/friends/work/loughshinny <3.txt
+        - wife  ->  /bye/friends/work/loughshinny <3.txt
         - world.txt
 )";
 
@@ -66,7 +66,7 @@ constexpr auto expected_rm = R"(
     - hello/
         - foo.txt
         - movie.mp4
-        - wife    ->    /bye/friends/work/loughshinny <3.txt
+        - wife  ->  /bye/friends/work/loughshinny <3.txt
 )";
 
 // NOTE: since there is no ordering guarantee from the VFS, this formatter just order them alphabetically
@@ -87,7 +87,7 @@ struct fmt::formatter<madbfs::Node> : fmt::formatter<Str>
             }
 
             auto visitor = madbfs::Overload{
-                [&](const node::Link& link) { return fmt::format("    ->    {}", link.target); },
+                [&](const node::Link& l) { return fmt::format("  ->  {}", l.target.value_or("[none]")); },
                 [&](const node::Directory&) { return String{ "/" }; },
                 [&](const auto&) { return String{ "" }; },
             };

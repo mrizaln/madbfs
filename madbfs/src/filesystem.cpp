@@ -43,13 +43,7 @@ namespace madbfs
         switch (stat->mode & S_IFMT) {
         case S_IFREG: co_return build_then_expire(name, *stat, node::Regular{});
         case S_IFDIR: co_return build_then_expire(name, *stat, node::Directory{});
-        case S_IFLNK: {
-            if (auto target = co_await m_connection.readlink(path); target) {
-                co_return build_then_expire(name, *stat, node::Link{ std::move(target).value() });
-            } else {
-                co_return build_then_expire(name, *stat, node::Error{ target.error() });
-            }
-        }
+        case S_IFLNK: co_return build_then_expire(name, *stat, node::Link{});
         default: co_return build_then_expire(name, *stat, node::Other{});
         }
     }
@@ -195,12 +189,8 @@ namespace madbfs
             }
         } break;
         case S_IFLNK: {
-            if (auto target = co_await m_connection.readlink(path); target) {
-                node.set_stat(*new_stat);
-                co_await mutate_and_invalidate(node, node::Link{ std::move(target).value() });
-            } else {
-                co_await mutate_and_invalidate(node, node::Error{ target.error() });
-            }
+            node.set_stat(*new_stat);
+            co_await mutate_and_invalidate(node, node::Link{});
             node.expires_after(m_ttl.value_or(Seconds::max()));
         } break;
         default: {
@@ -277,13 +267,7 @@ namespace madbfs
             switch (mode & S_IFMT) {
             case S_IFREG: co_return node::Regular{};
             case S_IFDIR: co_return node::Directory{};
-            case S_IFLNK: {
-                if (auto target = co_await m_connection.readlink(pathbuf); target) {
-                    co_return node::Link{ std::move(target).value() };
-                } else {
-                    co_return node::Error{ target.error() };
-                }
-            }
+            case S_IFLNK: co_return node::Link{};
             default: co_return node::Other{};
             }
         };
@@ -379,9 +363,25 @@ namespace madbfs
 
     AExpect<Str> Filesystem::readlink(path::Path path)
     {
-        co_return (co_await traverse_or_build(path))
-            .and_then([](Node& node) { return node.as<node::Link>(true); })
-            .transform([](node::Link& link) { return Str{ link.target }; });
+        auto link = (co_await traverse_or_build(path)).and_then([](Node& node) {
+            return node.as<node::Link>(true);
+        });
+
+        if (not link) {
+            co_return Unexpect{ link.error() };
+        }
+
+        if (link->get().target) {
+            co_return Str{ link->get().target.value() };
+        }
+
+        auto target = co_await m_connection.readlink(path);
+        if (not target) {
+            co_return Unexpect{ target.error() };
+        }
+
+        link->get().target = std::move(target).value();
+        co_return Str{ link->get().target.value() };
     }
 
     AExpect<Ref<Node>> Filesystem::mknod(path::Path path, mode_t mode, dev_t dev)

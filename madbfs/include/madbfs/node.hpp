@@ -123,7 +123,7 @@ namespace madbfs::node
      */
     struct Link
     {
-        String target;
+        Opt<String> target = std::nullopt;
     };
 
     /**
