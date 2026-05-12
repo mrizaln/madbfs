@@ -63,7 +63,7 @@ namespace madbfs::server
                 async::spawn(
                     m_pool,
                     handle_request(std::move(*req)),
-                    [&, id](std::exception_ptr e, Var<rpc::Status, rpc::Response> resp) {
+                    [&, id](std::exception_ptr e, rpc::FallibleResponse resp) {
                         log::log_exception(e, "handler");
                         async::spawn(
                             m_channel.get_executor(),
@@ -100,7 +100,7 @@ namespace madbfs::server
         }
     }
 
-    Await<Var<rpc::Status, rpc::Response>> Connection::handle_request(rpc::Request req)
+    Await<rpc::FallibleResponse> Connection::handle_request(rpc::Request req)
     {
         co_return std::move(req).visit([&](rpc::IsRequest auto&& req) {
             return m_handler.handle_req(std::move(req));
@@ -124,7 +124,7 @@ namespace madbfs::server
             if (auto req = m_requests.extract(id); not req.empty()) {
                 auto& [_, proc] = req.mapped();
                 log_d(__func__, "response is [{}]", to_string(proc));
-                std::ignore = co_await rpc::send_response(m_socket, payload_buf, proc, response, id);
+                std::ignore = co_await rpc::send_response(m_socket, payload_buf, response, id);
             } else {
                 log_e(__func__, "response incoming for id {} but no promise registered", id.inner());
             }

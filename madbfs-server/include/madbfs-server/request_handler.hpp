@@ -9,26 +9,24 @@ namespace madbfs::server
     class RequestHandler
     {
     public:
-        using Response = Var<rpc::Status, rpc::Response>;
-
         RequestHandler() = default;
 
-        Response handle_req(rpc::req::Listdir req);
-        Response handle_req(rpc::req::Stat req);
-        Response handle_req(rpc::req::Readlink req);
-        Response handle_req(rpc::req::Mknod req);
-        Response handle_req(rpc::req::Mkdir req);
-        Response handle_req(rpc::req::Unlink req);
-        Response handle_req(rpc::req::Rmdir req);
-        Response handle_req(rpc::req::Rename req);
-        Response handle_req(rpc::req::Truncate req);
-        Response handle_req(rpc::req::Utimens req);
-        Response handle_req(rpc::req::CopyFileRange req);
-        Response handle_req(rpc::req::Open req);
-        Response handle_req(rpc::req::Close req);
-        Response handle_req(rpc::req::Read req);
-        Response handle_req(rpc::req::Write req);
-        Response handle_req(rpc::req::Ping req);
+        rpc::FallibleResponse handle_req(rpc::req::Listdir req);
+        rpc::FallibleResponse handle_req(rpc::req::Stat req);
+        rpc::FallibleResponse handle_req(rpc::req::Readlink req);
+        rpc::FallibleResponse handle_req(rpc::req::Mknod req);
+        rpc::FallibleResponse handle_req(rpc::req::Mkdir req);
+        rpc::FallibleResponse handle_req(rpc::req::Unlink req);
+        rpc::FallibleResponse handle_req(rpc::req::Rmdir req);
+        rpc::FallibleResponse handle_req(rpc::req::Rename req);
+        rpc::FallibleResponse handle_req(rpc::req::Truncate req);
+        rpc::FallibleResponse handle_req(rpc::req::Utimens req);
+        rpc::FallibleResponse handle_req(rpc::req::CopyFileRange req);
+        rpc::FallibleResponse handle_req(rpc::req::Open req);
+        rpc::FallibleResponse handle_req(rpc::req::Close req);
+        rpc::FallibleResponse handle_req(rpc::req::Read req);
+        rpc::FallibleResponse handle_req(rpc::req::Write req);
+        rpc::FallibleResponse handle_req(rpc::req::Ping req);
 
     private:
         bool m_renameat2_impl       = true;

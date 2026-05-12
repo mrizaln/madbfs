@@ -16,6 +16,11 @@ namespace madbfs::rpc
 
     static_assert(sizeof(Status) == 4, "huh, unusual system. usually enums without base (int) are 4 bytes.");
 
+    /**
+     * @brief String used for handshake.
+     */
+    static constexpr Str server_ready_string = "SERVER_IS_READY";
+
     // NOTE: if you decide to add/remove one or more entries, do update domain check in read_procedure
     enum class Procedure : u8
     {
@@ -201,19 +206,58 @@ namespace madbfs::rpc
         u64       size;
     };
 
+    struct FailedResponse
+    {
+        Procedure proc;
+        Status    status;
+    };
+
+    using FallibleResponse = Var<Response, FailedResponse>;
+
+    /**
+     * @brief Check whether a type is a variant of `Request`.
+     */
     template <typename T>
     concept IsRequest = util::VarTraits<Request::Var>::has_type<T>();
 
+    /**
+     * @brief Check whether a type is a variant of `Response`.
+     */
     template <typename T>
     concept IsResponse = util::VarTraits<Response::Var>::has_type<T>();
 
+    /**
+     * @brief Convert `Request` variant into its corresponding `Response` variant.
+     */
     template <IsRequest Req>
     using ToResp = util::VarTraits<Request::Var>::Swap<Req, Response::Var>;
 
+    /**
+     * @brief Convert `Response` variant into its corresponding `Request` variant.
+     */
     template <IsResponse Resp>
     using ToReq = util::VarTraits<Response::Var>::Swap<Resp, rpc::Request::Var>;
 
-    static constexpr Str server_ready_string = "SERVER_IS_READY";
+    /**
+     * @brief Get Procedure enum from request or response variant.
+     */
+    template <typename T>
+        requires (IsRequest<T> or IsResponse<T>)
+    Procedure to_proc()
+    {
+        using R = std::conditional_t<IsRequest<T>, Request, Response>;
+        return static_cast<Procedure>(R::template index_of<T>());
+    }
+
+    /**
+     * @brief Get Procedure enum from request or response variant.
+     */
+    template <typename T>
+        requires (IsRequest<T> or IsResponse<T>)
+    Procedure to_proc(const T&)
+    {
+        return to_proc<T>();
+    };
 
     /**
      * @brief Return string representation of enum Procedure.
@@ -260,13 +304,7 @@ namespace madbfs::rpc
      * @param response Response data for the procedure.
      * @param id Response Unique response identifier.
      */
-    AExpect<void> send_response(
-        Socket&               socket,
-        Vec<u8>&              buffer,
-        Procedure             proc,
-        Var<Status, Response> response,
-        Id                    id
-    );
+    AExpect<void> send_response(Socket& socket, Vec<u8>& buffer, FallibleResponse response, Id id);
 
     /**
      * @brief Read request header from socket.

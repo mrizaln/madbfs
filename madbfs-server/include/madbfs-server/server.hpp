@@ -18,7 +18,7 @@ namespace madbfs::server
         {
         }
 
-        ~Connection(){ stop(); }
+        ~Connection() { stop(); }
 
         AExpect<void> run();
 
@@ -32,9 +32,9 @@ namespace madbfs::server
         };
 
         using Inflight = std::unordered_map<rpc::Id, Promise, rpc::Id::Hash>;
-        using Channel  = async::Channel<Tup<rpc::Id, Var<rpc::Status, rpc::Response>>>;
+        using Channel  = async::Channel<Tup<rpc::Id, rpc::FallibleResponse>>;
 
-        Await<Var<rpc::Status, rpc::Response>> handle_request(rpc::Request req);
+        Await<rpc::FallibleResponse> handle_request(rpc::Request req);
 
         AExpect<void> send_response();
 
@@ -50,7 +50,7 @@ namespace madbfs::server
     class Server
     {
     public:
-        using HandlerSig = Await<Var<rpc::Status, rpc::Response>>(Vec<u8>& buffer, rpc::Request request);
+        using HandlerSig = Await<rpc::FallibleResponse>(Vec<u8>& buffer, rpc::Request request);
         using Handler    = std::function<HandlerSig>;
 
         Server(async::Context& context, u16 port) noexcept(false);

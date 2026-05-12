@@ -479,17 +479,17 @@ namespace madbfs::rpc
         });
     }
 
-    Span<const u8> build_response(Vec<u8>& buffer, Procedure proc, Var<Status, Response> response, Id id)
+    Span<const u8> build_response(Vec<u8>& buffer, FallibleResponse response, Id id)
     {
         buffer.clear();
 
-        if (auto err = std::get_if<0>(&response); err) {
-            return ResponseBuilder{ buffer, id, proc, *err }.build();
+        if (auto fail = std::get_if<rpc::FailedResponse>(&response); fail) {
+            return ResponseBuilder{ buffer, id, fail->proc, fail->status }.build();
         }
 
-        auto builder = ResponseBuilder{ buffer, id, proc, Status{} };
+        const auto& resp = *std::get_if<rpc::Response>(&response);
 
-        const auto& resp = *std::get_if<1>(&response);
+        auto builder = ResponseBuilder{ buffer, id, resp.proc(), Status{} };
 
         return resp.visit(Overload{
             [&](const resp::Stat& resp) {
@@ -844,15 +844,9 @@ namespace madbfs::rpc
         co_return Expect<void>{};
     }
 
-    AExpect<void> send_response(
-        Socket&               socket,
-        Vec<u8>&              buffer,
-        Procedure             proc,
-        Var<Status, Response> response,
-        Id                    id
-    )
+    AExpect<void> send_response(Socket& socket, Vec<u8>& buffer, FallibleResponse response, Id id)
     {
-        auto payload = build_response(buffer, proc, response, id);
+        auto payload = build_response(buffer, response, id);
         auto n       = co_await async::write_exact(socket, payload);
         HANDLE_ERROR(n, payload.size(), "failed to send response payload");
         co_return Expect<void>{};

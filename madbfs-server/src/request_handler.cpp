@@ -16,9 +16,23 @@
 
 namespace
 {
-    madbfs::rpc::Status status_from_errno(
+    /**
+     * @brief Create failed response from req and status.
+     *
+     * The req is used for the type information only, the value doesn't matter at all.
+     */
+    madbfs::rpc::FailedResponse failed(const madbfs::rpc::IsRequest auto& req, madbfs::rpc::Status status)
+    {
+        return { .proc = madbfs::rpc::to_proc(req), .status = status };
+    }
+
+    /**
+     * @brief Get Status from errno, with extra logging.
+     */
+    template <fmt::formattable T>
+    madbfs::rpc::Status errno_status(
         madbfs::Str          name,
-        madbfs::Str          path,
+        T&&                  ident,
         madbfs::Str          msg,
         std::source_location loc = std::source_location::current()
     )
@@ -27,26 +41,26 @@ namespace
         using madbfs::log::log_loc;
 
         auto err = errno;
-        log_loc(loc, Level::err, "{}: {} {:?}: {}", name, msg, path, strerror(err));
+        log_loc(loc, Level::err, "{}: {} [{:}]: {}", name, msg, ident, strerror(err));
         return static_cast<madbfs::rpc::Status>(err);
     }
 }
 
 namespace madbfs::server
 {
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::Listdir req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Listdir req)
     {
         auto& [path, buf] = req;
         log_d("listdir", "path={:?}", path.data());
 
         auto dir = ::opendir(path.data());
         if (dir == nullptr) {
-            return status_from_errno(__func__, path, "failed to open dir");
+            return failed(req, errno_status(__func__, path, "failed to open dir"));
         }
 
         auto deferred = util::defer([=] {
             if (::closedir(dir) < 0) {
-                std::ignore = status_from_errno(__func__, path, "failed to close dir");
+                std::ignore = errno_status(__func__, path, "failed to close dir");
             }
         });
 
@@ -64,7 +78,7 @@ namespace madbfs::server
 
             struct stat filestat = {};
             if (auto res = ::fstatat(dirfd, entry->d_name, &filestat, AT_SYMLINK_NOFOLLOW); res < 0) {
-                std::ignore = status_from_errno(__func__, name, "failed to stat file");
+                std::ignore = errno_status(__func__, name, "failed to stat file");
                 continue;
             }
 
@@ -99,14 +113,14 @@ namespace madbfs::server
         return rpc::resp::Listdir{ .entries = std::move(entries) };
     }
 
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::Stat req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Stat req)
     {
         const auto& [path] = req;
         log_d("stat", "path={:?}", path.data());
 
         struct stat filestat = {};
         if (auto res = ::lstat(path.data(), &filestat); res < 0) {
-            return status_from_errno(__func__, path, "failed to stat file");
+            return failed(req, errno_status(__func__, path, "failed to stat file"));
         }
 
         return rpc::resp::Stat{
@@ -121,7 +135,7 @@ namespace madbfs::server
         };
     }
 
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::Readlink req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Readlink req)
     {
         auto&& [path, out_buf] = req;
         log_d("readlink", "path={:?}", path.data());
@@ -129,7 +143,7 @@ namespace madbfs::server
         // I can't use server's buffer as destination since using it will invalidate path.
         auto len = ::readlink(path.data(), m_readlink_buf.data(), m_readlink_buf.size());
         if (len < 0) {
-            return status_from_errno(__func__, path, "failed to readlink");
+            return failed(req, errno_status(__func__, path, "failed to readlink"));
         }
 
         // now I can use the server's buffer
@@ -141,55 +155,55 @@ namespace madbfs::server
         };
     }
 
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::Mknod req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Mknod req)
     {
         const auto& [path, mode, dev] = req;
         log_d("mknod", "path={:?} mode={:#08o} dev={:#04x}", path.data(), mode, dev);
 
         if (::mknod(path.data(), mode, dev) < 0) {
-            return status_from_errno(__func__, path, "failed to create file");
+            return failed(req, errno_status(__func__, path, "failed to create file"));
         }
 
         return rpc::resp::Mknod{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::Mkdir req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Mkdir req)
     {
         const auto& [path, mode] = req;
         log_d("mkdir", "path={:?} mode={:#08o}", path.data(), mode);
 
         if (::mkdir(path.data(), mode) < 0) {
-            return status_from_errno(__func__, path, "failed to create directory");
+            return failed(req, errno_status(__func__, path, "failed to create directory"));
         }
 
         return rpc::resp::Mkdir{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::Unlink req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Unlink req)
     {
         const auto& [path] = req;
         log_d("unlink", "path={:?}", path.data());
 
         if (::unlink(path.data()) < 0) {
-            return status_from_errno(__func__, path, "failed to remove file");
+            return failed(req, errno_status(__func__, path, "failed to remove file"));
         }
 
         return rpc::resp::Unlink{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::Rmdir req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Rmdir req)
     {
         const auto& [path] = req;
         log_d("rmdir", "path={:?}", path.data());
 
         if (::rmdir(path.data()) < 0) {
-            return status_from_errno(__func__, path, "failed to remove directory");
+            return failed(req, errno_status(__func__, path, "failed to remove directory"));
         }
 
         return rpc::resp::Rmdir{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::Rename req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Rename req)
     {
         const auto& [from, to, flags] = req;
         log_d("rename", "from={:?} -> to={:?} [flags={}]", from, to, flags);
@@ -204,7 +218,7 @@ namespace madbfs::server
                 m_renameat2_impl = false;
                 log_w("rename", "renameat2 syscall is not implemented, proceeding into fallback");
             } else if (res < 0) {
-                return status_from_errno(__func__, from, "failed to rename file");
+                return failed(req, errno_status(__func__, from, "failed to rename file"));
             } else {
                 return rpc::resp::Rename{};
             }
@@ -212,29 +226,29 @@ namespace madbfs::server
 
         // renameat don't take flags
         if (flags != 0) {
-            return rpc::Status::invalid_argument;
+            return failed(req, rpc::Status::invalid_argument);
         }
 
         if (::renameat(0, from.data(), 0, to.data()) < 0) {
-            return status_from_errno(__func__, from, "failed to rename file");
+            return failed(req, errno_status(__func__, from, "failed to rename file"));
         }
 
         return rpc::resp::Rename{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::Truncate req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Truncate req)
     {
         const auto& [path, size] = req;
         log_d("truncate", "path={:?} size={}", path.data(), size);
 
         if (::truncate(path.data(), size) < 0) {
-            return status_from_errno(__func__, path, "failed to truncate file");
+            return failed(req, errno_status(__func__, path, "failed to truncate file"));
         }
 
         return rpc::resp::Truncate{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::Utimens req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Utimens req)
     {
         const auto& [path, atime, mtime] = req;
 
@@ -243,43 +257,43 @@ namespace madbfs::server
 
         auto times = Array{ atime, mtime };
         if (::utimensat(0, path.data(), times.data(), AT_SYMLINK_NOFOLLOW) < 0) {
-            return status_from_errno(__func__, path, "failed to utimens file");
+            return failed(req, errno_status(__func__, path, "failed to utimens file"));
         }
 
         return rpc::resp::Utimens{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::CopyFileRange req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::CopyFileRange req)
     {
         const auto& [in, in_off, out, out_off, size] = req;
         log_d("copy_file_range", "from={:?} -> to={:?}", in.data(), out.data());
 
         auto in_fd = ::open(in.data(), O_RDONLY);
         if (in_fd < 0) {
-            return status_from_errno(__func__, in, "failed to open file");
+            return failed(req, errno_status(__func__, in, "failed to open file"));
         }
         auto in_deferred = util::defer([=] {
             if (::close(in_fd) < 0) {
-                std::ignore = status_from_errno(__func__, in, "failed to close file");
+                std::ignore = errno_status(__func__, in, "failed to close file");
             }
         });
 
         if (::lseek(in_fd, in_off, SEEK_SET) < 0) {
-            return status_from_errno(__func__, in, "failed to seek file");
+            return failed(req, errno_status(__func__, in, "failed to seek file"));
         }
 
         auto out_fd = ::open(out.data(), O_WRONLY);
         if (out_fd < 0) {
-            return status_from_errno(__func__, out, "failed to open file");
+            return failed(req, errno_status(__func__, out, "failed to open file"));
         }
         auto out_deferred = util::defer([=] {
             if (::close(out_fd) < 0) {
-                std::ignore = status_from_errno(__func__, out, "failed to close file");
+                std::ignore = errno_status(__func__, out, "failed to close file");
             }
         });
 
         if (::lseek(out_fd, out_off, SEEK_SET) < 0) {
-            return status_from_errno(__func__, out, "failed to seek file");
+            return failed(req, errno_status(__func__, out, "failed to seek file"));
         }
 
         // NOTE: copy_file_range syscall only available from API level 34
@@ -302,7 +316,7 @@ namespace madbfs::server
                 // dealing with just this operation
                 log_w("copy_file_range", "cross-filesystem copy, proceeding into fallback");
             } else if (res < 0) {
-                return status_from_errno(__func__, out, "failed to copy file range");
+                return failed(req, errno_status(__func__, out, "failed to copy file range"));
             }
         }
 
@@ -336,38 +350,38 @@ namespace madbfs::server
     end_copy:
 
         if (last_read < 0 or last_write < 0) {
-            return status_from_errno(__func__, out, "failed to copy file");
+            return failed(req, errno_status(__func__, out, "failed to copy file"));
         }
 
         return rpc::resp::CopyFileRange{ .size = static_cast<usize>(copied) };
     }
 
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::Open req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Open req)
     {
         const auto& [path, mode] = req;
         log_d("open", "path={:?} mode={}", path.data(), static_cast<int>(mode));
 
         auto fd = ::open(path.data(), static_cast<int>(req.mode));
         if (fd < 0) {
-            return status_from_errno(__func__, path, "failed to open file");
+            return failed(req, errno_status(__func__, path, "failed to open file"));
         }
 
         return rpc::resp::Open{ .fd = static_cast<u64>(fd) };
     }
 
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::Close req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Close req)
     {
         const auto& [fd] = req;
         log_d("close", "fd={}", fd);
 
         if (::close(static_cast<int>(fd)) < 0) {
-            return status_from_errno(__func__, fmt::format("[{}]", fd), "failed to close file");
+            return failed(req, errno_status(__func__, fd, "failed to close file"));
         }
 
         return rpc::resp::Close{};
     }
 
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::Read req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Read req)
     {
         const auto& [fd, offset, out] = req;
         log_d("read", "fd={} offset={} size={}", fd, offset, out.size());
@@ -375,18 +389,18 @@ namespace madbfs::server
         auto fd_int = static_cast<int>(fd);
 
         if (::lseek(fd_int, offset, SEEK_SET) < 0) {
-            return status_from_errno(__func__, fmt::format("[{}]", fd), "failed to seek file");
+            return failed(req, errno_status(__func__, fd, "failed to seek file"));
         }
 
         auto len = ::read(fd_int, out.data(), out.size());
         if (len < 0) {
-            return status_from_errno(__func__, fmt::format("[{}]", fd), "failed to read file");
+            return failed(req, errno_status(__func__, fd, "failed to read file"));
         }
 
         return rpc::resp::Read{ .read = Span{ out.data(), static_cast<usize>(len) } };
     }
 
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::Write req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Write req)
     {
         const auto& [fd, offset, in] = req;
         log_d("write", "fd={} offset={}, size={}", fd, offset, in.size());
@@ -394,18 +408,18 @@ namespace madbfs::server
         auto fd_int = static_cast<int>(fd);
 
         if (::lseek(fd_int, offset, SEEK_SET) < 0) {
-            return status_from_errno(__func__, fmt::format("[{}]", fd), "failed to seek file");
+            return failed(req, errno_status(__func__, fd, "failed to seek file"));
         }
 
         auto len = ::write(fd_int, in.data(), in.size());
         if (len < 0) {
-            return status_from_errno(__func__, fmt::format("[{}]", fd), "failed to read file");
+            return failed(req, errno_status(__func__, fd, "failed to read file"));
         }
 
         return rpc::resp::Write{ .size = static_cast<usize>(len) };
     }
 
-    RequestHandler::Response RequestHandler::handle_req(rpc::req::Ping req)
+    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Ping req)
     {
         return rpc::resp::Ping{ .num = req.num };
     }

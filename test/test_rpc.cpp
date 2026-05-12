@@ -152,15 +152,15 @@ Await<void> echo_response()
         auto dummy_buf = Vec<u8>{};
         auto dummy     = create_dummy_request(header->proc, dummy_buf);
 
-        auto req_buf = Vec<u8>{};
-        auto req     = co_await rpc::receive_response(*sock, req_buf, *header, dummy);
-        if (not req) {
-            log_e("{}: failed to receive response: {}", __func__, err_msg(req.error()));
+        auto resp_buf = Vec<u8>{};
+        auto resp     = co_await rpc::receive_response(*sock, resp_buf, *header, dummy);
+        if (not resp) {
+            log_e("{}: failed to receive response: {}", __func__, err_msg(resp.error()));
             continue;
         }
 
         auto payload_buf = Vec<u8>{};
-        std::ignore      = co_await rpc::send_response(*sock, payload_buf, req->proc(), *req, header->id);
+        std::ignore      = co_await rpc::send_response(*sock, payload_buf, *resp, header->id);
     }
 }
 
@@ -265,7 +265,6 @@ int main()
 
         auto id     = Id{ 42 };
         auto buffer = Vec<u8>{};
-        auto proc   = Procedure::Listdir;
         auto response = resp::Listdir{
             .entries = Vec<Pair<Str, resp::Stat>>{
                 { "earth", resp::Stat{ 
@@ -298,7 +297,7 @@ int main()
             },
         };
 
-        std::ignore = async::block(context, rpc::send_response(socket, buffer, proc, response, id));
+        std::ignore = async::block(context, rpc::send_response(socket, buffer, response, id));
 
         auto header = async::block(context, rpc::receive_response_header(socket));
         ut::expect(header.has_value() >> ut::fatal);
