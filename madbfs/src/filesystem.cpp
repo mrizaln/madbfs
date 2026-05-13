@@ -415,6 +415,7 @@ namespace madbfs
         }
 
         if (auto created = co_await m_connection.mknod(path, mode, dev); not created) {
+            parent->get().refresh_stat(timespec_omit, timespec_now);
             co_return Unexpect{ created.error() };
         }
 
@@ -447,6 +448,7 @@ namespace madbfs
         }
 
         if (auto created = co_await m_connection.mkdir(path, mode); not created) {
+            parent->get().refresh_stat(timespec_omit, timespec_now);
             co_return Unexpect{ created.error() };
         }
 
@@ -486,6 +488,7 @@ namespace madbfs
         if (auto res = co_await m_connection.unlink(path); not res) {
             auto overwritten = dir.insert(std::move(*erased), true);    // re-insert on failure :P
             assert(not overwritten.has_value());
+            parent->get().refresh_stat(timespec_omit, timespec_now);
             co_return Unexpect{ res.error() };
         }
 
@@ -519,7 +522,10 @@ namespace madbfs
             }
         }
 
-        co_return (co_await m_connection.rmdir(path)).transform([&] { dir.erase(name); });
+        co_return (co_await m_connection.rmdir(path)).transform([&] {
+            parent->get().refresh_stat(timespec_omit, timespec_now);
+            dir.erase(name);
+        });
     }
 
     AExpect<void> Filesystem::rename(path::Path from, path::Path to, u32 flags)
@@ -561,6 +567,9 @@ namespace madbfs
         if (not res) {
             co_return Unexpect{ res.error() };
         }
+
+        from_parent->refresh_stat(timespec_omit, timespec_now);
+        to_parent->get().refresh_stat(timespec_omit, timespec_now);
 
         auto node = from_dir.extract(from.filename()).value();
         co_await m_cache.rename(node->id(), to);
@@ -754,9 +763,14 @@ namespace madbfs
         std::ignore = co_await flush(in_fd);
         std::ignore = co_await flush(out_fd);
 
-        auto node = traverse(out_path);    // path must exist
-        if (not node) {
-            co_return Unexpect{ node.error() };
+        auto in_node = traverse(in_path);
+        if (not in_node) {
+            co_return Unexpect{ in_node.error() };
+        }
+
+        auto out_node = traverse(out_path);
+        if (not out_node) {
+            co_return Unexpect{ out_node.error() };
         }
 
         auto copied = co_await m_connection.copy_file_range(in_path, in_off, out_path, out_off, size);
@@ -765,7 +779,8 @@ namespace madbfs
         }
 
         co_return (co_await m_connection.stat(out_path)).and_then([&](Stat new_stat) {
-            node->get().set_stat(new_stat);
+            in_node->get().refresh_stat(timespec_now, timespec_omit);
+            out_node->get().set_stat(new_stat);
             return copied;
         });
     }
