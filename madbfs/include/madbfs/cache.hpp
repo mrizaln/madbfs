@@ -355,9 +355,8 @@ namespace madbfs
          *
          * @param fd Real write file descriptor on device.
          * @param page Page to be flushed.
-         * @param id Associated file id of the page.
          */
-        AExpect<void> flush_at(u64 fd, Page& page, Id id);
+        AExpect<void> flush_at(u64 fd, Page& page);
 
         Connection& m_connection;
 

@@ -236,7 +236,7 @@ namespace madbfs
             if (not page->is_dirty()) {
                 continue;
             }
-            auto res = co_await flush_at(*entry->get().write_fd, *page, id);
+            auto res = co_await flush_at(*entry->get().write_fd, *page);
             if (not res) {
                 log_e(__func__, "failed to flush [{}]: {}", id.inner(), err_msg(res.error()));
                 co_return Unexpect{ res.error() };
@@ -529,13 +529,12 @@ namespace madbfs
                     e.write_fd = *fd;
                 }
 
-                auto offset = static_cast<off_t>(idx * m_page_size);
-                if (auto res = co_await on_flush(*entry->get().write_fd, page.buf(), offset); not res) {
+                if (auto res = co_await flush_at(*entry->get().write_fd, page); not res) {
                     log_c(__func__, "failed to force push page [id={}|idx={}]", id.inner(), idx);
                 }
             }
 
-            // this is done last since on_flush requires entry to still exists
+            // this is done last since flush_at requires entry to still exists
             entry->get().pages.erase(idx);
         }
     }
@@ -700,9 +699,9 @@ namespace madbfs
         co_return written;
     }
 
-    AExpect<void> Cache::flush_at(u64 fd, Page& page, Id id)
+    AExpect<void> Cache::flush_at(u64 fd, Page& page)
     {
-        log_t(__func__, "flush: [id={}|idx={}]", id.inner(), page.key().index);
+        log_t(__func__, "flush: [id={}|idx={}]", page.key().id.inner(), page.key().index);
 
         if (auto queued = m_read_queue.find(page.key()); queued != m_read_queue.end()) {
             auto fut = queued->second;
