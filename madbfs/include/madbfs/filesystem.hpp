@@ -90,7 +90,7 @@ namespace madbfs
         );
         // --------------
 
-        // this function only used to link already existing files, user can't and shouldn't use it
+        // This function only used to link already existing files, user can't and shouldn't use it
         Expect<void> symlink(path::Path path, Str target);
 
         /**

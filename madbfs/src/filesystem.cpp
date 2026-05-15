@@ -558,7 +558,7 @@ namespace madbfs
             }
         } else if ((flags & RENAME_NOREPLACE) != 0) {
             auto to_node = co_await traverse_or_build(to);
-            if (to_node.has_value() and to_node->get().is_error()) {
+            if (to_node.has_value() and not to_node->get().is_error()) {
                 co_return Unexpect{ Errc::file_exists };
             }
         }
