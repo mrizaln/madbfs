@@ -33,6 +33,7 @@ namespace madbfs::args
         int         port       = 23237;
         int         no_server  = false;
         int         adb_only   = false;
+        int         no_cache   = false;
 
         ~MadbfsOpt()
         {
@@ -57,6 +58,12 @@ namespace madbfs::args
         using VarWrapper::VarWrapper;
     };
 
+    struct Caching
+    {
+        usize cachesize;
+        usize pagesize;
+    };
+
     /**
      * @class ParsedOpt
      *
@@ -64,15 +71,14 @@ namespace madbfs::args
      */
     struct ParsedOpt
     {
-        String     mount;
-        String     serial;
-        Connection connection;
-        log::Level log_level;
-        String     log_file;
-        usize      cachesize;
-        usize      pagesize;
-        i32        ttl;
-        i32        timeout;
+        String       mount;
+        String       serial;
+        Connection   connection;
+        Opt<Caching> caching;
+        log::Level   log_level;
+        String       log_file;
+        i32          ttl;
+        i32          timeout;
     };
 
     /**
@@ -115,6 +121,7 @@ namespace madbfs::args
         { "--port=%d",       offsetof(MadbfsOpt, port),       true },
         { "--no-server",     offsetof(MadbfsOpt, no_server),  true },
         { "--adb-only",      offsetof(MadbfsOpt, adb_only),   true },
+        { "--no-cache",      offsetof(MadbfsOpt, no_cache),   true },
         // clang-format on
         FUSE_OPT_END,
     });

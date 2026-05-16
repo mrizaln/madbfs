@@ -35,19 +35,33 @@ try {
         return 1;
     }
 
-    fmt::println("[madbfs] mount '{}' [cache={} MiB, page={} KiB]", opt.serial, opt.cachesize, opt.pagesize);
-    fmt::println("[madbfs] unmount with 'fusermount -u {:?}'", opt.mount);
+    if (opt.caching) {
+        fmt::println(
+            "[madbfs] mount '{}' [cache={} MiB, page={} KiB]",
+            opt.serial,
+            opt.caching->cachesize,
+            opt.caching->pagesize
+        );
+    } else {
+        fmt::println("[madbfs] mount '{}' [no cache]", opt.serial);
+    }
 
     if (opt.log_file != "-") {
-        madbfs::log_i(
-            __func__,
-            "[madbfs] mount '{}' at '{}' with cache size {} MiB and page size {} KiB",
-            opt.serial,
-            opt.mount,
-            opt.cachesize,
-            opt.pagesize
-        );
+        if (opt.caching) {
+            madbfs::log_i(
+                __func__,
+                "[madbfs] mount '{}' at '{}' with cache size {} MiB and page size {} KiB",
+                opt.serial,
+                opt.mount,
+                opt.caching->cachesize,
+                opt.caching->pagesize
+            );
+        } else {
+            madbfs::log_i(__func__, "[madbfs] mount '{}' at '{}' with cache disabled", opt.serial, opt.mount);
+        }
     }
+
+    fmt::println("[madbfs] unmount with 'fusermount -u {:?}'", opt.mount);
 
     if (::setenv("ANDROID_SERIAL", opt.serial.c_str(), 1) < 0) {
         fmt::println(stderr, "error: failed to set env variable 'ANDROID_SERIAL' ({})", strerror(errno));

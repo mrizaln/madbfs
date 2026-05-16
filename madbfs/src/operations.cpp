@@ -121,14 +121,16 @@ namespace madbfs::operations
             }
         }
 
-        auto cache_size = args->cachesize * 1024 * 1024;
-        auto page_size  = args->pagesize * 1024;
-        auto max_pages  = cache_size / page_size;
-        auto ttl        = args->ttl < 1 ? std::nullopt : Opt<Seconds>{ args->ttl };
-        auto timeout    = args->timeout < 1 ? std::nullopt : Opt<Seconds>{ args->timeout };
-        auto fuse       = ::fuse_get_context()->fuse;
+        auto caching = args->caching.transform([](auto& c) {
+            auto page_size = c.pagesize * 1024;
+            return Caching{ .page_size = page_size, .max_pages = (c.cachesize * 1024 * 1024) / page_size };
+        });
 
-        return new Madbfs{ fuse, args->connection, page_size, max_pages, args->mount, ttl, timeout };
+        auto ttl     = args->ttl < 1 ? std::nullopt : Opt<Seconds>{ args->ttl };
+        auto timeout = args->timeout < 1 ? std::nullopt : Opt<Seconds>{ args->timeout };
+        auto fuse    = ::fuse_get_context()->fuse;
+
+        return new Madbfs{ fuse, args->connection, caching, args->mount, ttl, timeout };
     }
 
     void destroy(void* private_data) noexcept
