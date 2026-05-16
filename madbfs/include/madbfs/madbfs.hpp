@@ -26,8 +26,7 @@ namespace madbfs
         Madbfs(
             struct fuse*     fuse,
             args::Connection connection,
-            usize            max_pages,
-            usize            page_size,
+            Opt<Caching>     caching,
             Str              mount_point,
             Opt<Seconds>     ttl,
             Opt<Seconds>     timeout

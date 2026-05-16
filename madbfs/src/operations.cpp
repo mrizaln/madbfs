@@ -162,13 +162,16 @@ namespace madbfs::operations
 
         std::memset(stbuf, 0, sizeof(struct stat));
 
+        const auto default_page_size = 64 * 1024;    // use minimum page size
+        auto page_size = get_data().fs().cache().transform(&Cache::page_size).value_or(default_page_size);
+
         stbuf->st_ino     = static_cast<ino_t>(id.inner());
         stbuf->st_mode    = stat.mode;
         stbuf->st_nlink   = stat.links;
         stbuf->st_uid     = stat.uid;
         stbuf->st_gid     = stat.gid;
         stbuf->st_size    = stat.size;
-        stbuf->st_blksize = static_cast<blksize_t>(get_data().fs().cache().page_size());
+        stbuf->st_blksize = static_cast<blksize_t>(page_size);
         stbuf->st_blocks  = (stbuf->st_size + 511) / 512;    // strictly in 512 B units [read stat(3)]
         stbuf->st_atim    = stat.atime;
         stbuf->st_mtim    = stat.mtime;

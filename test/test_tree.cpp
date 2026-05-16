@@ -222,7 +222,7 @@ int main()
         auto guard      = madbfs::net::make_work_guard(context);
         auto thread     = std::jthread{ [&] { context.run(); } };
         auto connection = madbfs::Connection{ context, mock::dummy_strategy };
-        auto tree       = Filesystem{ connection, 64 * 1024, 1024, std::nullopt };
+        auto tree       = Filesystem{ connection, std::nullopt, std::nullopt };
 
         using madbfs::path::operator""_path;
 

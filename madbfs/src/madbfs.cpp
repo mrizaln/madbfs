@@ -23,9 +23,11 @@ namespace madbfs
     {
         Await<json::value> handle(ipc::op::Info)
         {
-            const auto page_size     = madbfs.fs().cache().page_size();
-            const auto max_pages     = madbfs.fs().cache().max_pages();
-            const auto current_pages = madbfs.fs().cache().current_pages();
+            const auto& cache = madbfs.fs().cache();
+
+            const auto page_size     = cache.transform(&Cache::page_size).value_or(0);
+            const auto max_pages     = cache.transform(&Cache::max_pages).value_or(0);
+            const auto current_pages = cache.transform(&Cache::current_pages).value_or(0);
             const auto ttl_sec       = madbfs.fs().ttl().transform(&Seconds::count);
             const auto timeout_sec   = madbfs.m_timeout.transform(&Seconds::count);
 
@@ -43,10 +45,14 @@ namespace madbfs
 
         Await<json::value> handle(ipc::op::InvalidateCache)
         {
-            const auto page_size     = madbfs.fs().cache().page_size();
-            const auto current_pages = madbfs.fs().cache().current_pages();
+            auto& cache = madbfs.fs().cache();
 
-            co_await madbfs.fs().cache().invalidate_all();
+            const auto page_size     = cache.transform(&Cache::page_size).value_or(0);
+            const auto current_pages = cache.transform(&Cache::current_pages).value_or(0);
+
+            if (cache) {
+                co_await cache->invalidate_all();
+            }
 
             co_return json::value{ { "size", page_size * current_pages / 1024 / 1024 } };
         }
@@ -59,8 +65,10 @@ namespace madbfs
 
         Await<json::value> handle(ipc::op::SetPageSize size)
         {
-            const auto old_size = madbfs.fs().cache().page_size();
-            const auto old_max  = madbfs.fs().cache().max_pages();
+            auto& cache = madbfs.fs().cache();
+
+            const auto old_size = cache.transform(&Cache::page_size).value_or(0);
+            const auto old_max  = cache.transform(&Cache::max_pages).value_or(0);
 
             auto new_size = std::bit_ceil(size.kib * 1024);
             new_size      = std::clamp(new_size, lowest_page_size, highest_page_size);
@@ -68,8 +76,13 @@ namespace madbfs
             auto new_max = std::bit_ceil(old_max * old_size / new_size);
             new_max      = std::max(new_max, lowest_max_pages);
 
-            co_await madbfs.fs().cache().set_page_size(new_size);
-            co_await madbfs.fs().cache().set_max_pages(new_max);
+            if (cache) {
+                co_await cache->set_page_size(new_size);
+                co_await cache->set_max_pages(new_max);
+            } else {
+                new_size = 0;
+                new_max  = 0;
+            }
 
             co_return json::value{
                 { "page_size",
@@ -83,13 +96,19 @@ namespace madbfs
 
         Await<json::value> handle(ipc::op::SetCacheSize size)
         {
-            const auto page    = madbfs.fs().cache().page_size();
-            const auto old_max = madbfs.fs().cache().max_pages();
+            auto& cache = madbfs.fs().cache();
 
-            auto new_max = std::bit_ceil(size.mib * 1024 * 1024 / page);
+            const auto page    = cache.transform(&Cache::page_size).value_or(0);
+            const auto old_max = cache.transform(&Cache::max_pages).value_or(0);
+
+            auto new_max = std::bit_ceil(size.mib * 1024 * 1024 / (page ? page : 1));
             new_max      = std::max(new_max, lowest_max_pages);
 
-            co_await madbfs.fs().cache().set_max_pages(new_max);
+            if (cache) {
+                co_await cache->set_max_pages(new_max);
+            } else {
+                new_max = 0;
+            }
 
             co_return json::value{
                 { "cache_size",
@@ -205,8 +224,7 @@ namespace madbfs
     Madbfs::Madbfs(
         struct fuse*     fuse,
         args::Connection connection,
-        usize            page_size,
-        usize            max_pages,
+        Opt<Caching>     caching,
         Str              mountpoint,
         Opt<Seconds>     ttl,
         Opt<Seconds>     timeout
@@ -216,7 +234,7 @@ namespace madbfs
         , m_work_guard{ m_async_ctx.get_executor() }
         , m_work_thread{ [this] { work_thread_function(m_async_ctx); } }
         , m_connection{ prepare_connection(m_async_ctx, connection) }
-        , m_fs{ m_connection, page_size, max_pages, ttl }
+        , m_fs{ m_connection, caching, ttl }
         , m_ipc{ create_ipc(m_async_ctx) }
         , m_watchdog_timer{ m_async_ctx }
         , m_reaper_timer{ m_async_ctx }
@@ -290,13 +308,17 @@ namespace madbfs
             if (not ok) {
                 log_i(__func__, "connection is timed out");
                 if (auto res = co_await m_connection.reconnect(); res) {
-                    co_await m_fs.cache().invalidate_fds(false);
+                    if (auto& cache = m_fs.cache(); cache) {
+                        co_await cache->invalidate_fds(false);
+                    }
                     co_await m_connection.start();
                 }
             } else if (not m_connection.is_optimal()) {
                 log_i(__func__, "connection is ok but not optimized. trying to optimize...");
                 if (auto res = co_await m_connection.optimize(); res) {
-                    co_await m_fs.cache().invalidate_fds(false);
+                    if (auto& cache = m_fs.cache(); cache) {
+                        co_await cache->invalidate_fds(false);
+                    }
                     co_await m_connection.start();
                 }
             } else {
@@ -316,15 +338,16 @@ namespace madbfs
                 break;
             }
 
-            co_await m_fs.cache().clean_stale_fds();
+            if (auto& cache = m_fs.cache(); cache) {
+                co_await cache->clean_stale_fds();
+            }
 
             const auto& handles = m_fs.handles();
 
-            auto cap   = handles.size();
-            auto pred  = [](auto&& v) { return std::get<0>(v) == nullptr; };
-            auto empty = static_cast<usize>(sr::count_if(handles.iter(), pred));
+            auto cap   = handles.capacity();
+            auto empty = handles.count_empty();
 
-            log_i(__func__, "file handles [cap={:>04d}|open={:>04d}|unused={:>04d}]", cap, cap - empty, empty);
+            log_i(__func__, "file handles [cap={:>04d}|open={:>04d}|empty={:>04d}]", cap, cap - empty, empty);
         }
     }
 }
