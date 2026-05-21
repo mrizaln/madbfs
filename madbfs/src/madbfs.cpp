@@ -21,46 +21,70 @@ namespace madbfs
     // on: gcc (GCC) 15.2.1 20251211 (Red Hat 15.2.1-5).
     struct Madbfs::IpcHandler
     {
-        Await<json::value> handle(ipc::op::Info)
+        AExpect<json::value> handle(ipc::op::Info)
         {
-            const auto page_size     = madbfs.fs().cache().page_size();
-            const auto max_pages     = madbfs.fs().cache().max_pages();
-            const auto current_pages = madbfs.fs().cache().current_pages();
-            const auto ttl_sec       = madbfs.fs().ttl().transform(&Seconds::count);
-            const auto timeout_sec   = madbfs.m_timeout.transform(&Seconds::count);
+            const auto& cache = madbfs.fs().cache();
 
-            co_return json::value{
-                { "connection", madbfs.m_connection.name() },
-                { "log_level", log::level_to_str(log::get_level()) },
-                { "ttl", ttl_sec.value_or(0) },
-                { "timeout", timeout_sec.value_or(0) },
-                { "page_size", page_size / 1024 },
-                { "cache_size",
-                  { { "max", page_size * max_pages / 1024 / 1024 },
-                    { "current", page_size * current_pages / 1024 / 1024 } } },
-            };
+            const auto ttl_sec     = madbfs.fs().ttl().transform(&Seconds::count).value_or(0);
+            const auto timeout_sec = madbfs.m_timeout.transform(&Seconds::count).value_or(0);
+
+            if (cache) {
+                const auto page_size     = cache->page_size();
+                const auto max_pages     = cache->max_pages();
+                const auto current_pages = cache->current_pages();
+
+                co_return json::value{
+                    { "connection", madbfs.m_connection.name() },
+                    { "log_level", log::level_to_str(log::get_level()) },
+                    { "ttl", ttl_sec },
+                    { "timeout", timeout_sec },
+                    { "cache",
+                      { { "page_size", page_size / 1024 },
+                        { "cache_size",
+                          { { "max", page_size * max_pages / 1024 / 1024 },
+                            { "current", page_size * current_pages / 1024 / 1024 } } } } }
+                };
+            } else {
+                co_return json::value{
+                    { "connection", madbfs.m_connection.name() },
+                    { "log_level", log::level_to_str(log::get_level()) },
+                    { "ttl", ttl_sec },
+                    { "timeout", timeout_sec },
+                    { "cache", nullptr },
+                };
+            }
         }
 
-        Await<json::value> handle(ipc::op::InvalidateCache)
+        AExpect<json::value> handle(ipc::op::InvalidateCache)
         {
-            const auto page_size     = madbfs.fs().cache().page_size();
-            const auto current_pages = madbfs.fs().cache().current_pages();
+            auto& cache = madbfs.fs().cache();
+            if (not cache) {
+                co_return Unexpect{ Errc::operation_not_supported };
+            }
 
-            co_await madbfs.fs().cache().invalidate_all();
+            const auto page_size     = cache->page_size();
+            const auto current_pages = cache->current_pages();
+
+            co_await cache->invalidate_all();
 
             co_return json::value{ { "size", page_size * current_pages / 1024 / 1024 } };
         }
 
-        Await<json::value> handle(ipc::op::ExpireStat)
+        AExpect<json::value> handle(ipc::op::ExpireStat)
         {
             auto count = madbfs.fs().expires_all();
             co_return json::value{ { "count", count } };
         }
 
-        Await<json::value> handle(ipc::op::SetPageSize size)
+        AExpect<json::value> handle(ipc::op::SetPageSize size)
         {
-            const auto old_size = madbfs.fs().cache().page_size();
-            const auto old_max  = madbfs.fs().cache().max_pages();
+            auto& cache = madbfs.fs().cache();
+            if (not cache) {
+                co_return Unexpect{ Errc::operation_not_supported };
+            }
+
+            const auto old_size = cache->page_size();
+            const auto old_max  = cache->max_pages();
 
             auto new_size = std::bit_ceil(size.kib * 1024);
             new_size      = std::clamp(new_size, lowest_page_size, highest_page_size);
@@ -68,8 +92,8 @@ namespace madbfs
             auto new_max = std::bit_ceil(old_max * old_size / new_size);
             new_max      = std::max(new_max, lowest_max_pages);
 
-            co_await madbfs.fs().cache().set_page_size(new_size);
-            co_await madbfs.fs().cache().set_max_pages(new_max);
+            co_await cache->set_page_size(new_size);
+            co_await cache->set_max_pages(new_max);
 
             co_return json::value{
                 { "page_size",
@@ -81,15 +105,24 @@ namespace madbfs
             };
         }
 
-        Await<json::value> handle(ipc::op::SetCacheSize size)
+        AExpect<json::value> handle(ipc::op::SetCacheSize size)
         {
-            const auto page    = madbfs.fs().cache().page_size();
-            const auto old_max = madbfs.fs().cache().max_pages();
+            auto& cache = madbfs.fs().cache();
+            if (not cache) {
+                co_return Unexpect{ Errc::operation_not_supported };
+            }
 
-            auto new_max = std::bit_ceil(size.mib * 1024 * 1024 / page);
+            const auto page    = cache->page_size();
+            const auto old_max = cache->max_pages();
+
+            auto new_max = std::bit_ceil(size.mib * 1024 * 1024 / std::max(page, 1uz));
             new_max      = std::max(new_max, lowest_max_pages);
 
-            co_await madbfs.fs().cache().set_max_pages(new_max);
+            if (cache) {
+                co_await cache->set_max_pages(new_max);
+            } else {
+                new_max = 0;
+            }
 
             co_return json::value{
                 { "cache_size",
@@ -98,7 +131,7 @@ namespace madbfs
             };
         }
 
-        Await<json::value> handle(ipc::op::SetTTL ttl)
+        AExpect<json::value> handle(ipc::op::SetTTL ttl)
         {
             const auto new_ttl = ttl.sec < 1 ? std::nullopt : Opt<Seconds>{ ttl.sec };
             const auto old_ttl = madbfs.fs().set_ttl(new_ttl);
@@ -110,7 +143,7 @@ namespace madbfs
             };
         }
 
-        Await<json::value> handle(ipc::op::SetTimeout ttl)
+        AExpect<json::value> handle(ipc::op::SetTimeout ttl)
         {
             auto old = std::exchange(madbfs.m_timeout, ttl.sec < 1 ? std::nullopt : Opt<Seconds>{ ttl.sec });
             co_return json::value{
@@ -120,7 +153,7 @@ namespace madbfs
             };
         }
 
-        Await<json::value> handle(ipc::op::SetLogLevel op)
+        AExpect<json::value> handle(ipc::op::SetLogLevel op)
         {
             const auto prev_level = log::get_level();
             const auto new_level  = log::level_from_str(op.lvl).value_or(prev_level);
@@ -134,7 +167,7 @@ namespace madbfs
             };
         }
 
-        Await<json::value> handle(ipc::op::Unmount)
+        AExpect<json::value> handle(ipc::op::Unmount)
         {
             ::fuse_exit(madbfs.m_fuse);
             co_return json::value{ nullptr };
@@ -205,8 +238,7 @@ namespace madbfs
     Madbfs::Madbfs(
         struct fuse*     fuse,
         args::Connection connection,
-        usize            page_size,
-        usize            max_pages,
+        Opt<Caching>     caching,
         Str              mountpoint,
         Opt<Seconds>     ttl,
         Opt<Seconds>     timeout
@@ -216,7 +248,7 @@ namespace madbfs
         , m_work_guard{ m_async_ctx.get_executor() }
         , m_work_thread{ [this] { work_thread_function(m_async_ctx); } }
         , m_connection{ prepare_connection(m_async_ctx, connection) }
-        , m_fs{ m_connection, page_size, max_pages, ttl }
+        , m_fs{ m_connection, caching, ttl }
         , m_ipc{ create_ipc(m_async_ctx) }
         , m_watchdog_timer{ m_async_ctx }
         , m_reaper_timer{ m_async_ctx }
@@ -267,7 +299,7 @@ namespace madbfs
         m_work_thread.join();
     }
 
-    Await<json::value> Madbfs::ipc_handler(ipc::FsOp op)
+    AExpect<json::value> Madbfs::ipc_handler(ipc::FsOp op)
     {
         auto handler = IpcHandler{ *this };
         co_return co_await op.visit([&](auto&& op) { return handler.handle(op); });
@@ -290,13 +322,17 @@ namespace madbfs
             if (not ok) {
                 log_i(__func__, "connection is timed out");
                 if (auto res = co_await m_connection.reconnect(); res) {
-                    co_await m_fs.cache().invalidate_fds(false);
+                    if (auto& cache = m_fs.cache(); cache) {
+                        co_await cache->invalidate_fds(false);
+                    }
                     co_await m_connection.start();
                 }
             } else if (not m_connection.is_optimal()) {
                 log_i(__func__, "connection is ok but not optimized. trying to optimize...");
                 if (auto res = co_await m_connection.optimize(); res) {
-                    co_await m_fs.cache().invalidate_fds(false);
+                    if (auto& cache = m_fs.cache(); cache) {
+                        co_await cache->invalidate_fds(false);
+                    }
                     co_await m_connection.start();
                 }
             } else {
@@ -316,15 +352,16 @@ namespace madbfs
                 break;
             }
 
-            co_await m_fs.cache().clean_stale_fds();
+            if (auto& cache = m_fs.cache(); cache) {
+                co_await cache->clean_stale_fds();
+            }
 
             const auto& handles = m_fs.handles();
 
-            auto cap   = handles.size();
-            auto pred  = [](auto&& v) { return std::get<0>(v) == nullptr; };
-            auto empty = static_cast<usize>(sr::count_if(handles.iter(), pred));
+            auto cap   = handles.capacity();
+            auto empty = handles.count_empty();
 
-            log_i(__func__, "file handles [cap={:>04d}|open={:>04d}|unused={:>04d}]", cap, cap - empty, empty);
+            log_i(__func__, "file handles [cap={:>04d}|open={:>04d}|empty={:>04d}]", cap, cap - empty, empty);
         }
     }
 }

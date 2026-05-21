@@ -121,14 +121,16 @@ namespace madbfs::operations
             }
         }
 
-        auto cache_size = args->cachesize * 1024 * 1024;
-        auto page_size  = args->pagesize * 1024;
-        auto max_pages  = cache_size / page_size;
-        auto ttl        = args->ttl < 1 ? std::nullopt : Opt<Seconds>{ args->ttl };
-        auto timeout    = args->timeout < 1 ? std::nullopt : Opt<Seconds>{ args->timeout };
-        auto fuse       = ::fuse_get_context()->fuse;
+        auto caching = args->caching.transform([](auto& c) {
+            auto page_size = c.pagesize * 1024;
+            return Caching{ .page_size = page_size, .max_pages = (c.cachesize * 1024 * 1024) / page_size };
+        });
 
-        return new Madbfs{ fuse, args->connection, page_size, max_pages, args->mount, ttl, timeout };
+        auto ttl     = args->ttl < 1 ? std::nullopt : Opt<Seconds>{ args->ttl };
+        auto timeout = args->timeout < 1 ? std::nullopt : Opt<Seconds>{ args->timeout };
+        auto fuse    = ::fuse_get_context()->fuse;
+
+        return new Madbfs{ fuse, args->connection, caching, args->mount, ttl, timeout };
     }
 
     void destroy(void* private_data) noexcept
@@ -162,13 +164,16 @@ namespace madbfs::operations
 
         std::memset(stbuf, 0, sizeof(struct stat));
 
+        const auto default_page_size = 64 * 1024;    // use minimum page size
+        auto page_size = get_data().fs().cache().transform(&Cache::page_size).value_or(default_page_size);
+
         stbuf->st_ino     = static_cast<ino_t>(id.inner());
         stbuf->st_mode    = stat.mode;
         stbuf->st_nlink   = stat.links;
         stbuf->st_uid     = stat.uid;
         stbuf->st_gid     = stat.gid;
         stbuf->st_size    = stat.size;
-        stbuf->st_blksize = static_cast<blksize_t>(get_data().fs().cache().page_size());
+        stbuf->st_blksize = static_cast<blksize_t>(page_size);
         stbuf->st_blocks  = (stbuf->st_size + 511) / 512;    // strictly in 512 B units [read stat(3)]
         stbuf->st_atim    = stat.atime;
         stbuf->st_mtim    = stat.mtime;

@@ -165,11 +165,13 @@ namespace madbfs::args
             "                             (default: 256)\n"
             "                             (minimum: 128)\n"
             "                             (value will be rounded up to the next power of 2)\n"
+            "                             (ignored if 'no-cache' is provided)\n"
             "    --page-size=<int>      page size for cache & transfer in KiB\n"
             "                             (default: 128)\n"
             "                             (minimum: 64)\n"
             "                             (maximum: 4096)\n"
             "                             (value will be rounded up to the next power of 2)\n"
+            "                             (ignored if 'no-cache' is provided)\n"
             "    --ttl=<int>            set the TTL of the stat cache of the filesystem in seconds\n"
             "                             (default: 60)\n"
             "                             (set to 0 to disable it)\n"
@@ -182,7 +184,8 @@ namespace madbfs::args
             "                             (will still attempt to connect to specified port)\n"
             "                             (fall back to adb shell calls if connection failed)\n"
             "                             (useful for debugging the server)\n"
-            "    --adb-only             don't launch server and don't try to connect\n",
+            "    --adb-only             don't launch server and don't try to connect\n"
+            "    --no-cache             don't use data caching\n",
             log::level_names
         );
 
@@ -362,18 +365,22 @@ namespace madbfs::args
                           ? ""
                           : madbfs_opt.log_file;
 
-        auto cache_size = std::max(std::bit_ceil(static_cast<usize>(madbfs_opt.cache_size)), 128uz);
-        auto page_size  = std::clamp(std::bit_ceil(static_cast<usize>(madbfs_opt.page_size)), 64uz, 4096uz);
+        auto caching = Opt<Caching>{};
+        if (not madbfs_opt.no_cache) {
+            caching = Caching{
+                .cachesize = std::max(std::bit_ceil(static_cast<usize>(madbfs_opt.cache_size)), 128uz),
+                .pagesize = std::clamp(std::bit_ceil(static_cast<usize>(madbfs_opt.page_size)), 64uz, 4096uz),
+            };
+        }
 
         co_return ParseResult::Opt{
             .opt = {
                 .mount      = std::move(mountpoint),
                 .serial     = madbfs_opt.serial,
                 .connection = connection,
+                .caching    = caching,
                 .log_level  = log_level.value(),
                 .log_file   = log_file,
-                .cachesize  = cache_size,
-                .pagesize   = page_size,
                 .ttl        = madbfs_opt.ttl,
                 .timeout    = madbfs_opt.timeout,
             },

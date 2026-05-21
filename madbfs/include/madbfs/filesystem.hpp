@@ -6,6 +6,7 @@
 #include "madbfs/path.hpp"
 
 #include <madbfs-common/async/async.hpp>
+#include <madbfs-common/util/var_wrapper.hpp>
 
 #include <functional>
 
@@ -16,6 +17,17 @@ namespace madbfs
 
 namespace madbfs
 {
+    /**
+     * @class Caching
+     *
+     * @brief Parameters to be passed into Cache constructor.
+     */
+    struct Caching
+    {
+        usize page_size;
+        usize max_pages;
+    };
+
     /**
      * @class Filesystem
      *
@@ -32,11 +44,10 @@ namespace madbfs
          * @brief Create a new filesystem.
          *
          * @param connection Reference to active conneciton to device.
-         * @param page_size Cache page size.
-         * @param max_pages Maximum number of pages to be saved on the cache.
+         * @param caching Cache parameters or empty for no caching.
          * @param ttl Filesystem node's stat expiration time before re-fetching.
          */
-        Filesystem(Connection& connection, usize page_size, usize max_pages, Opt<Seconds> ttl);
+        Filesystem(Connection& connection, Opt<Caching> caching, Opt<Seconds> ttl);
 
         /**
          * @brief Destroy filesystem.
@@ -117,11 +128,12 @@ namespace madbfs
         /**
          * @brief Get cache structure.
          */
-        template <typename Self>
-        auto&& cache(this Self&& self)
-        {
-            return std::forward_like<Self>(self.m_cache);
-        }
+        const Opt<Cache>& cache() const { return m_cache; }
+
+        /**
+         * @brief Get cache structure.
+         */
+        Opt<Cache>& cache() { return m_cache; }
 
         /**
          * @brief Get root node.
@@ -138,7 +150,7 @@ namespace madbfs
         /**
          * @brief Get open file handle store.
          */
-        FileHandleStore& handles() { return m_handles; }
+        const FileHandleStore& handles() { return m_handles; }
 
     private:
         /**
@@ -194,7 +206,7 @@ namespace madbfs
         Connection& m_connection;
 
         Node            m_root;
-        Cache           m_cache;
+        Opt<Cache>      m_cache;
         FileHandleStore m_handles;
 
         Opt<Seconds> m_ttl              = std::nullopt;

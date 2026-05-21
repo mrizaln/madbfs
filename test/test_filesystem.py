@@ -52,7 +52,7 @@ READDIR_BIG_SIZE = 200
 DEFAULT_PAGE_SIZE = 128  # in KiB
 DEFAULT_CACHE_SIZE = 256  # in MiB
 DEFAULT_TTL = 60  # in seconds
-DEFAULT_TIMEOUT = 2 # in seconds
+DEFAULT_TIMEOUT = 2  # in seconds
 DEFAULT_LOG_LEVEL = "debug"  # on this test only
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,29 @@ class Environ:
     test_dir: Path
     log_path: Path
     mount_cmd: list[str]
-    server: bool
+
+
+@dataclass
+class Case:
+    use_server: bool
+    use_cache: bool
+
+    @staticmethod
+    def permutation():
+        return [
+            Case(True, True),
+            Case(True, False),
+            Case(False, True),
+            Case(False, False),
+        ]
+
+    @staticmethod
+    def with_server_only():
+        return [Case(True, True), Case(True, False)]
+
+    @staticmethod
+    def no_server_only():
+        return [Case(False, True), Case(False, False)]
 
 
 class Protocol:
@@ -108,9 +130,8 @@ class Protocol:
         return data, packet_count
 
 
-@pytest.fixture(params=[True, False])
-# @pytest.fixture(params=[True])
-def environ(request):
+@pytest.fixture(params=Case.permutation())
+def environ(request) -> tuple[Environ, Case]:
     serial = os.environ.get("ANDROID_SERIAL")
     if serial is None:
         pytest.fail("test requires ANDROID_SERIAL environment variable to be set")
@@ -123,7 +144,7 @@ def environ(request):
     abi = abi.stdout.decode("utf-8").strip()
 
     server_path = SERVER_PATH.parent / f"{SERVER_PATH.name}-{abi}"
-    if request.param and not server_path.exists():
+    if request.param.use_server and not server_path.exists():
         pytest.fail(f"server path '{server_path}' doesn't exists. compile it first!")
 
     mount_point = CURRENT_DIR / "mount"
@@ -143,17 +164,21 @@ def environ(request):
         "-f",
         f"--log-file={log_path}",
         f"--log-level={DEFAULT_LOG_LEVEL}",
-        f"--server={server_path}" if request.param else "--no-server",
+        f"--server={server_path}" if request.param.use_server else "--no-server",
     ]
+    if not request.param.use_cache:
+        mount_cmd.append("--no-cache")
 
-    return Environ(
-        abi=abi,
-        serial=serial,
-        mount_point=mount_point,
-        test_dir=test_dir,
-        log_path=log_path,
-        mount_cmd=mount_cmd,
-        server=request.param,
+    return (
+        Environ(
+            abi=abi,
+            serial=serial,
+            mount_point=mount_point,
+            test_dir=test_dir,
+            log_path=log_path,
+            mount_cmd=mount_cmd,
+        ),
+        request.param,
     )
 
 
@@ -614,9 +639,9 @@ def tst_open_rename(work_dir: Path):
 
 
 # first args is there just for symmetry, it's unused
-def tst_ipc(work_dir: str, serial: str, server_used: bool):
+def tst_ipc(_: str, serial: str, use_server: bool, use_cache: bool):
     version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
-    connection = "proxy" if server_used else "adb"
+    connection = "proxy" if use_server else "adb"
     timeout = DEFAULT_TIMEOUT
 
     with ipc_connect(serial) as sock:
@@ -651,10 +676,14 @@ def tst_ipc(work_dir: str, serial: str, server_used: bool):
         assert resp["value"]["log_level"] == DEFAULT_LOG_LEVEL
         assert resp["value"]["ttl"] == DEFAULT_TTL
         assert resp["value"]["timeout"] == timeout
-        assert resp["value"]["page_size"] == DEFAULT_PAGE_SIZE
-        assert resp["value"]["cache_size"]
-        assert resp["value"]["cache_size"]["max"] == DEFAULT_CACHE_SIZE
-        assert isinstance(resp["value"]["cache_size"]["current"], int)
+        if use_cache:
+            assert resp["value"]["cache"] is not None
+            assert resp["value"]["cache"]["page_size"] == DEFAULT_PAGE_SIZE
+            assert resp["value"]["cache"]["cache_size"]
+            assert resp["value"]["cache"]["cache_size"]["max"] == DEFAULT_CACHE_SIZE
+            assert isinstance(resp["value"]["cache"]["cache_size"]["current"], int)
+        else:
+            assert resp["value"]["cache"] is None
 
     with ipc_connect(serial) as sock:
         Protocol.send(sock, json.dumps({"op": "invalidate_cache"}))
@@ -662,9 +691,13 @@ def tst_ipc(work_dir: str, serial: str, server_used: bool):
         assert resp is not None
         logger.info(resp)
         resp = json.loads(resp)
-        assert resp["status"] == "success"
-        assert resp["value"]
-        assert isinstance(resp["value"]["size"], int)
+        if use_cache:
+            assert resp["status"] == "success"
+            assert resp["value"]
+            assert isinstance(resp["value"]["size"], int)
+        else:
+            assert resp["status"] == "error"
+            assert resp["value"] == os.strerror(errno.EOPNOTSUPP)
 
     with ipc_connect(serial) as sock:
         Protocol.send(sock, json.dumps({"op": "set_page_size", "value": 256}))
@@ -672,14 +705,18 @@ def tst_ipc(work_dir: str, serial: str, server_used: bool):
         assert resp is not None
         logger.info(resp)
         resp = json.loads(resp)
-        assert resp["status"] == "success"
-        assert resp["value"]
-        assert resp["value"]["page_size"]
-        assert resp["value"]["page_size"]["old"] == DEFAULT_PAGE_SIZE
-        assert resp["value"]["page_size"]["new"] == 256
-        assert resp["value"]["cache_size"]
-        assert isinstance(resp["value"]["cache_size"]["old"], int)
-        assert isinstance(resp["value"]["cache_size"]["new"], int)
+        if use_cache:
+            assert resp["status"] == "success"
+            assert resp["value"]
+            assert resp["value"]["page_size"]
+            assert resp["value"]["page_size"]["old"] == DEFAULT_PAGE_SIZE
+            assert resp["value"]["page_size"]["new"] == 256
+            assert resp["value"]["cache_size"]
+            assert isinstance(resp["value"]["cache_size"]["old"], int)
+            assert isinstance(resp["value"]["cache_size"]["new"], int)
+        else:
+            assert resp["status"] == "error"
+            assert resp["value"] == os.strerror(errno.EOPNOTSUPP)
 
     with ipc_connect(serial) as sock:
         Protocol.send(sock, json.dumps({"op": "set_cache_size", "value": 128}))
@@ -687,11 +724,15 @@ def tst_ipc(work_dir: str, serial: str, server_used: bool):
         assert resp is not None
         logger.info(resp)
         resp = json.loads(resp)
-        assert resp["status"] == "success"
-        assert resp["value"]
-        assert resp["value"]["cache_size"]
-        assert resp["value"]["cache_size"]["old"] == DEFAULT_CACHE_SIZE
-        assert resp["value"]["cache_size"]["new"] == 128
+        if use_cache:
+            assert resp["status"] == "success"
+            assert resp["value"]
+            assert resp["value"]["cache_size"]
+            assert resp["value"]["cache_size"]["old"] == DEFAULT_CACHE_SIZE
+            assert resp["value"]["cache_size"]["new"] == (128 if use_cache else 0)
+        else:
+            assert resp["status"] == "error"
+            assert resp["value"] == os.strerror(errno.EOPNOTSUPP)
 
     with ipc_connect(serial) as sock:
         Protocol.send(sock, json.dumps({"op": "set_ttl", "value": 20}))
@@ -745,11 +786,13 @@ def test_filesystem(environ):
     test_dir: Path
     log_file: Path
     cmd_base: list[str]
-    server: bool
+    use_server: bool
+    use_cache: bool
 
-    serial, abi, mount_point, test_dir, log_file, cmd_base, server = astuple(environ)
+    serial, abi, mount_point, test_dir, log_file, cmd_base = astuple(environ[0])
+    use_server, use_cache = astuple(environ[1])
 
-    logger.info(f"test is [running serial={serial}, abi={abi}, server={server}]")
+    logger.info(f"[serial={serial}, abi={abi}, server={use_server}, cache={use_cache}]")
 
     cmd = cmd_base + [f"--serial={serial}", str(mount_point)]
     proc = Popen(cmd, stdout=PIPE, universal_newlines=True)
@@ -793,13 +836,15 @@ def test_filesystem(environ):
         call(tst_unlink)
         call(tst_symlink)
         call(tst_chown)
-        call(tst_utimens, 1000 if server else 1000000000)  # tolerance in nanoseconds
+        call(
+            tst_utimens, 1000 if use_server else 1000000000
+        )  # tolerance in nanoseconds
         call(tst_link)
         call(tst_truncate_path)
         call(tst_truncate_fd)
         call(tst_open_unlink)
         call(tst_open_rename)
-        call(tst_ipc, serial, server)
+        call(tst_ipc, serial, use_server, use_cache)
     except:
         # NOTE: if tests are failing, the work_dir might not be cleaned up correctly. I
         # won't clean them up here since I might want to inspect the file in the work_dir
