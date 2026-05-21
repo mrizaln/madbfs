@@ -219,7 +219,7 @@ namespace madbfs::ipc
     {
     public:
         using Acceptor = async::unix_socket::Acceptor;
-        using OnFsOp   = std::move_only_function<Await<boost::json::value>(ipc::FsOp op)>;
+        using OnFsOp   = std::move_only_function<AExpect<boost::json::value>(ipc::FsOp op)>;
 
         /**
          * @brief Create IPC server.

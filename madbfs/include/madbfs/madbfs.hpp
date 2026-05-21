@@ -77,7 +77,7 @@ namespace madbfs
          *
          * This function handles all requested operations from peers that comes from `m_ipc` instance.
          */
-        Await<boost::json::value> ipc_handler(ipc::FsOp op);
+        AExpect<boost::json::value> ipc_handler(ipc::FsOp op);
 
         /**
          * @brief Watch connection status.
