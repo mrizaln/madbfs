@@ -69,7 +69,10 @@ namespace madbfs
      * files. Each element in the LRU is a `Page` that represents a portion of a file being stored. This
      * pages are interleaved between files (cross-file).
      *
-     * The class also acts as debouncer for read/write operations.
+     * This Cache stores a pair of real fds for read and write operations, even when the FUSE client opens
+     * multiple files. Every file is discriminated by its id. Real fds are not exposed through this mode.
+     *
+     * The class also acts as debouncer for read/write operations because of the nature of it.
      */
     class Cache
     {
@@ -115,11 +118,13 @@ namespace madbfs
         };
 
         /**
-         * @brief Construct a new cache.
+         * @brief Create a new LRU-based cache.
          *
-         * @param connection Connection to device.
-         * @param page_size Page size.
-         * @param max_pages Maximum number of pages cached.
+         * @param connection Conneciton to device.
+         * @param page_size Cache page size.
+         * @param max_pages Number of maximum pages the Cache can hold.
+         *
+         * The connection will be held by the instance until it is destroyed.
          */
         Cache(Connection& connection, usize page_size, usize max_pages);
 
@@ -201,6 +206,8 @@ namespace madbfs
          *
          * @param id File id.
          * @param new_name New path for the file.
+         *
+         * This function only renames path in the cumulative fd map, not the real device.
          */
         Await<void> rename(Id id, path::Path new_name);
 
@@ -222,7 +229,7 @@ namespace madbfs
         /**
          * @brief Shut down the cache and invalidate all cache entries.
          *
-         * Calling this function is the same as calling `shutdown()`
+         * Calling this function is the same as calling `invalidate_all()`
          */
         Await<void> shutdown();
 
@@ -241,11 +248,33 @@ namespace madbfs
          */
         Await<void> invalidate_fds(bool close);
 
+        /**
+         * @brief Set new page size for the cache.
+         *
+         * @param new_page_size Non-zero integer; power of 2.
+         */
         Await<void> set_page_size(usize new_page_size);
+
+        /**
+         * @brief Set new maximum number of pages the cache able to hold.
+         *
+         * @param new_page_size Non-zero integer.
+         */
         Await<void> set_max_pages(usize new_max_pages);
 
+        /**
+         * @brief Get the cache page size.
+         */
         usize page_size() const { return m_page_size; }
+
+        /**
+         * @brief Get the cache max pages.
+         */
         usize max_pages() const { return m_max_pages; }
+
+        /**
+         * @brief Get current number of pages held by cache.
+         */
         usize current_pages() const { return m_lru.size(); }
 
     private:

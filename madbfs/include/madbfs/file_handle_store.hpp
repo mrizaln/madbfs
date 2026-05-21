@@ -13,6 +13,7 @@ namespace madbfs
     {
         Node*    node;
         OpenMode mode;
+        u64      real_fd;    // only useful for direct IO; Cache is not enabled
     };
 
     /**
@@ -32,11 +33,11 @@ namespace madbfs
          *
          * @param fd File descriptor.
          *
-         * @return FileHandle if exists, else default initialized FileHandle.
+         * @return FileHandle if exists, else `std::nullopt`.
          *
          * The complexity of the operation is constant.
          */
-        FileHandle find(u64 fd);
+        Opt<FileHandle> find(u64 fd);
 
         /**
          * @brief Get associated `Node` from file handle store for file descriptor with specified open mode.
@@ -44,34 +45,35 @@ namespace madbfs
          * @param fd File descriptor.
          * @param mode Open file mode.
          *
-         * @return The node if found and fulfill the mode else `Errc::bad_file_descriptor`.
+         * @return The node if found and fulfill the mode else `std::nullopt`.
          *
          * The complexity of the operation is constant.
          */
-        Node* find(u64 fd, OpenMode mode);
+        Opt<FileHandle> find(u64 fd, OpenMode mode);
 
         /**
          * @brief Store `Node` pointer into file handle store.
          *
          * @param node The node to be inserted.
          * @param mode Open file mode for the node.
+         * @param real_fd Real file descriptor (only useful for direct IO).
          *
          * @return File descriptor (position of the node in the store).
          *
          * The complexity of the opration is linear (depends on number of handles before finding a hole).
          */
-        u64 store(Node* node, OpenMode mode);
+        u64 store(Node* node, OpenMode mode, u64 real_fd);
 
         /**
          * @brief Release the associated node of file descriptor from the file handle store.
          *
          * @param fd File descriptor.
          *
-         * @return The released node if exists, else default initialized FileHandle.
+         * @return The released node if exists, else `std::nullopt`.
          *
          * The complexity of the operation is constant.
          */
-        FileHandle release(u64 fd);
+        Opt<FileHandle> release(u64 fd);
 
         /**
          * @brief Erase any pointer to node.
@@ -84,13 +86,14 @@ namespace madbfs
          */
         usize erase(Node* node);
 
-        FRange auto iter() { return sv::zip(m_nodes, m_modes); }
-        FRange auto iter() const { return sv::zip(m_nodes, m_modes); }
+        Span<FileHandle>       iter() { return m_handles; }
+        Span<const FileHandle> iter() const { return m_handles; }
 
-        usize size() const { return m_nodes.size(); }
+        usize capacity() const { return m_handles.size(); }
+        usize count_open() const;
+        usize count_empty() const;
 
     private:
-        std::vector<Node*>    m_nodes;
-        std::vector<OpenMode> m_modes;
+        Vec<FileHandle> m_handles;
     };
 }

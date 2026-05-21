@@ -2,68 +2,78 @@
 
 #include "madbfs/node.hpp"
 
+#include <algorithm>
 #include <utility>
 
 namespace madbfs
 {
-    FileHandle FileHandleStore::find(u64 fd)
+    Opt<FileHandle> FileHandleStore::find(u64 fd)
     {
-        return fd < m_nodes.size() ? FileHandle{ m_nodes[fd], m_modes[fd] } : FileHandle{};
+        return fd < m_handles.size() ? Opt{ m_handles[fd] } : std::nullopt;
     }
 
-    Node* FileHandleStore::find(u64 fd, OpenMode mode)
+    Opt<FileHandle> FileHandleStore::find(u64 fd, OpenMode mode)
     {
-        if (fd >= m_nodes.size()) {
-            return nullptr;
+        if (fd >= m_handles.size()) {
+            return std::nullopt;
         }
 
-        auto ok   = m_modes[fd] == mode or m_modes[fd] == OpenMode::ReadWrite;
-        auto node = m_nodes[fd];
+        auto handle = m_handles[fd];
+        auto ok     = handle.mode == mode or handle.mode == OpenMode::ReadWrite;
 
-        return node and ok ? node : nullptr;
+        return handle.node and ok ? Opt{ handle } : std::nullopt;
     }
 
-    u64 FileHandleStore::store(Node* node, OpenMode mode)
+    u64 FileHandleStore::store(Node* node, OpenMode mode, u64 real_fd)
     {
-        if (auto found = sr::find(m_nodes, nullptr); found != m_nodes.end()) {
-            auto dist     = static_cast<usize>(found - m_nodes.begin());
-            m_nodes[dist] = node;
-            m_modes[dist] = mode;
+        if (auto found = sr::find(m_handles, nullptr, &FileHandle::node); found != m_handles.end()) {
+            auto dist               = static_cast<usize>(found - m_handles.begin());
+            m_handles[dist].node    = node;
+            m_handles[dist].mode    = mode;
+            m_handles[dist].real_fd = real_fd;
             return dist;
         }
 
-        auto size = m_nodes.size();
+        auto size = m_handles.size();
 
-        if (m_nodes.empty()) {
-            m_nodes.resize(1024, {});    // 1024 seats by default is reasonable I guess
-            m_modes.resize(1024, {});
+        if (m_handles.empty()) {
+            m_handles.resize(1024, {});    // 1024 seats by default is reasonable I guess
         } else {
-            m_nodes.resize(size * 2, {});    // should I add upper limit?
-            m_modes.resize(size * 2, {});
+            m_handles.resize(size * 2, {});    // should I add upper limit?
         }
 
-        m_nodes[size] = node;
-        m_modes[size] = mode;
+        m_handles[size].node    = node;
+        m_handles[size].mode    = mode;
+        m_handles[size].real_fd = real_fd;
 
         return size;
     }
 
-    FileHandle FileHandleStore::release(u64 fd)
+    Opt<FileHandle> FileHandleStore::release(u64 fd)
     {
-        return fd < m_nodes.size()
-                 ? FileHandle{ std::exchange(m_nodes[fd], {}), std::exchange(m_modes[fd], {}) }
-                 : FileHandle{};
+        return fd < m_handles.size() ? Opt{ std::exchange(m_handles[fd], {}) } : std::nullopt;
     }
 
     usize FileHandleStore::erase(Node* node)
     {
         auto count = 0uz;
-        for (auto& v : m_nodes) {
-            if (v == node) {
-                v = nullptr;
+        for (auto& v : m_handles) {
+            if (v.node == node) {
+                v.node = nullptr;
                 ++count;
             }
         }
         return count;
+    }
+
+    usize FileHandleStore::count_open() const
+    {
+        auto count = sr::count_if(m_handles, [](const FileHandle& h) { return h.node != nullptr; });
+        return static_cast<usize>(count);
+    }
+
+    usize FileHandleStore::count_empty() const
+    {
+        return capacity() - count_open();
     }
 }

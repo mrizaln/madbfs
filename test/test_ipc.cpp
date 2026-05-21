@@ -23,7 +23,7 @@ namespace net   = madbfs::net;
 using madbfs::Await, madbfs::AExpect;
 using namespace madbfs::aliases;
 
-Await<boost::json::value> server_handler(ipc::FsOp op)
+AExpect<boost::json::value> server_handler(ipc::FsOp op)
 {
     co_return boost::json::value{
         { "type", op.visit([]<typename Op>(Op) { return ut::reflection::type_name<Op>(); }) }

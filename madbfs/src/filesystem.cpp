@@ -8,11 +8,15 @@
 #include <fmt/std.h>
 #include <sys/stat.h>
 
+#include <cassert>
+
 constexpr auto timespec_now  = timespec{ .tv_sec = 0, .tv_nsec = UTIME_NOW };
 constexpr auto timespec_omit = timespec{ .tv_sec = 0, .tv_nsec = UTIME_OMIT };
 
 namespace
 {
+    using namespace madbfs;
+
     // NOTE: Errc::not_connected, Errc::timed_out, and Errc::resource_unavailable_try_again should be
     // considered an OK error since it can happen if the device is disconnected. The error should not be
     // cached as node.
@@ -22,14 +26,19 @@ namespace
            and err != std::errc::timed_out        //
            and err != std::errc::resource_unavailable_try_again;
     }
+
+    Opt<Cache> construct_cache(Connection& connection, Opt<Caching> caching)
+    {
+        return caching.transform([&](auto c) { return Cache{ connection, c.page_size, c.max_pages }; });
+    }
 }
 
 namespace madbfs
 {
-    Filesystem::Filesystem(Connection& connection, usize page_size, usize max_pages, Opt<Seconds> ttl)
+    Filesystem::Filesystem(Connection& connection, Opt<Caching> caching, Opt<Seconds> ttl)
         : m_connection{ connection }
         , m_root{ "/", nullptr, {}, node::Directory{} }
-        , m_cache{ m_connection, page_size, max_pages }
+        , m_cache{ construct_cache(connection, caching) }
         , m_ttl{ ttl }
     {
     }
@@ -224,12 +233,16 @@ namespace madbfs
             for (const auto& node : dir->children()) {
                 walk(*node, [&](Node& n) { m_handles.erase(&n), nodes.push_back(&n); });
             }
-            for (auto node : nodes) {
-                co_await m_cache.invalidate_one(node->id(), false);    // maybe flush? child might not change
+            if (m_cache) {
+                for (auto node : nodes) {
+                    co_await m_cache->invalidate_one(node->id(), false);    // flush? child maybe unchanged
+                }
             }
             m_handles.erase(&node);
         } else if (std::get_if<node::Regular>(&old)) {
-            co_await m_cache.invalidate_one(node.id(), false);    // no flush needed since the file changed
+            if (m_cache) {
+                co_await m_cache->invalidate_one(node.id(), false);    // no flush since the file changed
+            }
             m_handles.erase(&node);
         }
     }
@@ -343,7 +356,9 @@ namespace madbfs
                     auto name = (**it).name();
                     if (not new_list.contains(name)) {
                         log_d(__func__, "[{:?}]   removed: {:?}", current->name(), name);
-                        co_await m_cache.invalidate_one((**it).id(), false);    // should I flush
+                        if (m_cache) {
+                            co_await m_cache->invalidate_one((**it).id(), false);    // should I flush
+                        }
                         it = list.erase(it);
                         continue;
                     }
@@ -493,7 +508,9 @@ namespace madbfs
         }
 
         m_handles.erase(erased->get());
-        co_await m_cache.invalidate_one((*erased)->id(), false);
+        if (m_cache) {
+            co_await m_cache->invalidate_one((*erased)->id(), false);
+        }
 
         co_return Expect<void>{};
     }
@@ -572,7 +589,9 @@ namespace madbfs
         to_parent->get().refresh_stat(timespec_omit, timespec_now);
 
         auto node = from_dir.extract(from.filename()).value();
-        co_await m_cache.rename(node->id(), to);
+        if (m_cache) {
+            co_await m_cache->rename(node->id(), to);
+        }
 
         node->set_name(to.filename());
         node->set_parent(&to_parent->get());
@@ -582,14 +601,18 @@ namespace madbfs
             assert(overwritten.second != nullptr);
             auto node = std::move(overwritten).second;
 
-            co_await m_cache.rename(node->id(), from);
+            if (m_cache) {
+                co_await m_cache->rename(node->id(), from);
+            }
             node->set_name(from.filename());
             node->set_parent(from_parent);
 
             auto res = from_dir.insert(std::move(node), false);
             assert(res->second == nullptr);    // has extracted before
         } else if (overwritten.second != nullptr) {
-            co_await m_cache.invalidate_one(overwritten.second->id(), false);
+            if (m_cache) {
+                co_await m_cache->invalidate_one(overwritten.second->id(), false);
+            }
             m_handles.erase(overwritten.second.get());
         }
 
@@ -629,7 +652,9 @@ namespace madbfs
         auto new_size = static_cast<usize>(size);
 
         // error from Cache::truncate are from eviction only, which should not matter for this file
-        std::ignore = co_await m_cache.truncate(node.id(), old_size, new_size);
+        if (m_cache) {
+            std::ignore = co_await m_cache->truncate(node.id(), old_size, new_size);
+        }
 
         node.set_size(size);
         node.refresh_stat(timespec_omit, timespec_now);
@@ -650,60 +675,79 @@ namespace madbfs
         auto  mode = static_cast<OpenMode>(O_ACCMODE & flags);
 
         // send hint to cache to prepare a real fd that can be used for further operations
-        co_return (co_await m_cache.hint_open(node.id(), path, mode)).transform([&] {
-            return m_handles.store(&node, mode);
-        });
+        if (m_cache) {
+            co_return (co_await m_cache->hint_open(node.id(), path, mode)).transform([&] {
+                return m_handles.store(&node, mode, 0);
+            });
+        } else {
+            co_return (co_await m_connection.open(path, mode)).transform([&](u64 real_fd) {
+                return m_handles.store(&node, mode, real_fd);
+            });
+        }
     }
 
     AExpect<usize> Filesystem::read(u64 fd, Span<char> out, off_t offset)
     {
-        auto node = m_handles.find(fd, OpenMode::Read);
-        if (not node) {
+        auto handle = m_handles.find(fd, OpenMode::Read);
+        if (not handle) {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        co_return (co_await m_cache.read(node->id(), out, offset)).transform([&](usize ret) {
-            node->refresh_stat(timespec_now, timespec_omit);
+        auto after = [&](usize ret) {
+            handle->node->refresh_stat(timespec_now, timespec_omit);
             return ret;
-        });
+        };
+
+        if (m_cache) {
+            co_return (co_await m_cache->read(handle->node->id(), out, offset)).transform(after);
+        } else {
+            assert(handle->real_fd != 0 && "on no-cache, the file descriptor is exposed directly, not 0");
+            co_return (co_await m_connection.read(handle->real_fd, out, offset)).transform(after);
+        }
     }
 
     AExpect<usize> Filesystem::write(u64 fd, Str in, off_t offset)
     {
-        auto node = m_handles.find(fd, OpenMode::Write);
-        if (not node) {
+        auto handle = m_handles.find(fd, OpenMode::Write);
+        if (not handle) {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        auto may_file = node->as_regular();
+        auto may_file = handle->node->as_regular();
         if (not may_file) [[unlikely]] {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
         auto& file = may_file->get();
 
-        co_return (co_await m_cache.write(node->id(), in, offset)).transform([&](usize ret) {
+        auto after = [&](usize ret) {
             // the file size is defined as offset + size from last write if it's higher than previous size
             auto new_size = offset + static_cast<off_t>(ret);
-            auto size     = std::max(node->stat().size, new_size);
+            auto size     = std::max(handle->node->stat().size, new_size);
 
-            node->set_size(size);
-            node->refresh_stat(timespec_omit, timespec_now);
+            handle->node->set_size(size);
+            handle->node->refresh_stat(timespec_omit, timespec_now);
 
             file.dirty = true;
 
             return ret;
-        });
+        };
+
+        if (m_cache) {
+            co_return (co_await m_cache->write(handle->node->id(), in, offset)).transform(after);
+        } else {
+            co_return (co_await m_connection.write(handle->real_fd, in, offset)).transform(after);
+        }
     }
 
     AExpect<void> Filesystem::flush(u64 fd)
     {
-        auto [node, _] = m_handles.find(fd);
-        if (not node) {
+        auto handle = m_handles.find(fd);
+        if (not handle) {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        auto may_file = node->as_regular();
+        auto may_file = handle->node->as_regular();
         if (not may_file) [[unlikely]] {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
@@ -713,40 +757,46 @@ namespace madbfs
             co_return Expect<void>{};    // no writes, do nothing
         }
 
-        co_return (co_await m_cache.flush(node->id())).transform([&] {
-            node->refresh_stat(timespec_omit, timespec_now);
+        if (m_cache) {
+            co_return (co_await m_cache->flush(handle->node->id())).transform([&] {
+                handle->node->refresh_stat(timespec_omit, timespec_now);
+                file.dirty = false;
+            });
+        } else {
+            // do nothing, write already happens on write :P
             file.dirty = false;
-        });
+            co_return Expect<void>{};
+        }
     }
 
     AExpect<void> Filesystem::release(u64 fd)
     {
-        auto [node, mode] = m_handles.release(fd);
-        if (not node) {
+        auto handle = m_handles.release(fd);
+        if (not handle) {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        auto may_file = node->as_regular();
+        auto may_file = handle->node->as_regular();
         if (not may_file) [[unlikely]] {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
         auto& file = may_file->get();
-        if (file.dirty) {
-            if (auto res = co_await m_cache.flush(node->id()); not res) {
+        if (file.dirty and m_cache) {
+            if (auto res = co_await m_cache->flush(handle->node->id()); not res) {
                 co_return Unexpect{ res.error() };
             }
 
-            node->refresh_stat(timespec_omit, timespec_now);
+            handle->node->refresh_stat(timespec_omit, timespec_now);
             file.dirty = false;
         }
 
         // send hint to cache to close its associated fd for this node if exist
-        if (auto res = co_await m_cache.hint_close(node->id(), mode); not res) {
-            co_return Unexpect{ res.error() };
+        if (m_cache) {
+            co_return co_await m_cache->hint_close(handle->node->id(), handle->mode);
+        } else {
+            co_return co_await m_connection.close(handle->real_fd);
         }
-
-        co_return Expect<void>{};
     }
 
     AExpect<usize> Filesystem::copy_file_range(
@@ -831,7 +881,9 @@ namespace madbfs
 
     Await<void> Filesystem::shutdown()
     {
-        co_await m_cache.shutdown();
+        if (m_cache) {
+            co_await m_cache->shutdown();
+        }
     }
 
     Opt<Seconds> Filesystem::set_ttl(Opt<Seconds> ttl)
