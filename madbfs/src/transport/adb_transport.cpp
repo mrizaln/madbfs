@@ -270,10 +270,24 @@ namespace madbfs
                 co_return Unexpect{ Errc::invalid_argument };
             } else if (req.flags == RENAME_NOREPLACE) {
                 auto res = co_await cmd::exec({ "adb", "shell", "mv", "-n", quote(req.from), quote(req.to) });
-                co_return res.transform([](auto&&) { return rpc::resp::Rename{}; });
+                co_return res.transform([&](auto&&) {
+                    for (auto& [k, v] : m_fd_map) {
+                        if (v == req.from) {
+                            v = req.to;
+                        }
+                    }
+                    return rpc::resp::Rename{};
+                });
             } else {
                 auto res = co_await cmd::exec({ "adb", "shell", "mv", quote(req.from), quote(req.to) });
-                co_return res.transform([](auto&&) { return rpc::resp::Rename{}; });
+                co_return res.transform([&](auto&&) {
+                    for (auto& [k, v] : m_fd_map) {
+                        if (v == req.from) {
+                            v = req.to;
+                        }
+                    }
+                    return rpc::resp::Rename{};
+                });
             }
         }
 
