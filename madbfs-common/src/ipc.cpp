@@ -346,7 +346,7 @@ namespace madbfs::ipc
             case Op::index_of<FsOp>(): {
                 auto res = co_await m_on_op(std::move(*op->as<FsOp>()));
                 status   = res ? "success" : "error";
-                value    = res.value_or(json::value{ err_msg(res.error()) });
+                value    = res ? res.value() : json::value{ err_msg(res.error()) };
             } break;
             case Op::index_of<op::Help>():
                 value = json::value{ { "operations", json::value_from(op::names) } };
