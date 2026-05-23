@@ -35,6 +35,7 @@ namespace madbfs
 
                 co_return json::value{
                     { "connection", madbfs.m_connection.name() },
+                    { "root", madbfs.m_root.str() },
                     { "log_level", log::level_to_str(log::get_level()) },
                     { "ttl", ttl_sec },
                     { "timeout", timeout_sec },
@@ -47,6 +48,7 @@ namespace madbfs
             } else {
                 co_return json::value{
                     { "connection", madbfs.m_connection.name() },
+                    { "root", madbfs.m_root.str() },
                     { "log_level", log::level_to_str(log::get_level()) },
                     { "ttl", ttl_sec },
                     { "timeout", timeout_sec },
