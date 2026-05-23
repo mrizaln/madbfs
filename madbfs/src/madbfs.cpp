@@ -239,6 +239,7 @@ namespace madbfs
         struct fuse*     fuse,
         args::Connection connection,
         Opt<Caching>     caching,
+        path::Path       custom_root,
         Str              mountpoint,
         Opt<Seconds>     ttl,
         Opt<Seconds>     timeout
@@ -253,6 +254,7 @@ namespace madbfs
         , m_watchdog_timer{ m_async_ctx }
         , m_reaper_timer{ m_async_ctx }
         , m_signal{ m_async_ctx, SIGINT, SIGTERM }
+        , m_root{ custom_root.owned() }
         , m_mountpoint{ mountpoint }
         , m_timeout{ timeout }
     {
@@ -297,6 +299,19 @@ namespace madbfs
         m_work_guard.reset();
         m_async_ctx.stop();
         m_work_thread.join();
+    }
+
+    Expect<path::PathBuf> Madbfs::create_path(const char* path)
+    {
+        if (m_root.is_root()) {
+            return ok_or(path::create_buf(path), Errc::operation_not_supported);
+        }
+
+        auto str = String{ m_root.str() };
+        str.ends_with('/') ? void() : str.push_back('/');
+        str.append(path);
+
+        return ok_or(path::create_buf(std::move(str)), Errc::operation_not_supported);
     }
 
     AExpect<json::value> Madbfs::ipc_handler(ipc::FsOp op)
