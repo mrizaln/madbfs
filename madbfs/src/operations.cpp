@@ -130,7 +130,7 @@ namespace madbfs::operations
         auto timeout = args->timeout < 1 ? std::nullopt : Opt<Seconds>{ args->timeout };
         auto fuse    = ::fuse_get_context()->fuse;
 
-        return new Madbfs{ fuse, args->connection, caching, path::Path{}, args->mount, ttl, timeout };
+        return new Madbfs{ fuse, args->connection, caching, args->root, args->mount, ttl, timeout };
     }
 
     void destroy(void* private_data) noexcept

@@ -37,27 +37,35 @@ try {
 
     if (opt.caching) {
         fmt::println(
-            "[madbfs] mount '{}' [cache={} MiB, page={} KiB]",
+            "[madbfs] mount '{}@{}' [cache={} MiB, page={} KiB]",
             opt.serial,
+            opt.root,
             opt.caching->cachesize,
             opt.caching->pagesize
         );
     } else {
-        fmt::println("[madbfs] mount '{}' [no cache]", opt.serial);
+        fmt::println("[madbfs] mount '{}@{}' [no cache]", opt.serial, opt.root);
     }
 
     if (opt.log_file != "-") {
         if (opt.caching) {
             madbfs::log_i(
                 __func__,
-                "[madbfs] mount '{}' at '{}' with cache size {} MiB and page size {} KiB",
+                "[madbfs] mount '{}@{}' at '{}' with cache size {} MiB and page size {} KiB",
                 opt.serial,
+                opt.root,
                 opt.mount,
                 opt.caching->cachesize,
                 opt.caching->pagesize
             );
         } else {
-            madbfs::log_i(__func__, "[madbfs] mount '{}' at '{}' with cache disabled", opt.serial, opt.mount);
+            madbfs::log_i(
+                __func__,
+                "[madbfs] mount '{}@{}' at '{}' with cache disabled",
+                opt.serial,
+                opt.root,
+                opt.mount
+            );
         }
     }
 
