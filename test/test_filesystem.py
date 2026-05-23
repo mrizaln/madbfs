@@ -72,23 +72,29 @@ class Environ:
 class Case:
     use_server: bool
     use_cache: bool
+    custom_root: bool
+    name: str
 
     @staticmethod
     def permutation():
         return [
-            Case(True, True),
-            Case(True, False),
-            Case(False, True),
-            Case(False, False),
+            Case(True, True, True, "case1"),
+            Case(True, True, False, "case2"),
+            Case(True, False, True, "case3"),
+            Case(True, False, False, "case4"),
+            Case(False, True, True, "case5"),
+            Case(False, True, False, "case6"),
+            Case(False, False, True, "case7"),
+            Case(False, False, False, "case8"),
         ]
 
     @staticmethod
     def with_server_only():
-        return [Case(True, True), Case(True, False)]
+        return Case.permutation()[:4]
 
     @staticmethod
     def no_server_only():
-        return [Case(False, True), Case(False, False)]
+        return Case.permutation()[4:]
 
 
 class Protocol:
@@ -156,8 +162,7 @@ def environ(request) -> tuple[Environ, Case]:
     elif len(os.listdir(mount_point)) > 0:
         pytest.fail(f"mount point {mount_point} is not empty")
 
-    test_dir = mount_point / "data/local/tmp"  # testing on /sdcard is risky...
-    log_path = CURRENT_DIR / "test.log"
+    log_path = CURRENT_DIR / "log" / f"test-{request.param.name}.log"
 
     mount_cmd = [
         BINARY_PATH,
@@ -166,8 +171,16 @@ def environ(request) -> tuple[Environ, Case]:
         f"--log-level={DEFAULT_LOG_LEVEL}",
         f"--server={server_path}" if request.param.use_server else "--no-server",
     ]
+
     if not request.param.use_cache:
         mount_cmd.append("--no-cache")
+    if request.param.custom_root:
+        mount_cmd.append("--root=/data/local/tmp")
+
+    # testing on other directory is risky...
+    test_dir = mount_point
+    if not request.param.custom_root:
+        test_dir = test_dir / "data/local/tmp"
 
     return (
         Environ(
@@ -788,11 +801,14 @@ def test_filesystem(environ):
     cmd_base: list[str]
     use_server: bool
     use_cache: bool
+    custom_root: bool
 
     serial, abi, mount_point, test_dir, log_file, cmd_base = astuple(environ[0])
-    use_server, use_cache = astuple(environ[1])
+    use_server, use_cache, custom_root, _ = astuple(environ[1])
 
-    logger.info(f"[serial={serial}, abi={abi}, server={use_server}, cache={use_cache}]")
+    logger.info(
+        f"[serial={serial}, abi={abi}, server={use_server}, cache={use_cache}, custom_root={custom_root}, log={log_file}]"
+    )
 
     cmd = cmd_base + [f"--serial={serial}", str(mount_point)]
     proc = Popen(cmd, stdout=PIPE, universal_newlines=True)
@@ -812,6 +828,7 @@ def test_filesystem(environ):
         logger.info(f"filesystem is mounted at {mount_point}")
 
         work_dir = test_dir / "testing"
+
         if work_dir.exists():
             shutil.rmtree(work_dir)
         work_dir.mkdir(exist_ok=True)

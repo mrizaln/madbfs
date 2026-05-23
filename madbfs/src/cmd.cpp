@@ -203,7 +203,7 @@ namespace madbfs::cmd
         auto ret = co_await proc.async_wait();
         if (check and ret != 0) {
             auto errmsg = not err.empty() ? util::strip(err) : util::strip(out);
-            log_i(__func__, "non-zero command status ({}) {}: err: [{}]", ret, cmd, errmsg);
+            log_t(__func__, "non-zero command status ({}) {}: err: [{}]", ret, cmd, errmsg);
             co_return Unexpect{ to_errc(parse_stderr(errmsg)) };
         }
 

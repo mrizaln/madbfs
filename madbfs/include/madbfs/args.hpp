@@ -1,5 +1,7 @@
 #pragma once
 
+#include "madbfs/path.hpp"
+
 #include <madbfs-common/async/async.hpp>
 #include <madbfs-common/log.hpp>
 #include <madbfs-common/util/var_wrapper.hpp>
@@ -23,6 +25,7 @@ namespace madbfs::args
     struct MadbfsOpt
     {
         const char* serial     = nullptr;
+        const char* root       = nullptr;
         const char* server     = nullptr;
         const char* log_level  = nullptr;
         const char* log_file   = nullptr;
@@ -38,6 +41,7 @@ namespace madbfs::args
         ~MadbfsOpt()
         {
             ::free((void*)serial);
+            ::free((void*)root);
             ::free((void*)server);
             ::free((void*)log_level);
             ::free((void*)log_file);
@@ -71,14 +75,15 @@ namespace madbfs::args
      */
     struct ParsedOpt
     {
-        String       mount;
-        String       serial;
-        Connection   connection;
-        Opt<Caching> caching;
-        log::Level   log_level;
-        String       log_file;
-        i32          ttl;
-        i32          timeout;
+        String        mount;
+        String        serial;
+        path::PathBuf root;
+        Connection    connection;
+        Opt<Caching>  caching;
+        log::Level    log_level;
+        String        log_file;
+        i32           ttl;
+        i32           timeout;
     };
 
     /**
@@ -111,6 +116,7 @@ namespace madbfs::args
     static constexpr auto madbfs_opt_spec = std::to_array<fuse_opt>({
         // clang-format off
         { "--serial=%s",     offsetof(MadbfsOpt, serial),     true },
+        { "--root=%s",       offsetof(MadbfsOpt, root),       true },
         { "--server=%s",     offsetof(MadbfsOpt, server),     true },
         { "--log-level=%s",  offsetof(MadbfsOpt, log_level),  true },
         { "--log-file=%s",   offsetof(MadbfsOpt, log_file),   true },

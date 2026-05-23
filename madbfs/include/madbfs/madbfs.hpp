@@ -3,6 +3,7 @@
 #include "madbfs/args.hpp"
 #include "madbfs/connection.hpp"
 #include "madbfs/filesystem.hpp"
+#include "madbfs/path.hpp"
 
 #include <madbfs-common/ipc.hpp>
 
@@ -27,6 +28,7 @@ namespace madbfs
             struct fuse*     fuse,
             args::Connection connection,
             Opt<Caching>     caching,
+            path::Path       custom_root,
             Str              mount_point,
             Opt<Seconds>     ttl,
             Opt<Seconds>     timeout
@@ -39,6 +41,19 @@ namespace madbfs
 
         Madbfs(const Madbfs&)            = delete;
         Madbfs& operator=(const Madbfs&) = delete;
+
+        /**
+         * @brief Crate a new real file path on device.
+         *
+         * @param path Path to file (raw from FUSE).
+         *
+         * @return The path prepended with custom root, or `Errc::operation_not_supported`
+         *
+         * This function prepends custom root path into the path.
+         *
+         * TODO: add mechanism that cache the PathBuf so no repeated allocations.
+         */
+        Expect<path::PathBuf> create_path(const char* path);
 
         Filesystem&     fs() { return m_fs; }
         async::Context& ctx() { return m_async_ctx; }
@@ -106,7 +121,8 @@ namespace madbfs
         async::Timer    m_reaper_timer;
         net::signal_set m_signal;
 
-        String       m_mountpoint;
-        Opt<Seconds> m_timeout;
+        path::PathBuf m_root;    // custom root for mounting subdirectory
+        String        m_mountpoint;
+        Opt<Seconds>  m_timeout;
     };
 }

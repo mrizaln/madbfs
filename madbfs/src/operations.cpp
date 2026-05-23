@@ -130,7 +130,7 @@ namespace madbfs::operations
         auto timeout = args->timeout < 1 ? std::nullopt : Opt<Seconds>{ args->timeout };
         auto fuse    = ::fuse_get_context()->fuse;
 
-        return new Madbfs{ fuse, args->connection, caching, args->mount, ttl, timeout };
+        return new Madbfs{ fuse, args->connection, caching, args->root, args->mount, ttl, timeout };
     }
 
     void destroy(void* private_data) noexcept
@@ -153,7 +153,7 @@ namespace madbfs::operations
     {
         log_i(__func__, "{:?}", path);
 
-        auto named_stat = ok_or(path::create(path), Errc::operation_not_supported).and_then([](path::Path p) {
+        auto named_stat = get_data().create_path(path).and_then([](path::PathBuf p) {
             return invoke_fs(&Filesystem::getattr, p);
         });
         if (not named_stat.has_value()) {
@@ -186,8 +186,9 @@ namespace madbfs::operations
     {
         log_i(__func__, "{:?}", path);
 
-        return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](path::Path p) { return invoke_fs(&Filesystem::readlink, p); })
+        return get_data()
+            .create_path(path)
+            .and_then([](path::PathBuf p) { return invoke_fs(&Filesystem::readlink, p); })
             .and_then([&](Str target) -> Expect<void> {
                 if (target.size() < 1) {
                     return Unexpect{ Errc::invalid_argument };
@@ -221,8 +222,9 @@ namespace madbfs::operations
     {
         log_i(__func__, "{:?}", path);
 
-        return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([=](path::Path p) { return invoke_fs(&Filesystem::mknod, p, mode, dev); })
+        return get_data()
+            .create_path(path)
+            .and_then([=](path::PathBuf p) { return invoke_fs(&Filesystem::mknod, p, mode, dev); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -231,8 +233,9 @@ namespace madbfs::operations
     {
         log_i(__func__, "{:?}", path);
 
-        return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([=](path::Path p) { return invoke_fs(&Filesystem::mkdir, p, mode | S_IFDIR); })
+        return get_data()
+            .create_path(path)
+            .and_then([=](path::PathBuf p) { return invoke_fs(&Filesystem::mkdir, p, mode | S_IFDIR); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -241,8 +244,9 @@ namespace madbfs::operations
     {
         log_i(__func__, "{:?}", path);
 
-        return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](path::Path p) { return invoke_fs(&Filesystem::unlink, p); })
+        return get_data()
+            .create_path(path)
+            .and_then([](path::PathBuf p) { return invoke_fs(&Filesystem::unlink, p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -251,8 +255,9 @@ namespace madbfs::operations
     {
         log_i(__func__, "{:?}", path);
 
-        return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([](path::Path p) { return invoke_fs(&Filesystem::rmdir, p); })
+        return get_data()
+            .create_path(path)
+            .and_then([](path::PathBuf p) { return invoke_fs(&Filesystem::rmdir, p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -262,8 +267,8 @@ namespace madbfs::operations
     {
         log_i(__func__, "{:?} -> {:?} [flags={}]", from, to, flags);
 
-        auto from_path = path::create(from);
-        auto to_path   = path::create(to);
+        auto from_path = get_data().create_path(from);
+        auto to_path   = get_data().create_path(to);
 
         if (not from_path.has_value()) {
             return fuse_err(__func__, from)(Errc::operation_not_supported);
@@ -281,8 +286,9 @@ namespace madbfs::operations
     {
         log_i(__func__, "[size={}] {:?}", size, path);
 
-        return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return invoke_fs(&Filesystem::truncate, p, size); })
+        return get_data()
+            .create_path(path)
+            .and_then([&](path::PathBuf p) { return invoke_fs(&Filesystem::truncate, p, size); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -291,8 +297,9 @@ namespace madbfs::operations
     {
         log_i(__func__, "{:?} [flags={:#08o}]", path, fi->flags);
 
-        return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return invoke_fs(&Filesystem::open, p, fi->flags); })
+        return get_data()
+            .create_path(path)
+            .and_then([&](path::PathBuf p) { return invoke_fs(&Filesystem::open, p, fi->flags); })
             .transform([&](u64 fd) { fi->fh = fd; })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
@@ -343,8 +350,9 @@ namespace madbfs::operations
 
         const auto fill = [&](const char* name) { filler(buf, name, nullptr, 0, FUSE_FILL_DIR_PLUS); };
 
-        return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return invoke_fs(&Filesystem::readdir, p, fill); })
+        return get_data()
+            .create_path(path)
+            .and_then([&](path::PathBuf p) { return invoke_fs(&Filesystem::readdir, p, fill); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -358,8 +366,9 @@ namespace madbfs::operations
     {
         log_i(__func__, "{:?}", path);
 
-        return ok_or(path::create(path), Errc::operation_not_supported)
-            .and_then([&](path::Path p) { return invoke_fs(&Filesystem::utimens, p, tv[0], tv[1]); })
+        return get_data()
+            .create_path(path)
+            .and_then([&](path::PathBuf p) { return invoke_fs(&Filesystem::utimens, p, tv[0], tv[1]); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }

@@ -153,6 +153,10 @@ namespace madbfs::args
             "    --serial=<str>         serial number of the device to mount\n"
             "                             (you can omit this [detection is similar to adb])\n"
             "                             (will prompt if more than one device exists)\n"
+            "    --root=<path>          directory to mount on device as root of the filesystem\n"
+            "                             (by default madbfs mounts the root path of the device)\n"
+            "                             (the path must be absolute and points to an existing path)\n"
+            "                             (if the path is a symlink, it will be resolved first)\n"
             "    --server=<path>        path to server file\n"
             "                             (if omitted will search the file automatically)\n"
             "                             (must have the same arch as your phone)\n"
@@ -307,6 +311,35 @@ namespace madbfs::args
             co_return ParseResult{ 1 };
         }
 
+        auto root = path::PathBuf{};
+        {
+            auto path = path::create_buf(madbfs_opt.root ? madbfs_opt.root : "/");
+            if (not path) {
+                fmt::println(stderr, "[madbfs] root path is not valid");
+                ::fuse_opt_free_args(&args);
+                co_return ParseResult{ 1 };
+            }
+
+            auto str = fmt::format("\"{}\"", path->str());
+
+            if (auto is_dir = co_await cmd::exec({ "adb", "shell", "test", "-d", str }); not is_dir) {
+                fmt::println(stderr, "[madbfs] root path is not a directory or not exists");
+                ::fuse_opt_free_args(&args);
+                co_return ParseResult{ 1 };
+            }
+
+            if (auto is_link = co_await cmd::exec({ "adb", "shell", "test", "-L", str }); not is_link) {
+                root = std::move(path).value();
+            } else if (auto link = co_await cmd::exec({ "adb", "shell", "readlink", "-ne", str }); not link) {
+                fmt::println(stderr, "[madbfs] failed to read link");
+                ::fuse_opt_free_args(&args);
+                co_return ParseResult{ 1 };
+            } else {
+                root = path::create_buf(std::move(link).value()).value();
+                fmt::println("[madbfs] root resolved: {:?} -> {:?}", path->str(), root);
+            }
+        }
+
         auto port       = static_cast<u16>(madbfs_opt.port);
         auto connection = Connection{ connection::AdbOnly{} };
 
@@ -377,6 +410,7 @@ namespace madbfs::args
             .opt = {
                 .mount      = std::move(mountpoint),
                 .serial     = madbfs_opt.serial,
+                .root       = std::move(root),
                 .connection = connection,
                 .caching    = caching,
                 .log_level  = log_level.value(),
