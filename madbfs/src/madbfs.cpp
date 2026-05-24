@@ -277,11 +277,15 @@ namespace madbfs
         m_signal.async_wait([this, pid = ::getpid()](net::error_code ec, int sig) {
             if (not ec) {
                 assert(m_fuse != nullptr);
-                madbfs::log_w("Madbfs", "signal raised: SIG{} ({})", ::sigabbrev_np(sig), sig);
+                log_w("Madbfs", "signal raised: SIG{} ({})", ::sigabbrev_np(sig), sig);
                 ::fuse_exit(m_fuse);
                 ::kill(pid, SIGPIPE);
             }
         });
+
+        if (auto result = async::block(m_async_ctx, m_fs.initialize_root()); not result) {
+            log_c(__func__, "Failed to initialize root");
+        }
     }
 
     Madbfs::~Madbfs()

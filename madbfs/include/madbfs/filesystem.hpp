@@ -105,6 +105,11 @@ namespace madbfs
         Expect<void> symlink(path::Path path, Str target);
 
         /**
+         * @brief Initialize root directory by getting its stat early.
+         */
+        AExpect<void> initialize_root();
+
+        /**
          * @brief Shut down the filesystem and stop every async operation.
          *
          * Call this before destructor. This is needed to do proper flushing for the `Cache`.
