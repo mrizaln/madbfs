@@ -307,17 +307,53 @@ namespace madbfs
         m_work_thread.join();
     }
 
-    Expect<path::PathBuf> Madbfs::create_path(const char* path)
+    Expect<path::Path> Madbfs::create_path(const char* path)
     {
+        thread_local static auto string = String{};
+        thread_local static auto comps  = Vec<util::Slice>{};
+
         if (m_root.is_root()) {
-            return ok_or(path::create_buf(path), Errc::invalid_argument);
+            return ok_or(path::create_with(comps, path), Errc::invalid_argument);
         }
 
-        auto str = String{ m_root.str() };
-        str.ends_with('/') ? void() : str.push_back('/');
-        str.append(path);
+        string.clear();
+        string.assign(m_root.str());
+        string.ends_with('/') ? void() : string.push_back('/');
+        string.append(path);
 
-        return ok_or(path::create_buf(std::move(str)), Errc::invalid_argument);
+        return ok_or(path::create_with(comps, string), Errc::invalid_argument);
+    }
+
+    Expect<Array<path::Path, 2>> Madbfs::create_path2(const char* path1, const char* path2)
+    {
+        thread_local static auto strings = Array<String, 2>{};
+        thread_local static auto compss  = Array<Vec<util::Slice>, 2>{};
+
+        auto paths  = Array{ path1, path2 };
+        auto result = Array<path::Path, 2>{};
+
+        for (auto i : sv::iota(0uz, 2uz)) {
+            if (m_root.is_root()) {
+                auto path = path::create_with(compss[i], paths[i]);
+                if (not path) {
+                    return Unexpect{ Errc::invalid_argument };
+                }
+                result[i] = std::move(*path);
+            }
+
+            strings[i].clear();
+            strings[i].assign(m_root.str());
+            strings[i].ends_with('/') ? void() : strings[i].push_back('/');
+            strings[i].append(paths[i]);
+
+            auto path = path::create_with(compss[i], strings[i]);
+            if (not path) {
+                return Unexpect{ Errc::invalid_argument };
+            }
+            result[i] = std::move(*path);
+        }
+
+        return std::move(result);
     }
 
     AExpect<json::value> Madbfs::ipc_handler(ipc::FsOp op)
