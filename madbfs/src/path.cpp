@@ -7,18 +7,21 @@ namespace madbfs::path
     /**
      * @brief Split path string into its components.
      *
+     * @param comps_buf Path components storage.
      * @param path Input path string.
      *
-     * @return A pair of the components and a cleaned version of the path (extra '/' are stripped from the
-     * beginning and the end of the path).
+     * @return A cleaned version of the path (extra '/' are stripped from the beginning and the end of the
+     * path).
      *
      * The components and the cleaned path are in index-based slice instead of string view.
      */
-    Opt<Pair<Vec<Slice>, Slice>> split_components(Str path)
+    Opt<Slice> split_components(Vec<Slice>& comps_buf, Str path)
     {
         if (path.empty() or path.front() != '/') {
             return std::nullopt;
         }
+
+        comps_buf.clear();
 
         while (path.size() > 1 and path.back() == '/') {
             path.remove_suffix(1);
@@ -31,11 +34,10 @@ namespace madbfs::path
         }
 
         if (path == "/") {
-            return Pair{ Vec<Slice>{}, Slice{} };
+            return Slice{};
         }
 
-        auto components = Vec<Slice>{};
-        auto index      = 1uz;
+        auto index = 1uz;
 
         while (index < path.size()) {
             auto current = index;
@@ -45,15 +47,15 @@ namespace madbfs::path
 
             auto next = path.find('/', current);
             if (next == Str::npos) {
-                components.emplace_back(current, path.size() - current);
+                comps_buf.emplace_back(current, path.size() - current);
                 break;
             }
 
-            components.emplace_back(current, next - current);
+            comps_buf.emplace_back(current, next - current);
             index = next;
         }
 
-        return Pair{ std::move(components), Slice{ offset_prefix, path.size() } };
+        return Slice{ offset_prefix, path.size() };
     }
 }
 
@@ -166,45 +168,61 @@ namespace madbfs::path
 {
     Opt<SemiPath> create(Str path)
     {
-        auto split = split_components(path);
-        if (not split) {
+        auto comps = Vec<Slice>{};
+        auto slice = split_components(comps, path);
+        if (not slice) {
             return std::nullopt;
         }
 
-        auto&& [comps, slice] = *split;
         if (comps.empty()) {
             return SemiPath{};
         }
 
-        auto path_path = Path{ slice.to_str(path), comps };
+        auto path_path = Path{ slice->to_str(path), comps };
         return SemiPath{ std::move(comps), std::move(path_path) };
     }
 
     Opt<PathBuf> create_buf(String&& path_str)
     {
-        auto split = split_components(path_str);
-        if (not split) {
+        auto comps = Vec<Slice>{};
+        auto slice = split_components(comps, path_str);
+        if (not slice) {
             return std::nullopt;
         }
 
-        auto&& [comps, slice] = *split;
         if (comps.empty()) {
             path_str = "/";
         } else {
-            slice.keep_slice(path_str);
+            slice->keep_slice(path_str);
         }
 
         return PathBuf{ std::move(path_str), std::move(comps) };
     }
 
-    PathBuf resolve(madbfs::path::Path parent, madbfs::Str path)
+    Opt<Path> create_with(Vec<Slice>& comps_buf, Str path)
     {
-        auto parents = madbfs::Vec<madbfs::Str>{};
-        if (path.front() != '/') {
-            parents = madbfs::util::split(parent.str(), '/');
+        auto slice = split_components(comps_buf, path);
+        if (not slice) {
+            return std::nullopt;
         }
 
-        madbfs::util::StringSplitter{ path, '/' }.while_next([&](madbfs::Str str) {
+        if (comps_buf.empty()) {
+            return Path{};
+        }
+
+        return Path{ slice->to_str(path), comps_buf };
+    }
+
+    PathBuf resolve(Path parent, Str path)
+    {
+        assert(not path.empty());
+
+        auto parents = Vec<Str>{};
+        if (path.front() != '/') {
+            parents = util::split(parent.str(), '/');
+        }
+
+        util::StringSplitter{ path, '/' }.while_next([&](Str str) {
             if (str == ".") {
                 return;
             } else if (str == "..") {
@@ -220,7 +238,7 @@ namespace madbfs::path
             return PathBuf{};
         }
 
-        auto resolved = madbfs::String{};
+        auto resolved = String{};
         for (auto path : parents) {
             resolved += '/';
             resolved += path;

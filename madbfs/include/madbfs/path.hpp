@@ -33,7 +33,8 @@ namespace madbfs::path
     {
     public:
         friend class PathBuf;
-        friend Opt<SemiPath> create(Str path);
+        friend Opt<SemiPath> create(Str);
+        friend Opt<Path>     create_with(Vec<Slice>&, Str);
 
         /**
          * @brief Default construct a path.
@@ -268,6 +269,15 @@ namespace madbfs::path
      * @param path_str The path to create from.
      */
     Opt<PathBuf> create_buf(String&& path_str);
+
+    /**
+     * @brief Create a Path from a string and use the buf provided as the components storage.
+     *
+     * @param path Path string.
+     *
+     * The rule is the same as `create()`. `comps_buf` will be cleared only on success.
+     */
+    Opt<Path> create_with(Vec<Slice>& comps_buf, Str path);
 
     /**
      * @brief Resolve path relative to parent.
