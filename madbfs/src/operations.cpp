@@ -84,7 +84,7 @@ namespace
             case std::errc::read_only_file_system:
             case std::errc::filename_too_long:
             case std::errc::invalid_argument: {
-                if (madbfs::log::get_level() == madbfs::log::Level::debug) {
+                if (madbfs::log::get_level() <= madbfs::log::Level::debug) {
                     const auto& msg = madbfs::err_msg(err);
                     log(Level::warn, "{:?} returned with error code [{}]: {}", path, errint, msg);
                 }
@@ -96,6 +96,49 @@ namespace
             }
             return -errint;
         };
+    }
+
+    /**
+     * @brief Resolve then store symlink target into buf.
+     *
+     * @param buf Output buffer.
+     * @param target Symlink target.
+     *
+     * @return Nothing if success Errc if failure.
+     *
+     * This function resolves the symlink by prepending the mountpoint to the target if the symlink target is
+     * absolute. It only stores the target if the target is relative.
+     */
+    madbfs::Expect<void> resolve_symlink(madbfs::Span<char> buf, madbfs::Str target)
+    {
+        using namespace madbfs;
+
+        if (target.size() < 1) {
+            return Unexpect{ Errc::invalid_argument };
+        }
+
+        // custom root may break symlinks since the path pointed by the link might be unreachable, do I need
+        // to handle this special case? currently I'm too lazy to think, so I'll just let it be.
+
+        if (target[0] == '/') {    // absolute link
+            auto mount = get_data().mountpoint();
+            if (auto pathsize = mount.size() + target.size() + 1; pathsize > buf.size()) {
+                log_e(__func__, "path size is too long: {} vs {}", buf.size(), pathsize);
+                return Unexpect{ Errc::filename_too_long };
+            }
+            std::memcpy(buf.data(), mount.data(), mount.size());
+            std::memcpy(buf.data() + mount.size(), target.data(), target.size());
+            buf[mount.size() + target.size()] = '\0';
+        } else {
+            if (auto pathsize = target.size(); pathsize + 1 > buf.size()) {
+                log_e(__func__, "path size is too long: {} vs {}", buf.size(), pathsize);
+                return Unexpect{ Errc::filename_too_long };
+            }
+            std::memcpy(buf.data(), target.data(), target.size());
+            buf[target.size()] = '\0';
+        }
+
+        return {};
     }
 }
 
@@ -189,31 +232,7 @@ namespace madbfs::operations
         return get_data()
             .create_path(path)
             .and_then([](path::PathBuf p) { return invoke_fs(&Filesystem::readlink, p); })
-            .and_then([&](Str target) -> Expect<void> {
-                if (target.size() < 1) {
-                    return Unexpect{ Errc::invalid_argument };
-                }
-
-                if (target[0] == '/') {    // absolute link
-                    auto mount = get_data().mountpoint();
-                    if (auto pathsize = mount.size() + target.size() + 1; pathsize > size) {
-                        log_e(__func__, "path size is too long: {} vs {}", size, pathsize);
-                        return Unexpect{ Errc::filename_too_long };
-                    }
-                    std::memcpy(buf, mount.data(), mount.size());
-                    std::memcpy(buf + mount.size(), target.data(), target.size());
-                    buf[mount.size() + target.size()] = '\0';
-                } else {
-                    if (auto pathsize = target.size(); pathsize + 1 > size) {
-                        log_e(__func__, "path size is too long: {} vs {}", size, pathsize);
-                        return Unexpect{ Errc::filename_too_long };
-                    }
-                    std::memcpy(buf, target.data(), target.size());
-                    buf[target.size()] = '\0';
-                }
-
-                return {};
-            })
+            .and_then([&](Str target) { return resolve_symlink({ buf, size }, target); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
