@@ -59,6 +59,23 @@ namespace madbfs::path
 
 namespace madbfs::path
 {
+    Str Path::parent() const
+    {
+        if (is_root() or m_components.size() == 1) {
+            return "/";
+        }
+
+        const auto parent = m_components[m_components.size() - 2];
+        const auto size   = parent.offset + parent.size;
+
+        return { m_path.data(), size };
+    }
+
+    Path Path::parent_path() const
+    {
+        return is_root() ? *this : Path{ parent(), { m_components.begin(), m_components.size() - 1 } };
+    }
+
     Opt<PathBuf> Path::extend_copy(Str name) const
     {
         if (name.contains('/')) {
@@ -81,6 +98,23 @@ namespace madbfs::path
 
 namespace madbfs::path
 {
+    Str PathBuf::parent() const
+    {
+        if (is_root() or m_components.size() == 1) {
+            return "/";
+        }
+
+        const auto parent = m_components[m_components.size() - 2];
+        const auto size   = parent.offset + parent.size;
+
+        return { m_path.data(), size };
+    }
+
+    Path PathBuf::parent_path() const
+    {
+        return is_root() ? *this : Path{ parent(), { m_components.begin(), m_components.size() - 1 } };
+    }
+
     bool PathBuf::rename(Str name)
     {
         if (name.empty() or name.contains('/') or name == "." or name == "..") {
