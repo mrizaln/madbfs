@@ -47,7 +47,7 @@ namespace madbfs
          *
          * @param path Path to file (raw from FUSE).
          *
-         * @return The path prepended with custom root, or `Errc::operation_not_supported`
+         * @return The path prepended with custom root, or `Errc::invalid_argument`
          *
          * This function prepends custom root path into the path.
          *

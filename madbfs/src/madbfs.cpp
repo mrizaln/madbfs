@@ -310,14 +310,14 @@ namespace madbfs
     Expect<path::PathBuf> Madbfs::create_path(const char* path)
     {
         if (m_root.is_root()) {
-            return ok_or(path::create_buf(path), Errc::operation_not_supported);
+            return ok_or(path::create_buf(path), Errc::invalid_argument);
         }
 
         auto str = String{ m_root.str() };
         str.ends_with('/') ? void() : str.push_back('/');
         str.append(path);
 
-        return ok_or(path::create_buf(std::move(str)), Errc::operation_not_supported);
+        return ok_or(path::create_buf(std::move(str)), Errc::invalid_argument);
     }
 
     AExpect<json::value> Madbfs::ipc_handler(ipc::FsOp op)
