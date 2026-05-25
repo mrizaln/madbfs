@@ -84,7 +84,7 @@ namespace
             case std::errc::read_only_file_system:
             case std::errc::filename_too_long:
             case std::errc::invalid_argument: {
-                if (madbfs::log::get_level() == madbfs::log::Level::debug) {
+                if (madbfs::log::get_level() <= madbfs::log::Level::debug) {
                     const auto& msg = madbfs::err_msg(err);
                     log(Level::warn, "{:?} returned with error code [{}]: {}", path, errint, msg);
                 }
@@ -96,6 +96,49 @@ namespace
             }
             return -errint;
         };
+    }
+
+    /**
+     * @brief Resolve then store symlink target into buf.
+     *
+     * @param buf Output buffer.
+     * @param target Symlink target.
+     *
+     * @return Nothing if success Errc if failure.
+     *
+     * This function resolves the symlink by prepending the mountpoint to the target if the symlink target is
+     * absolute. It only stores the target if the target is relative.
+     */
+    madbfs::Expect<void> resolve_symlink(madbfs::Span<char> buf, madbfs::Str target)
+    {
+        using namespace madbfs;
+
+        if (target.size() < 1) {
+            return Unexpect{ Errc::invalid_argument };
+        }
+
+        // custom root may break symlinks since the path pointed by the link might be unreachable, do I need
+        // to handle this special case? currently I'm too lazy to think, so I'll just let it be.
+
+        if (target[0] == '/') {    // absolute link
+            auto mount = get_data().mountpoint();
+            if (auto pathsize = mount.size() + target.size() + 1; pathsize > buf.size()) {
+                log_e(__func__, "path size is too long: {} vs {}", buf.size(), pathsize);
+                return Unexpect{ Errc::filename_too_long };
+            }
+            std::memcpy(buf.data(), mount.data(), mount.size());
+            std::memcpy(buf.data() + mount.size(), target.data(), target.size());
+            buf[mount.size() + target.size()] = '\0';
+        } else {
+            if (auto pathsize = target.size(); pathsize + 1 > buf.size()) {
+                log_e(__func__, "path size is too long: {} vs {}", buf.size(), pathsize);
+                return Unexpect{ Errc::filename_too_long };
+            }
+            std::memcpy(buf.data(), target.data(), target.size());
+            buf[target.size()] = '\0';
+        }
+
+        return {};
     }
 }
 
@@ -153,7 +196,7 @@ namespace madbfs::operations
     {
         log_i(__func__, "{:?}", path);
 
-        auto named_stat = get_data().create_path(path).and_then([](path::PathBuf p) {
+        auto named_stat = get_data().create_path(path).and_then([](path::Path p) {
             return invoke_fs(&Filesystem::getattr, p);
         });
         if (not named_stat.has_value()) {
@@ -188,32 +231,8 @@ namespace madbfs::operations
 
         return get_data()
             .create_path(path)
-            .and_then([](path::PathBuf p) { return invoke_fs(&Filesystem::readlink, p); })
-            .and_then([&](Str target) -> Expect<void> {
-                if (target.size() < 1) {
-                    return Unexpect{ Errc::invalid_argument };
-                }
-
-                if (target[0] == '/') {    // absolute link
-                    auto mount = get_data().mountpoint();
-                    if (auto pathsize = mount.size() + target.size() + 1; pathsize > size) {
-                        log_e(__func__, "path size is too long: {} vs {}", size, pathsize);
-                        return Unexpect{ Errc::filename_too_long };
-                    }
-                    std::memcpy(buf, mount.data(), mount.size());
-                    std::memcpy(buf + mount.size(), target.data(), target.size());
-                    buf[mount.size() + target.size()] = '\0';
-                } else {
-                    if (auto pathsize = target.size(); pathsize + 1 > size) {
-                        log_e(__func__, "path size is too long: {} vs {}", size, pathsize);
-                        return Unexpect{ Errc::filename_too_long };
-                    }
-                    std::memcpy(buf, target.data(), target.size());
-                    buf[target.size()] = '\0';
-                }
-
-                return {};
-            })
+            .and_then([](path::Path p) { return invoke_fs(&Filesystem::readlink, p); })
+            .and_then([&](Str target) { return resolve_symlink({ buf, size }, target); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -224,7 +243,7 @@ namespace madbfs::operations
 
         return get_data()
             .create_path(path)
-            .and_then([=](path::PathBuf p) { return invoke_fs(&Filesystem::mknod, p, mode, dev); })
+            .and_then([=](path::Path p) { return invoke_fs(&Filesystem::mknod, p, mode, dev); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -235,7 +254,7 @@ namespace madbfs::operations
 
         return get_data()
             .create_path(path)
-            .and_then([=](path::PathBuf p) { return invoke_fs(&Filesystem::mkdir, p, mode | S_IFDIR); })
+            .and_then([=](path::Path p) { return invoke_fs(&Filesystem::mkdir, p, mode | S_IFDIR); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -246,7 +265,7 @@ namespace madbfs::operations
 
         return get_data()
             .create_path(path)
-            .and_then([](path::PathBuf p) { return invoke_fs(&Filesystem::unlink, p); })
+            .and_then([](path::Path p) { return invoke_fs(&Filesystem::unlink, p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -257,7 +276,7 @@ namespace madbfs::operations
 
         return get_data()
             .create_path(path)
-            .and_then([](path::PathBuf p) { return invoke_fs(&Filesystem::rmdir, p); })
+            .and_then([](path::Path p) { return invoke_fs(&Filesystem::rmdir, p); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -267,17 +286,9 @@ namespace madbfs::operations
     {
         log_i(__func__, "{:?} -> {:?} [flags={}]", from, to, flags);
 
-        auto from_path = get_data().create_path(from);
-        auto to_path   = get_data().create_path(to);
-
-        if (not from_path.has_value()) {
-            return fuse_err(__func__, from)(Errc::operation_not_supported);
-        }
-        if (not to_path.has_value()) {
-            return fuse_err(__func__, to)(Errc::operation_not_supported);
-        }
-
-        return invoke_fs(&Filesystem::rename, *from_path, *to_path, flags)
+        return get_data()
+            .create_path2(from, to)
+            .and_then([&](auto p) { return invoke_fs(&Filesystem::rename, p[0], p[1], flags); })
             .transform_error(fuse_err(__func__, from))
             .error_or(0);
     }
@@ -288,7 +299,7 @@ namespace madbfs::operations
 
         return get_data()
             .create_path(path)
-            .and_then([&](path::PathBuf p) { return invoke_fs(&Filesystem::truncate, p, size); })
+            .and_then([&](path::Path p) { return invoke_fs(&Filesystem::truncate, p, size); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -299,7 +310,7 @@ namespace madbfs::operations
 
         return get_data()
             .create_path(path)
-            .and_then([&](path::PathBuf p) { return invoke_fs(&Filesystem::open, p, fi->flags); })
+            .and_then([&](path::Path p) { return invoke_fs(&Filesystem::open, p, fi->flags); })
             .transform([&](u64 fd) { fi->fh = fd; })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
@@ -352,7 +363,7 @@ namespace madbfs::operations
 
         return get_data()
             .create_path(path)
-            .and_then([&](path::PathBuf p) { return invoke_fs(&Filesystem::readdir, p, fill); })
+            .and_then([&](path::Path p) { return invoke_fs(&Filesystem::readdir, p, fill); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -368,7 +379,7 @@ namespace madbfs::operations
 
         return get_data()
             .create_path(path)
-            .and_then([&](path::PathBuf p) { return invoke_fs(&Filesystem::utimens, p, tv[0], tv[1]); })
+            .and_then([&](path::Path p) { return invoke_fs(&Filesystem::utimens, p, tv[0], tv[1]); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }
@@ -388,17 +399,10 @@ namespace madbfs::operations
             __func__, "[size={}] | {:?} [off={}] -> {:?} [off={}]", size, in_path, in_off, out_path, out_off
         );
 
-        auto in  = path::create(in_path);
-        auto out = path::create(out_path);
-
-        if (not in) {
-            return fuse_err(__func__, in_path)(Errc::operation_not_supported);
-        } else if (not out) {
-            return fuse_err(__func__, out_path)(Errc::operation_not_supported);
-        }
-
-        auto op  = &Filesystem::copy_file_range;
-        auto res = invoke_fs(op, *in, in_fi->fh, in_off, *out, out_fi->fh, out_off, size);
+        auto res = get_data().create_path2(in_path, out_path).and_then([&](auto p) {
+            auto op = &Filesystem::copy_file_range;
+            return invoke_fs(op, p[0], in_fi->fh, in_off, p[1], out_fi->fh, out_off, size);
+        });
         return res ? static_cast<isize>(res.value()) : fuse_err(__func__, in_path)(res.error());
     }
 }

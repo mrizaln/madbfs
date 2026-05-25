@@ -33,7 +33,8 @@ namespace madbfs::path
     {
     public:
         friend class PathBuf;
-        friend Opt<SemiPath> create(Str path);
+        friend Opt<SemiPath> create(Str);
+        friend Opt<Path>     create_with(Vec<Slice>&, Str);
 
         /**
          * @brief Default construct a path.
@@ -58,27 +59,14 @@ namespace madbfs::path
          * This operation returns a directory path as if you do `dirname <path>` command. Use `parent_path()`
          * member function if you want the resulting path as `Path` instead of plain string.
          */
-        Str parent() const
-        {
-            if (is_root() or m_components.size() == 1) {
-                return "/";
-            }
-
-            const auto parent = m_components[m_components.size() - 2];
-            const auto size   = parent.offset + parent.size;
-
-            return { m_path.data(), size };
-        }
+        Str parent() const;
 
         /**
          * @brief Create a `Path` that points to parent as its basename.
          *
          * @return New Path.
          */
-        Path parent_path() const
-        {
-            return is_root() ? *this : Path{ parent(), { m_components.begin(), m_components.size() - 1 } };
-        }
+        Path parent_path() const;
 
         /**
          * @brief Get the full path as string.
@@ -163,27 +151,14 @@ namespace madbfs::path
          * This operation returns a directory path as if you do `dirname <path>` command. Use `parent_path()`
          * member function if you want the resulting path as `Path` instead of plain string.
          */
-        Str parent() const
-        {
-            if (is_root() or m_components.size() == 1) {
-                return "/";
-            }
-
-            const auto parent = m_components[m_components.size() - 2];
-            const auto size   = parent.offset + parent.size;
-
-            return { m_path.data(), size };
-        }
+        Str parent() const;
 
         /**
          * @brief Create a `Path` that points to parent as its basename.
          *
          * @return New Path.
          */
-        Path parent_path() const
-        {
-            return is_root() ? *this : Path{ parent(), { m_components.begin(), m_components.size() - 1 } };
-        }
+        Path parent_path() const;
 
         /**
          * @brief Get the full path as string.
@@ -294,6 +269,15 @@ namespace madbfs::path
      * @param path_str The path to create from.
      */
     Opt<PathBuf> create_buf(String&& path_str);
+
+    /**
+     * @brief Create a Path from a string and use the buf provided as the components storage.
+     *
+     * @param path Path string.
+     *
+     * The rule is the same as `create()`. `comps_buf` will be cleared only on success.
+     */
+    Opt<Path> create_with(Vec<Slice>& comps_buf, Str path);
 
     /**
      * @brief Resolve path relative to parent.

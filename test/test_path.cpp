@@ -278,8 +278,10 @@ int main()
     using ut::expect, ut::log, ut::that, ut::throws;
 
     using madbfs::path::create;
+    using madbfs::path::create_with;
     using madbfs::path::operator""_path;
     using madbfs::path::PathBuf;
+    using madbfs::util::Slice;
 
     "Path must be correctly constructed"_test = [](const TestConstruct& test) {
         auto comp_path = create(test.input);
@@ -374,4 +376,25 @@ int main()
                 << "Address should be different: " << test;
         }
     } | constructible_testcases;
+
+    "Path constructed using existing buffer should have the same components"_test = [] {
+        auto path_str  = "/home/user/projects/cpp/madbfs";
+        auto comps_buf = Vec<Slice>{};
+
+        auto path = create_with(comps_buf, path_str);
+        expect(path.has_value() >> ut::fatal);
+
+        expect(path->parent() == "/home/user/projects/cpp");
+        expect(path->filename() == "madbfs");
+        expect(path->str() == path_str);
+
+        auto path2 = create(path_str);
+        expect(path2.has_value() >> ut::fatal);
+
+        expect(path2->path.parent() == "/home/user/projects/cpp");
+        expect(path2->path.filename() == "madbfs");
+        expect(path2->path.str() == path_str);
+
+        expect(std::ranges::equal(path->iter(), path2->path.iter()));
+    };
 }

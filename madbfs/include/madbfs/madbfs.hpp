@@ -43,17 +43,32 @@ namespace madbfs
         Madbfs& operator=(const Madbfs&) = delete;
 
         /**
-         * @brief Crate a new real file path on device.
+         * @brief Create a new real file path on device (by prepending the path with custom root).
          *
          * @param path Path to file (raw from FUSE).
          *
-         * @return The path prepended with custom root, or `Errc::operation_not_supported`
+         * @return The path prepended with custom root, or `Errc::invalid_argument`
          *
-         * This function prepends custom root path into the path.
+         * @warning This function caches the string and components of the path using TLS scratch buffer.
+         * The produced path only valid until the next call to this function. Previos path produced by this
+         * function will be overwritten by the path used on latest call to this function.
          *
-         * TODO: add mechanism that cache the PathBuf so no repeated allocations.
+         * Use the `create_path2()` for 2 simultaneous path creation, there are two scratch buffer in that
+         * function.
          */
-        Expect<path::PathBuf> create_path(const char* path);
+        Expect<path::Path> create_path(const char* path);
+
+        /**
+         * @brief Create two new real file path on device (by prepending the path with custom root).
+         *
+         * @param path1 Path to file (raw from FUSE).
+         * @param path2 Path to file (raw from FUSE).
+         *
+         * @return The path prepended with custom root, or `Errc::invalid_argument`
+         *
+         * The same warning as `create_path()` applies.
+         */
+        Expect<Array<path::Path, 2>> create_path2(const char* path1, const char* path2);
 
         Filesystem&     fs() { return m_fs; }
         async::Context& ctx() { return m_async_ctx; }

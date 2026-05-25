@@ -312,32 +312,31 @@ namespace madbfs::args
         }
 
         auto root = path::PathBuf{};
-        {
-            auto path = path::create_buf(madbfs_opt.root ? madbfs_opt.root : "/");
-            if (not path) {
+        if (madbfs_opt.root) {
+            auto path = String{ madbfs_opt.root };
+            if (path.empty() or path.front() != '/') {
                 fmt::println(stderr, "[madbfs] root path is not valid");
                 ::fuse_opt_free_args(&args);
                 co_return ParseResult{ 1 };
             }
 
-            auto str = fmt::format("\"{}\"", path->str());
+            auto quoted = fmt::format("\"{}\"", path);
 
-            if (auto is_dir = co_await cmd::exec({ "adb", "shell", "test", "-d", str }); not is_dir) {
+            if (auto is_dir = co_await cmd::exec({ "adb", "shell", "test", "-d", quoted }); not is_dir) {
                 fmt::println(stderr, "[madbfs] root path is not a directory or not exists");
                 ::fuse_opt_free_args(&args);
                 co_return ParseResult{ 1 };
             }
 
-            if (auto is_link = co_await cmd::exec({ "adb", "shell", "test", "-L", str }); not is_link) {
-                root = std::move(path).value();
-            } else if (auto link = co_await cmd::exec({ "adb", "shell", "readlink", "-ne", str }); not link) {
-                fmt::println(stderr, "[madbfs] failed to read link");
+            auto real = co_await cmd::exec({ "adb", "shell", "realpath", quoted });
+            if (not real) {
+                fmt::println(stderr, "[madbfs] failed to resolve path: {}", err_msg(real.error()));
                 ::fuse_opt_free_args(&args);
                 co_return ParseResult{ 1 };
-            } else {
-                root = path::create_buf(std::move(link).value()).value();
-                fmt::println("[madbfs] root resolved: {:?} -> {:?}", path->str(), root);
             }
+
+            root = path::create_buf(String{ util::strip(*real) }).value();
+            fmt::println("[madbfs] root resolved: {:?} -> {:?}", path, root);
         }
 
         auto port       = static_cast<u16>(madbfs_opt.port);

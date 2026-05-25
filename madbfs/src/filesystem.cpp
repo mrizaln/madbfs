@@ -118,15 +118,6 @@ namespace madbfs
     AExpect<Ref<Node>> Filesystem::traverse_or_build(path::Path path)
     {
         if (path.is_root()) {
-            // workaround to initialize root stat on getattr
-            if (not m_root_initialized) {
-                auto stat = co_await m_connection.stat(path);
-                if (not stat.has_value()) {
-                    co_return Unexpect{ stat.error() };
-                }
-                m_root.set_stat(*stat);
-                m_root_initialized = true;
-            }
             co_return m_root;
         }
 
@@ -877,6 +868,19 @@ namespace madbfs
         auto node = std::make_unique<Node>(name, &parent->get(), std::move(stat), std::move(link));
 
         return dir.insert(std::move(node), false).transform(sink_void);
+    }
+
+    AExpect<void> Filesystem::initialize_root()
+    {
+        if (not std::exchange(m_root_initialized, true)) {
+            if (auto stat = co_await m_connection.stat(path::Path{}); stat.has_value()) {
+                m_root.set_stat(*stat);
+            } else {
+                co_return Unexpect{ stat.error() };
+            }
+        }
+
+        co_return Expect<void>{};
     }
 
     Await<void> Filesystem::shutdown()
