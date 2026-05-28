@@ -193,6 +193,80 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
     };
 }
 
+template <typename T, typename... Args>
+    requires (std::default_initializable<Args> and ...)    //
+         and std::constructible_from<T, Args...>           //
+         and std::constructible_from<ipc::Op, T>
+std::optional<ipc::Op> parse_cmd(std::string_view cmd, std::span<const std::string> args)
+{
+    using Tuple = std::tuple<Args...>;
+
+    if (auto size = sizeof...(Args); args.size() != size) {
+        fmt::println(stderr, "error: wrong number of argument on command '{}' (expects {} args)", cmd, size);
+        return std::nullopt;
+    }
+
+    auto ok    = true;
+    auto tuple = Tuple{};
+
+    auto parse = [&]<std::size_t I>(std::string_view arg) {
+        if (not ok) {
+            return;
+        } else if constexpr (std::integral<std::tuple_element_t<I, Tuple>>) {
+            auto [ptr, ec] = std::from_chars(arg.begin(), arg.end(), std::get<I>(tuple));
+            if (ptr != arg.end() or ec != std::errc{}) {
+                fmt::println(stderr, "error: unable to parse '{}' to valid integer", arg);
+                ok = false;
+            }
+        } else {
+            std::get<I>(tuple) = arg;
+        }
+    };
+
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        (parse.template operator()<Is>(args[Is]), ...);
+    }(std::index_sequence_for<Args...>{});
+
+    return ok ? std::optional<ipc::Op>{ std::make_from_tuple<T>(std::move(tuple)) } : std::nullopt;
+}
+
+std::optional<ipc::Op> parse_message(std::span<const std::string> message)
+{
+    assert(not message.empty());
+
+    auto cmd  = message[0];
+    auto args = message.subspan(1);
+
+    using Parser = std::optional<ipc::Op>(std::string_view cmd, std::span<const std::string> args);
+
+    namespace op = ipc::op;
+
+    static const auto parsers = std::unordered_map<std::string_view, Parser*>{ {
+        // clang-format off
+        { op::name::help,             parse_cmd<op::Help>                        },
+        { op::name::version,          parse_cmd<op::Version>                     },
+        { op::name::info,             parse_cmd<op::Info>                        },
+        { op::name::invalidate_cache, parse_cmd<op::InvalidateCache>             },
+        { op::name::expire_stat,      parse_cmd<op::ExpireStat>                  },
+        { op::name::set_page_size,    parse_cmd<op::SetPageSize, unsigned long>  },
+        { op::name::set_cache_size,   parse_cmd<op::SetCacheSize, unsigned long> },
+        { op::name::set_ttl,          parse_cmd<op::SetTTL, unsigned long>       },
+        { op::name::set_timeout,      parse_cmd<op::SetTimeout, unsigned long>   },
+        { op::name::set_log_level,    parse_cmd<op::SetLogLevel, std::string>    },
+        { op::name::logcat,           parse_cmd<op::Logcat>                      }, // let color unspecified
+        { op::name::unmount,          parse_cmd<op::Unmount>                     },
+        // clang-format on
+    } };
+
+    if (auto entry = parsers.find(cmd); entry != parsers.end()) {
+        auto parser = entry->second;
+        return parser(cmd, args);
+    }
+
+    fmt::println(stderr, "error: unknown command '{}'", cmd);
+    return std::nullopt;
+}
+
 void pretty_print(json::value const& json, std::string* indent = nullptr)
 {
     auto indent_str = std::string{};
@@ -291,129 +365,6 @@ int perform_list(fs::path search_path)
     }
 
     return 0;
-}
-
-template <std::integral Int>
-std::optional<Int> to_int(std::string_view str)
-{
-    auto value     = Int{};
-    auto [ptr, ec] = std::from_chars(str.begin(), str.end(), value);
-
-    if (ptr != str.end() or ec != std::error_code{}) {
-        fmt::println(stderr, "error: unable to parse '{}' to an integer", str);
-        return {};
-    } else {
-        return value;
-    }
-};
-
-std::optional<ipc::Op> parse_message(std::span<const std::string> message)
-{
-    auto too_much = [&](std::string_view cmd, int num) {
-        fmt::println(stderr, "error: too much argument passed to command '{}' (expects {} args)", cmd, num);
-    };
-
-    auto too_few = [&](std::string_view cmd, int num) {
-        fmt::println(stderr, "error: too few argument passed to command '{}' (expects {} args)", cmd, num);
-    };
-
-    auto op_str    = std::string_view{ message[0] };
-    auto value_str = std::optional<std::string_view>{};
-
-    if (message.size() > 1) {
-        value_str = message[1];
-    }
-
-    auto op = std::optional<ipc::Op>{};
-    if (op_str == ipc::op::name::help) {
-        if (value_str) {
-            too_much(op_str, 0);
-        } else {
-            op = ipc::op::Help{};
-        }
-    } else if (op_str == ipc::op::name::version) {
-        if (value_str) {
-            too_much(op_str, 0);
-        } else {
-            op = ipc::op::Version{};
-        }
-    } else if (op_str == ipc::op::name::logcat) {
-        if (value_str) {
-            too_much(op_str, 0);
-        } else {
-            op = ipc::op::Logcat{ .color = false };
-        }
-    } else if (op_str == ipc::op::name::info) {
-        if (value_str) {
-            too_much(op_str, 0);
-        } else {
-            op = ipc::op::Info{};
-        }
-    } else if (op_str == ipc::op::name::invalidate_cache) {
-        if (value_str) {
-            too_much(op_str, 0);
-        } else {
-            op = ipc::op::InvalidateCache{};
-        }
-    } else if (op_str == ipc::op::name::expire_stat) {
-        if (value_str) {
-            too_much(op_str, 0);
-        } else {
-            op = ipc::op::ExpireStat{};
-        }
-    } else if (op_str == ipc::op::name::set_page_size) {
-        if (not value_str) {
-            too_few(op_str, 1);
-        } else if (message.size() > 2) {
-            too_much(op_str, 1);
-        } else if (auto value = to_int<unsigned long>(*value_str); value) {
-            op = ipc::op::SetPageSize{ .kib = *value };
-        }
-    } else if (op_str == ipc::op::name::set_cache_size) {
-        if (not value_str) {
-            too_few(op_str, 1);
-        } else if (message.size() > 2) {
-            too_much(op_str, 1);
-        } else if (auto value = to_int<unsigned long>(*value_str); value) {
-            op = ipc::op::SetCacheSize{ .mib = *value };
-        }
-    } else if (op_str == ipc::op::name::set_ttl) {
-        if (not value_str) {
-            too_few(op_str, 1);
-        } else if (message.size() > 2) {
-            too_much(op_str, 1);
-        } else if (auto value = to_int<unsigned long>(*value_str); value) {
-            op = ipc::op::SetTTL{ .sec = *value };
-        }
-    } else if (op_str == ipc::op::name::set_timeout) {
-        if (not value_str) {
-            too_few(op_str, 1);
-        } else if (message.size() > 2) {
-            too_much(op_str, 1);
-        } else if (auto value = to_int<unsigned long>(*value_str); value) {
-            op = ipc::op::SetTimeout{ .sec = *value };
-        }
-    } else if (op_str == ipc::op::name::set_log_level) {
-        if (not value_str) {
-            too_few(op_str, 1);
-        } else if (message.size() > 2) {
-            too_much(op_str, 1);
-        } else if (not madbfs::log::level_from_str(*value_str)) {
-            fmt::println(stderr, "error: '{} is not valid {}", *value_str, madbfs::log::level_names);
-        } else {
-            op = ipc::op::SetLogLevel{ .lvl = std::string{ *value_str } };
-        }
-    } else if (op_str == ipc::op::name::unmount) {
-        if (value_str) {
-            too_much(op_str, 0);
-        } else {
-            op = ipc::op::Unmount{};
-        }
-    } else {
-        fmt::println(stderr, "error: unknown command '{}'", op_str);
-    }
-
-    return op;
 }
 
 int send_message(std::span<const std::string> message, fs::path socket_path, bool color)

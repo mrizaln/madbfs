@@ -84,7 +84,7 @@ namespace
                 auto level = json::value_to<String>(json.at("value"));
                 if (not log::level_from_str(level)) {
                     return Unexpect{
-                        fmt::format("'{}' is not a valid log level {}", level, log::level_names)
+                        fmt::format("'{}' is not a valid log level {::}", level, log::level_names)
                     };
                 }
                 return Op{ op::SetLogLevel{ .lvl = level } };
