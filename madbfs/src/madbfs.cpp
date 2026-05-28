@@ -35,7 +35,7 @@ namespace madbfs
                 const auto current_pages = cache->current_pages();
 
                 co_return json::value{
-                    { "connection", madbfs.m_connection.name() },
+                    { "transport", madbfs.m_connection.name() },
                     { "root", madbfs.m_root.str() },
                     { "log_level", log::level_to_str(log::get_level()) },
                     { "ttl", ttl_sec },
@@ -48,7 +48,7 @@ namespace madbfs
                 };
             } else {
                 co_return json::value{
-                    { "connection", madbfs.m_connection.name() },
+                    { "transport", madbfs.m_connection.name() },
                     { "root", madbfs.m_root.str() },
                     { "log_level", log::level_to_str(log::get_level()) },
                     { "ttl", ttl_sec },
