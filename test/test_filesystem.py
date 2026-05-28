@@ -54,6 +54,7 @@ DEFAULT_CACHE_SIZE = 256  # in MiB
 DEFAULT_TTL = 60  # in seconds
 DEFAULT_TIMEOUT = 2  # in seconds
 DEFAULT_LOG_LEVEL = "debug"  # on this test only
+CUSTOM_ROOT_PATH = "/data/local/tmp"
 
 logger = logging.getLogger(__name__)
 
@@ -175,12 +176,12 @@ def environ(request) -> tuple[Environ, Case]:
     if not request.param.use_cache:
         mount_cmd.append("--no-cache")
     if request.param.custom_root:
-        mount_cmd.append("--root=/data/local/tmp")
+        mount_cmd.append(f"--root={CUSTOM_ROOT_PATH}")
 
     # testing on other directory is risky...
     test_dir = mount_point
     if not request.param.custom_root:
-        test_dir = test_dir / "data/local/tmp"
+        test_dir = test_dir / CUSTOM_ROOT_PATH.lstrip("/")
 
     return (
         Environ(
@@ -652,9 +653,10 @@ def tst_open_rename(work_dir: Path):
 
 
 # first args is there just for symmetry, it's unused
-def tst_ipc(_: str, serial: str, use_server: bool, use_cache: bool):
+def tst_ipc(_: str, serial: str, custom_root: bool, use_server: bool, use_cache: bool):
     version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
-    connection = "proxy" if use_server else "adb"
+    transport = "proxy" if use_server else "adb"
+    root = CUSTOM_ROOT_PATH if custom_root else "/"
     timeout = DEFAULT_TIMEOUT
 
     with ipc_connect(serial) as sock:
@@ -685,7 +687,9 @@ def tst_ipc(_: str, serial: str, use_server: bool, use_cache: bool):
         resp = json.loads(resp)
         assert resp["status"] == "success"
         assert resp["value"]
-        assert resp["value"]["connection"] == connection
+        assert resp["value"]["serial"] == serial
+        assert resp["value"]["transport"] == transport
+        assert resp["value"]["root"] == root
         assert resp["value"]["log_level"] == DEFAULT_LOG_LEVEL
         assert resp["value"]["ttl"] == DEFAULT_TTL
         assert resp["value"]["timeout"] == timeout
@@ -853,15 +857,13 @@ def test_filesystem(environ):
         call(tst_unlink)
         call(tst_symlink)
         call(tst_chown)
-        call(
-            tst_utimens, 1000 if use_server else 1000000000
-        )  # tolerance in nanoseconds
+        call(tst_utimens, 1000 if use_server else 1000000000)  # tolerance in ns
         call(tst_link)
         call(tst_truncate_path)
         call(tst_truncate_fd)
         call(tst_open_unlink)
         call(tst_open_rename)
-        call(tst_ipc, serial, use_server, use_cache)
+        call(tst_ipc, serial, custom_root, use_server, use_cache)
     except:
         # NOTE: if tests are failing, the work_dir might not be cleaned up correctly. I
         # won't clean them up here since I might want to inspect the file in the work_dir
