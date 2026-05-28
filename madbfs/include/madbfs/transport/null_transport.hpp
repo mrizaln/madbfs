@@ -6,7 +6,8 @@ namespace madbfs::transport
 {
     /**
      * @class NullTransport
-     * @brief Dummy tranport that does nothing.
+     *
+     * @brief Tranport method that does nothing but return error instead.
      */
     class NullTransport final : public Transport
     {
@@ -21,6 +22,8 @@ namespace madbfs::transport
         {
         }
 
+        // overrides
+        // ---------
         Str  name() const override { return "null"; }
         bool running() const override { return true; }
 
@@ -29,6 +32,7 @@ namespace madbfs::transport
 
         AExpect<rpc::Response> send(rpc::Request) override { co_return Unexpect{ m_errc }; }
         AExpect<rpc::Response> send(rpc::Request, Milliseconds) override { co_return Unexpect{ m_errc }; }
+        // ---------
 
     private:
         Errc m_errc;

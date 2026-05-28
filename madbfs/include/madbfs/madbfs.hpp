@@ -66,7 +66,7 @@ namespace madbfs
          *
          * @return The path prepended with custom root, or `Errc::invalid_argument`
          *
-         * The same warning as `create_path()` applies.
+         * The same rule as `create_path()` applies.
          */
         Expect<Array<path::Path, 2>> create_path2(const char* path1, const char* path2);
 

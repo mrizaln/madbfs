@@ -20,6 +20,12 @@ namespace madbfs::util
             using Type = U4;
         };
 
+        /**
+         * @brief Helper traits for applying the same cvref of a type to another type.
+         *
+         * @tparam T Source type.
+         * @tparam U Destination type.
+         */
         template <typename Src, typename Dest>
         using CopyCVRef = CopyCVRefTraits<Src, Dest>::Type;
 
@@ -44,6 +50,12 @@ namespace madbfs::util
             }
         }
 
+        /**
+         * @brief Check whether a variant visitor is complete.
+         *
+         * @tparam Visit Visitor of the variant.
+         * @tparam Var The variant type.
+         */
         template <typename Visit, typename Var>
         concept VisitorComplete = visitor_complete<Visit, Var>();
     }
@@ -53,17 +65,37 @@ namespace madbfs::util
     {
     };
 
+    /**
+     * @brief Helper traits for variants.
+     *
+     * @tparam Ts Contained types of a variant.
+     */
     template <template <typename...> typename VT, typename... Ts>
     struct VarTraits<VT<Ts...>>
     {
+        /**
+         * @brief Return the number of types contained inside the variant.
+         */
         static consteval std::size_t size() { return sizeof...(Ts); }
 
+        /**
+         * @brief Check whether the variant contains a type.
+         *
+         * @tparam T The type to be checked.
+         */
         template <typename T>
         static consteval bool has_type()
         {
             return (std::same_as<T, Ts> || ...);
         }
 
+        /**
+         * @brief Get the index of the type on the variant.
+         *
+         * @tparam T The type to be indexed.
+         *
+         * This function only works if the variant contains unique types only (no duplicates).
+         */
         template <typename T>
             requires (has_type<T>())
         static consteval std::size_t type_index()
@@ -73,9 +105,18 @@ namespace madbfs::util
             }(std::make_index_sequence<size()>{});
         }
 
+        /**
+         * @brief Get type at index.
+         */
         template <std::size_t I>
         using TypeAt = std::variant_alternative_t<I, std::variant<Ts...>>;
 
+        /**
+         * @brief Get the contained type of other variant at the same position as T of current variant.
+         *
+         * @tparam T Type to be swapped.
+         * @tparam Var Other variant type.
+         */
         template <typename T, typename Var>
         using Swap = VarTraits<Var>::template TypeAt<type_index<T>()>;
     };
@@ -120,12 +161,20 @@ namespace madbfs::util
             return Traits::template type_index<T>();
         }
 
+        /**
+         * @brief Visit the variant of this instance using provided visitor.
+         *
+         * @param visitor The visitor of the instance.
+         */
         template <typename Self, detail::VisitorComplete<detail::CopyCVRef<Self, Var>> Visitor>
         decltype(auto) visit(this Self&& self, Visitor&& visitor)
         {
             return std::visit(std::forward<Visitor>(visitor), std::forward<Self>(self).as_var());
         }
 
+        /**
+         * @brief Return the underlying variant type.
+         */
         template <typename Self>
         decltype(auto) as_var(this Self&& self)
         {
@@ -133,12 +182,25 @@ namespace madbfs::util
             return static_cast<Var>(self);
         }
 
+        /**
+         * @brief Check if variant contains a type.
+         *
+         * @tparam T The type to be checked.
+         */
         template <typename T>
         bool holds() const
         {
             return std::holds_alternative<T>(as_var());
         }
 
+        /**
+         * @brief Get the contained variant of specified type.
+         *
+         * @tparam T Target type.
+         *
+         * @return The pointer to underlying type or `nullptr` if the variant is currently not containing the
+         * specfieid type.
+         */
         template <typename T>
         T* as()
         {
@@ -146,6 +208,14 @@ namespace madbfs::util
             return std::get_if<T>(&var);
         }
 
+        /**
+         * @brief Get the contained variant of specified type.
+         *
+         * @tparam T Target type.
+         *
+         * @return The pointer to underlying type or `nullptr` if the variant is currently not containing the
+         * specfieid type.
+         */
         template <typename T>
         const T* as() const
         {

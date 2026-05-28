@@ -121,7 +121,9 @@ namespace madbfs::node
     /**
      * @class Link
      *
-     * @brief Represent a symbolic link.
+     * @brief Represent a symbolic link (lazy).
+     *
+     * If the link is `std::nullopt` that means readlink hasn't been performed on this link.
      */
     struct Link
     {
@@ -157,6 +159,9 @@ namespace madbfs::node
 
 namespace madbfs
 {
+    /**
+     * @brief Represent a variant of file in the filesystem.
+     */
     using File = Var<node::Regular, node::Directory, node::Link, node::Other, node::Error>;
 
     /**
@@ -194,7 +199,6 @@ namespace madbfs
         Str         name() const { return m_name; }
         Node*       parent() const { return m_parent; }
         const File& value() const { return m_value; }
-
         const Stat& stat() const { return m_stat; }
 
         /**
@@ -365,7 +369,7 @@ namespace madbfs
         auto overload = Overload{
             [](            Reg&       reg) -> Ret { return reg;                                             },
             [](const node::Directory&    ) -> Ret { return Unexpect{ Errc::is_a_directory };                },
-            [](const node::Link&         ) -> Ret { return Unexpect{ Errc::too_many_symbolic_link_levels }; },  // mimick open(2) when no O_NOFOLLOW
+            [](const node::Link&         ) -> Ret { return Unexpect{ Errc::too_many_symbolic_link_levels }; },  // mimic open(2) when no O_NOFOLLOW
             [](const node::Other&        ) -> Ret { return Unexpect{ Errc::operation_not_supported };       },
             [](const node::Error&     err) -> Ret { return Unexpect{ err.error };                           },
         };

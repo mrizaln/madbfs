@@ -8,9 +8,19 @@
 
 namespace madbfs::server
 {
+    /**
+     * @class Connection
+     *
+     * @brief Represent active connection with madbfs client.
+     */
     class Connection
     {
     public:
+        /**
+         * @brief Create a connection with associated socket.
+         *
+         * @param socket Socket to madbfs client.
+         */
         Connection(rpc::Socket socket)
             : m_socket{ std::move(socket) }
             , m_channel{ m_socket.get_executor() }
@@ -20,8 +30,14 @@ namespace madbfs::server
 
         ~Connection() { stop(); }
 
+        /**
+         * @brief Start handling requests from madbfs client.
+         */
         AExpect<void> run();
 
+        /**
+         * @brief Stop handling requests.
+         */
         void stop();
 
     private:
@@ -47,6 +63,13 @@ namespace madbfs::server
         bool           m_running = false;
     };
 
+    /**
+     * @class Server
+     *
+     * @brief A connection listener for madbfs client.
+     *
+     * This class can only handle one `Connection` with madbfs client.
+     */
     class Server
     {
     public:
@@ -63,17 +86,16 @@ namespace madbfs::server
         Server& operator=(const Server&) = delete;
 
         /**
-         * @brief Start listening for RPC requests.
-         *
-         * @param handler The procedure handler.
+         * @brief Start listening for connection.
          */
         AExpect<void> run();
 
+        /**
+         * @brief Stop listening for connection.
+         */
         void stop();
 
     private:
-        AExpect<void> handle_connection(async::tcp::Socket sock);
-
         async::tcp::Acceptor m_acceptor;
         Opt<Connection>      m_connection;
         bool                 m_running = false;

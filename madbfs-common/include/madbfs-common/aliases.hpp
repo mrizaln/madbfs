@@ -13,7 +13,7 @@
 #include <version>
 
 #ifdef __cpp_lib_generator
-#    include <generator>
+#include <generator>
 #endif
 
 namespace madbfs
@@ -120,7 +120,14 @@ namespace madbfs
 
     inline namespace util_functions
     {
+        /**
+         * @brief Utility function that consume anything (single param).
+         */
         inline constexpr auto sink_void = [](auto&&) { };
+
+        /**
+         * @brief Utility function that consume anything then return `Unit` (single param).
+         */
         inline constexpr auto sink_unit = [](auto&&) { return Unit{}; };
 
         /**
@@ -248,6 +255,9 @@ namespace madbfs
             using Type = Unit;
         };
 
+        /**
+         * @brief Convert `void` to `Unit` but leave anything else as is.
+         */
         template <typename T>
         using ToUnit = ToUnitTrait<T>::Type;
     }
@@ -267,11 +277,11 @@ namespace madbfs
 }
 
 #ifndef MADBFS_RAPIDHASH_ENABLED
-#    define MADBFS_RAPIDHASH_ENABLED 0
+#define MADBFS_RAPIDHASH_ENABLED 0
 #endif
 
 #if MADBFS_RAPIDHASH_ENABLED
-#    include <rapidhash.h>
+#include <rapidhash.h>
 
 // enable hashing for any type that has unique object representation
 template <typename T>

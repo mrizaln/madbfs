@@ -106,6 +106,9 @@ namespace madbfs
 
             bool dirty = false;
 
+            /**
+             * @brief Check if an entry is free to be discarded.
+             */
             bool is_free() const
             {
                 return pages.empty()          //

@@ -1,24 +1,24 @@
 #pragma once
 
 #ifndef MADBFS_NON_BOOST_ASIO
-#    define MADBFS_NON_BOOST_ASIO 0
+#define MADBFS_NON_BOOST_ASIO 0
 #endif
 
 #include "madbfs-common/aliases.hpp"
 #include "madbfs-common/async/as_expected.hpp"
 
 #if MADBFS_NON_BOOST_ASIO
-#    include <asio.hpp>
-#    include <asio/error.hpp>
-#    include <asio/experimental/awaitable_operators.hpp>
-#    include <asio/experimental/channel.hpp>
-#    include <asio/experimental/parallel_group.hpp>
+#include <asio.hpp>
+#include <asio/error.hpp>
+#include <asio/experimental/awaitable_operators.hpp>
+#include <asio/experimental/channel.hpp>
+#include <asio/experimental/parallel_group.hpp>
 #else
-#    include <boost/asio.hpp>
-#    include <boost/asio/error.hpp>
-#    include <boost/asio/experimental/awaitable_operators.hpp>
-#    include <boost/asio/experimental/channel.hpp>
-#    include <boost/asio/experimental/parallel_group.hpp>
+#include <boost/asio.hpp>
+#include <boost/asio/error.hpp>
+#include <boost/asio/experimental/awaitable_operators.hpp>
+#include <boost/asio/experimental/channel.hpp>
+#include <boost/asio/experimental/parallel_group.hpp>
 #endif
 
 #include <atomic>
@@ -28,7 +28,7 @@ namespace madbfs::net
 {
 #if not MADBFS_NON_BOOST_ASIO
     using namespace ::boost::asio;
-    using error_code = boost::system::error_code;
+    using error_code = ::boost::system::error_code;
 #else
     using namespace ::asio;
     using error_code = std::error_code;
@@ -37,9 +37,21 @@ namespace madbfs::net
 
 namespace madbfs
 {
+    /**
+     * @brief Awaitable type to be used for asynchronous operations (coroutines).
+     *
+     * @tparam T Result of the asynchronous operation.
+     */
     template <typename T>
     using Await = net::awaitable<T>;
 
+    /**
+     * @brief Awaitable type to be used for asynchronouse operations (coroutines) with explicit failure.
+     *
+     * @tparam T Result of the asynchronous operation.
+     *
+     * This type is a convenience in order to reduce horizontal space burden on the codebase.
+     */
     template <typename T, typename E = Errc>
     using AExpect = Await<Expect<T, E>>;
 }
@@ -59,6 +71,11 @@ namespace madbfs::inline concepts
         };
     }
 
+    /**
+     * @brief Check whether a type is awaitable.
+     *
+     * @tparam T The type to be checked.
+     */
     template <typename T>
     concept IsAwaitable = concepts::detail::AwaitableTraits<T>::value;
 }
@@ -93,14 +110,13 @@ namespace madbfs::async
     }
 
     /**
-     * @brief Run a coroutine once then return the result (blocking).
+     * @brief Run a coroutine once on the provided context then return the result (blocking).
      *
      * @param awaitable The coroutine.
      *
-     * This overload is similar to the previous one but the context is provided by the caller.
-     *
-     * Use this function if the context is not run yet, if the context is already running in other thread use
-     * `async::block()` instead or `async::spawn()` with `async::use_future` for its completion handler.
+     * Use this function if the context is not run yet, if the context is already running in other
+     * thread use `async::block()` instead or `async::spawn()` with `async::use_future` for its completion
+     * handler.
      */
     template <typename T>
     auto once(async::Context& ctx, Await<T>&& awaitable) noexcept
@@ -111,7 +127,7 @@ namespace madbfs::async
     }
 
     /**
-     * @brief Spawn a new coroutine.
+     * @brief Spawn a new coroutine on the executor thread.
      *
      * @param exec Executor of the coroutine.
      * @param awaitable The coroutine.
@@ -138,7 +154,8 @@ namespace madbfs::async
      * @return The result of the coroutine.
      *
      * This function will put the caller thread to sleep/wait state. Make sure the coroutine is run on an
-     * already running async context or else this function will wait forever.
+     * already running async context or else this function will wait forever. Also make sure that you are not
+     * calling this function from the same thread as the context is run on, it will lead to deadlock.
      */
     template <typename Exec, typename T>
     T block(Exec& exec, Await<T> coro) noexcept(false)
@@ -233,7 +250,7 @@ namespace madbfs::async
      * @param awaitable Coroutine to be awaited.
      * @param time Duration before the coroutine is cancelled.
      *
-     * @return The result of the coroutine if completed within timeout, else `std::nullopt`;
+     * @return The result of the coroutine if completed within timeout, else `Errc::timed_out`;
      */
     template <typename T>
     AExpect<ToUnit<T>> timeout(AExpect<T>&& awaitable, Milliseconds time)

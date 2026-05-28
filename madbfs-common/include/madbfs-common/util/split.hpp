@@ -15,16 +15,33 @@ namespace madbfs::util
     {
         using Variant = Var<char, Span<const char>>;
 
+        /**
+         * @brief Create multiple delimiters.
+         *
+         * @param delim Delimiters as string.
+         */
         constexpr SplitDelim(Str delim)
             : variant{ delim }
         {
         }
 
+        /**
+         * @brief Create a single delimiter.
+         *
+         * @param delim Delimiter character.
+         */
         constexpr SplitDelim(char delim)
             : variant{ delim }
         {
         }
 
+        /**
+         * @brief Check if a character is a delimiter.
+         *
+         * @param ch Single character.
+         *
+         * In the case of string delimiter, this function checks whether char exists within it.
+         */
         constexpr bool is_delim(char ch) const
         {
             auto visitor = [&](auto&& value) {
@@ -45,6 +62,8 @@ namespace madbfs::util
      * @class StringSplitter
      *
      * @brief Simple string splitter.
+     *
+     * The string splitter treats multiple delimiters as one.
      */
     class StringSplitter
     {

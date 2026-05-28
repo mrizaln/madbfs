@@ -59,7 +59,7 @@ namespace madbfs::transport
          *
          * @param req Operation request.
          *
-         * This function typecheck the returned response variant from `send()` to match the corresponding
+         * This function checks the returned response variant type from `send()` to match the corresponding
          * request. Use this instead of `send()`
          */
         template <rpc::IsRequest Req>
@@ -79,7 +79,7 @@ namespace madbfs::transport
          * @param req Operation request.
          * @param timeout Timeout for the operation before cancelled.
          *
-         * This function typecheck the returned response variant from `send()` to match the corresponding
+         * This function checks the returned response variant type from `send()` to match the corresponding
          * request. Use this instead of `send()`
          */
         template <rpc::IsRequest Req>

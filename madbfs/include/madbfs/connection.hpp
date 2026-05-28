@@ -82,6 +82,8 @@ namespace madbfs
      * @class Proxy
      *
      * @brief Connection strategy to be used for connection.
+     *
+     * This struct is used to control reconnection logic and its fallback on `Connection`.
      */
     struct ConnectionStrategy    //
         : util::VarWrapper<      //
@@ -96,7 +98,24 @@ namespace madbfs
     /**
      * @class Connection
      *
-     * @brief Abstract struct for connection to adb devices and its fs operations.
+     * @brief Connection to adb devices and its filesystem operations.
+     *
+     * The connection uses multiple transport method to communicate with the device. It uses strategies that
+     * can be set at construction time to allow for reconection and transport fallback (`connection_strategy`
+     * namespace).
+     *
+     * Reconnection logic is provided via `reconnect()` function. The user is the one responsible for the
+     * decision on when the reconnection should be done. You can use `ping()` to check if current transport is
+     * OK and then call `reconnect()` if it is not OK to attempt a reconnection using previously set strategy.
+     *
+     * You can also check whether the transport must be optimized by using the most preferred connection based
+     * on the strategy using `is_optimal()` function. Call `optimize()` to then attempt to optimize the
+     * connection.
+     *
+     * Before using filesystem operations provided by this class, call `start()` first. This is also the case
+     * when you succesfully `reconnect()` or `optimized()` the connection. This is necessary since the
+     * transport may have detached coroutines that runs concurrently with the caller. They need to be to be
+     * launched to perform the filesystem operations.
      */
     class Connection
     {
@@ -111,10 +130,21 @@ namespace madbfs
 
         ~Connection();
 
+        /**
+         * @brief Create a new connection to the device using provided strategy.
+         *
+         * @param ctx Asynchronous context.
+         * @param strat Connection strategy.
+         *
+         * Call `start()` before using filesystem operations provided by this class.
+         */
         Connection(async::Context& ctx, ConnectionStrategy strat);
 
         /**
          * @brief Start the connection.
+         *
+         * The underlyin transport used by this class may have detached coroutines that must run concurrently
+         * with the caller to perform its filesystem operation. This function provides a way to launch them.
          */
         Await<void> start();
 
@@ -127,6 +157,11 @@ namespace madbfs
          * @brief Cancel all pending operations that go through this connection.
          *
          * @param err The error status to be set for cancelled operations.
+         *
+         * This function is the opposite of `start()`. The class will automatically `cancel()` pending
+         * operations on `reconnect()`, `optimize()`, and destructor of this class. Feel free to call this
+         * anytime to cancel all pending operations. But if you want to resume usage, call `start()`
+         * beforehand.
          */
         void cancel(Errc err);
 
@@ -303,7 +338,7 @@ namespace madbfs
         /**
          * @brief Check if reconnection is in progress and then wait for the result.
          *
-         * If there is no reconnection, this function will immediately return `std::nullopt`, on successful
+         * If there is no reconnection, this function will immediately return `std::nullopt`. On successful
          * reconnection, the function will return default value of `Errc` (0; success).
          */
         Await<Opt<Errc>> check_reconnection();

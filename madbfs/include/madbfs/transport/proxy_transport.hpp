@@ -5,6 +5,13 @@
 
 namespace madbfs::transport
 {
+    /**
+     * @class ProxyTransport
+     *
+     * @brief Transport method that uses embedded server that communicates via TCP enabled by adb forwarding.
+     *
+     * The server is loaded into the device and run at connect time (construction).
+     */
     class ProxyTransport final : public Transport
     {
     public:

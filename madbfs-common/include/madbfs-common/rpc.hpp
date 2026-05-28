@@ -21,7 +21,11 @@ namespace madbfs::rpc
      */
     static constexpr Str server_ready_string = "SERVER_IS_READY";
 
-    // NOTE: if you decide to add/remove one or more entries, do update domain check in read_procedure
+    /**
+     * @enum Procedure
+     *
+     * @brief Enumerate all possible filesystem operations via this RPC.
+     */
     enum class Procedure : u8
     {
         Stat,
@@ -101,6 +105,11 @@ namespace madbfs::rpc
         // clang-format on
     }
 
+    /**
+     * @class Request
+     *
+     * @brief Represent a filesystem operations as request structs.
+     */
     struct Request    //
         : util::VarWrapper<
               req::Stat,
@@ -123,13 +132,10 @@ namespace madbfs::rpc
         // make the base constructor visible
         using VarWrapper::VarWrapper;
 
+        /**
+         * @brief Get the `Procedure` enum.
+         */
         Procedure proc() const { return static_cast<Procedure>(index()); }
-    };
-
-    struct NamedRequest
-    {
-        Id      id;
-        Request req;
     };
 
     struct RequestHeader
@@ -144,7 +150,7 @@ namespace madbfs::rpc
         // clang-format off
         struct Stat;
         struct Listdir       { Vec<Pair<Str, Stat>> entries; }; // uses corresponding `req::Listdir` buf
-        struct Readlink      { Str target; };                   // uses corresponding `req::Readlink` buf 
+        struct Readlink      { Str target; };                   // uses corresponding `req::Readlink` buf
         struct Mknod         { };
         struct Mkdir         { };
         struct Unlink        { };
@@ -173,6 +179,11 @@ namespace madbfs::rpc
         };
     }
 
+    /**
+     * @class Response
+     *
+     * @brief Represent a filesystem operation resultss as response structs.
+     */
     struct Response    //
         : util::VarWrapper<
               resp::Stat,
@@ -195,6 +206,9 @@ namespace madbfs::rpc
         // make the base constructor visible
         using VarWrapper::VarWrapper;
 
+        /**
+         * @brief Get the `Procedure` enum.
+         */
         Procedure proc() const { return static_cast<Procedure>(index()); }
     };
 
@@ -239,7 +253,7 @@ namespace madbfs::rpc
     using ToReq = util::VarTraits<Response::Var>::Swap<Resp, rpc::Request::Var>;
 
     /**
-     * @brief Get Procedure enum from request or response variant.
+     * @brief Get `Procedure` enum from request or response variant.
      */
     template <typename T>
         requires (IsRequest<T> or IsResponse<T>)
@@ -250,7 +264,7 @@ namespace madbfs::rpc
     }
 
     /**
-     * @brief Get Procedure enum from request or response variant.
+     * @brief Get `Procedure` enum from request or response variant.
      */
     template <typename T>
         requires (IsRequest<T> or IsResponse<T>)

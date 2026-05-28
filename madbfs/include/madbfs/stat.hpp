@@ -14,14 +14,14 @@ namespace madbfs
 namespace madbfs
 {
     /**
-     * @class CacheId
+     * @class Id
      *
-     * @brief Strong type for identifying an entry in the cache.
+     * @brief Strong type for identifying a node entry in `Filesystem`.
      */
     class Id
     {
     public:
-        friend ::madbfs::Node;
+        friend Node;
 
         Id() = default;
         u64 inner() const { return m_inner; }
@@ -79,6 +79,8 @@ namespace madbfs
      *
      * This function only considers a modification in the remote is made when the remote stat is newer than
      * the host.
+     *
+     * TODO: Maybe store inode on the Stat then use it to detect modification? At least for files
      */
     inline bool detect_modification(const Stat& host, const Stat& remote)
     {

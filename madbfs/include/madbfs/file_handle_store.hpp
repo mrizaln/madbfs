@@ -35,7 +35,7 @@ namespace madbfs
          *
          * @return FileHandle if exists, else `std::nullopt`.
          *
-         * The complexity of the operation is constant.
+         * The time complexity of the operation is constant.
          */
         Opt<FileHandle> find(u64 fd);
 
@@ -47,7 +47,7 @@ namespace madbfs
          *
          * @return The node if found and fulfill the mode else `std::nullopt`.
          *
-         * The complexity of the operation is constant.
+         * The time complexity of the operation is constant.
          */
         Opt<FileHandle> find(u64 fd, OpenMode mode);
 
@@ -60,7 +60,7 @@ namespace madbfs
          *
          * @return File descriptor (position of the node in the store).
          *
-         * The complexity of the opration is linear (depends on number of handles before finding a hole).
+         * The time complexity of the opration is linear (depends on number of handles before finding a hole).
          */
         u64 store(Node* node, OpenMode mode, u64 real_fd);
 
@@ -71,7 +71,7 @@ namespace madbfs
          *
          * @return The released node if exists, else `std::nullopt`.
          *
-         * The complexity of the operation is constant.
+         * The time complexity of the operation is constant.
          */
         Opt<FileHandle> release(u64 fd);
 

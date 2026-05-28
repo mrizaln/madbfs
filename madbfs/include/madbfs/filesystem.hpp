@@ -33,7 +33,7 @@ namespace madbfs
      *
      * @brief A class representing the filesystem and its tree structure.
      *
-     * This data structure is a Trie
+     * This data structure is a Trie.
      */
     class Filesystem
     {
@@ -70,8 +70,8 @@ namespace madbfs
          */
         Expect<Ref<Node>> traverse(path::Path path);
 
-        // fuse oprations
-        // --------------
+        // fuse operations
+        // ---------------
         AExpect<void>      readdir(path::Path path, Filler filler);
         AExpect<NamedStat> getattr(path::Path path);
 
@@ -99,7 +99,7 @@ namespace madbfs
             off_t      offset_out,
             size_t     size
         );
-        // --------------
+        // ---------------
 
         // This function only used to link already existing files, user can't and shouldn't use it
         Expect<void> symlink(path::Path path, Str target);

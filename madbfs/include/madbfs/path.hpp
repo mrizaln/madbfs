@@ -284,6 +284,9 @@ namespace madbfs::path
      *
      * @param parent Reference path.
      * @param path Path to be resolved.
+     *
+     * Path must not be empty. If you use this to normalize a symlink, the parent path should be the directory
+     * containing the symlink not the path to the symlink.
      */
     PathBuf resolve(Path parent, Str path);
 }

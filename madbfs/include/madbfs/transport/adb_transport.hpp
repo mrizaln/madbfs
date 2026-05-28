@@ -4,6 +4,11 @@
 
 namespace madbfs::transport
 {
+    /**
+     * @class AdbTransport
+     *
+     * @brief Transport method that uses adb commands to execute filesystem operations.
+     */
     class AdbTransport final : public Transport
     {
     public:
@@ -59,8 +64,10 @@ namespace madbfs::transport
 
         /**
          * @brief Generate next id.
+         *
+         * The counter starts from 1.
          */
-        rpc::Id next_id() { return ++m_counter; }    // starts from 1
+        rpc::Id next_id() { return ++m_counter; }
 
         /**
          * @brief Detached coroutine for dispatching requests.

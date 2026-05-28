@@ -57,11 +57,21 @@ namespace madbfs::args
         // clang-format on
     };
 
+    /**
+     * @class Connection
+     *
+     * @brief Connection strategy (transport) to be used by the filesystem.
+     */
     struct Connection : util::VarWrapper<connection::AdbOnly, connection::NoServer, connection::Server>
     {
         using VarWrapper::VarWrapper;
     };
 
+    /**
+     * @class Caching
+     *
+     * @brief User-defined cache parameters.
+     */
     struct Caching
     {
         usize cachesize;
