@@ -324,13 +324,14 @@ namespace madbfs::args
 
             auto quoted = fmt::format("\"{}\"", path);
 
-            if (auto is_dir = co_await cmd::exec({ "adb", "shell", "test", "-d", quoted }); not is_dir) {
+            auto dir = co_await cmd::exec({ "adb", "-s", madbfs_opt.serial, "shell", "test", "-d", quoted });
+            if (not dir) {
                 fmt::println(stderr, "[madbfs] root path is not a directory or not exists");
                 ::fuse_opt_free_args(&args);
                 co_return ParseResult{ 1 };
             }
 
-            auto real = co_await cmd::exec({ "adb", "shell", "realpath", quoted });
+            auto real = co_await cmd::exec({ "adb", "-s", madbfs_opt.serial, "shell", "realpath", quoted });
             if (not real) {
                 fmt::println(stderr, "[madbfs] failed to resolve path: {}", err_msg(real.error()));
                 ::fuse_opt_free_args(&args);
