@@ -35,6 +35,7 @@ namespace madbfs
                 const auto current_pages = cache->current_pages();
 
                 co_return json::value{
+                    { "serial", std::getenv("ANDROID_SERIAL") },
                     { "transport", madbfs.m_connection.name() },
                     { "root", madbfs.m_root.str() },
                     { "log_level", log::level_to_str(log::get_level()) },
@@ -48,6 +49,7 @@ namespace madbfs
                 };
             } else {
                 co_return json::value{
+                    { "serial", std::getenv("ANDROID_SERIAL") },
                     { "transport", madbfs.m_connection.name() },
                     { "root", madbfs.m_root.str() },
                     { "log_level", log::level_to_str(log::get_level()) },
