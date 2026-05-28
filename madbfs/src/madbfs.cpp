@@ -9,13 +9,14 @@
 
 namespace json = boost::json;
 
+// madbfs.hpp impl: Madbfs::IpcHandler
 namespace madbfs
 {
     constexpr usize lowest_page_size  = 64 * 1024;
     constexpr usize highest_page_size = 4 * 1024 * 1024;
     constexpr usize lowest_max_pages  = 128;
 
-    // NOTE: normally, I'll use overloads of coro-lambdas with `this auto` as 1st param, but gcc segfaulted.
+    // NOTE: normally, I'd use overloads of coro-lambdas with `this auto` as 1st param, but gcc segfaulted.
     // see: https://gcc.gnu.org/bugzilla/show_bug.cgi?format=multiple&id=114632.
     // last-checked: 2026-02-13 21:15.
     // on: gcc (GCC) 15.2.1 20251211 (Red Hat 15.2.1-5).
@@ -179,6 +180,7 @@ namespace madbfs
     };
 }
 
+// madbfs.hpp impl: Madbfs
 namespace madbfs
 {
     Connection Madbfs::prepare_connection(async::Context& ctx, args::Connection connection)

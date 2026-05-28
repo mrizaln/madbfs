@@ -6,18 +6,21 @@
 #define BOOST_PROCESS_VERSION 2
 #include <boost/process.hpp>
 
+using namespace madbfs;
+
+// helper functions/classes
 namespace
 {
     // adb error patterns.
     namespace error
     {
-        static constexpr madbfs::Str no_device           = "adb: no devices/emulators found";
-        static constexpr madbfs::Str device_offline      = "adb: device offline";
-        static constexpr madbfs::Str permission_denied   = " Permission denied";
-        static constexpr madbfs::Str no_such_file_or_dir = " No such file or directory";
-        static constexpr madbfs::Str not_a_directory     = " Not a directory";
-        static constexpr madbfs::Str inaccessible        = " inaccessible or not found";
-        static constexpr madbfs::Str read_only           = " Read-only file system";
+        static constexpr Str no_device           = "adb: no devices/emulators found";
+        static constexpr Str device_offline      = "adb: device offline";
+        static constexpr Str permission_denied   = " Permission denied";
+        static constexpr Str no_such_file_or_dir = " No such file or directory";
+        static constexpr Str not_a_directory     = " Not a directory";
+        static constexpr Str inaccessible        = " inaccessible or not found";
+        static constexpr Str read_only           = " Read-only file system";
     }
 
     /**
@@ -42,7 +45,7 @@ namespace
      *
      * The string will be empty if `ANDROID_SERIAL` is defined.
      */
-    inline madbfs::Str get_no_dev_serial()
+    inline Str get_no_dev_serial()
     {
         if (auto* serial = std::getenv("ANDROID_SERIAL"); serial != nullptr) {
             static auto no_dev_serial = fmt::format("adb: device '{}' not found", serial);
@@ -56,20 +59,20 @@ namespace
      *
      * @param err adb error.
      */
-    inline madbfs::Errc to_errc(AdbError err)
+    inline Errc to_errc(AdbError err)
     {
         using Err = AdbError;
         // clang-format off
         switch (err) {
-        case Err::Unknown:         return madbfs::Errc::io_error;
-        case Err::NoDev:           return madbfs::Errc::no_such_device;
-        case Err::PermDenied:      return madbfs::Errc::permission_denied;
-        case Err::NoSuchFileOrDir: return madbfs::Errc::no_such_file_or_directory;
-        case Err::NotADir:         return madbfs::Errc::not_a_directory;
-        case Err::Inaccessible:    return madbfs::Errc::operation_not_supported;
-        case Err::ReadOnly:        return madbfs::Errc::read_only_file_system;
-        case Err::TryAgain:        return madbfs::Errc::resource_unavailable_try_again;
-        default:                   return madbfs::Errc::io_error;
+        case Err::Unknown:         return Errc::io_error;
+        case Err::NoDev:           return Errc::no_such_device;
+        case Err::PermDenied:      return Errc::permission_denied;
+        case Err::NoSuchFileOrDir: return Errc::no_such_file_or_directory;
+        case Err::NotADir:         return Errc::not_a_directory;
+        case Err::Inaccessible:    return Errc::operation_not_supported;
+        case Err::ReadOnly:        return Errc::read_only_file_system;
+        case Err::TryAgain:        return Errc::resource_unavailable_try_again;
+        default:                   return Errc::io_error;
         }
         // clang-format on
     }
@@ -83,11 +86,11 @@ namespace
      *
      * Will return `AdbError::Unknown` if the stderr output does not match any enumeration.
      */
-    inline AdbError parse_stderr(madbfs::Str str)
+    inline AdbError parse_stderr(Str str)
     {
         using Err = AdbError;
 
-        auto splitter = madbfs::util::StringSplitter{ str, '\n' };
+        auto splitter = util::StringSplitter{ str, '\n' };
         while (auto line = splitter.next()) {
             if (*line == error::no_device or *line == error::device_offline) {
                 return Err::NoDev;
@@ -95,14 +98,14 @@ namespace
                 return Err::TryAgain;
             }
 
-            auto rev       = madbfs::String{ line->rbegin(), line->rend() };
-            auto rev_strip = madbfs::util::strip(rev);
-            auto err       = madbfs::util::StringSplitter{ rev_strip, ':' }.next();
+            auto rev       = String{ line->rbegin(), line->rend() };
+            auto rev_strip = util::strip(rev);
+            auto err       = util::StringSplitter{ rev_strip, ':' }.next();
             if (not err) {
                 continue;
             }
 
-            auto eq = [&](auto rhs) { return madbfs::sr::equal(*err, rhs | madbfs::sv::reverse); };
+            auto eq = [&](auto rhs) { return sr::equal(*err, rhs | sv::reverse); };
 
             // clang-format off
             if      (eq(error::permission_denied))   return Err::PermDenied;
@@ -125,36 +128,37 @@ namespace
      *
      * @return An error code. If the returned error is `EOF`, then draining is successful.
      */
-    madbfs::Await<madbfs::net::error_code> drain_pipe(madbfs::async::pipe::Read& rpipe, madbfs::String& out)
+    Await<net::error_code> drain_pipe(async::pipe::Read& rpipe, String& out)
     {
         out.clear();
 
-        auto tmp = madbfs::Array<char, 1024>{};
+        auto tmp = Array<char, 1024>{};
         auto eof = false;
 
         while (not eof) {
             auto tmp_read = 0uz;
             while (tmp_read < tmp.size()) {
-                auto buf = madbfs::net::buffer(tmp.data() + tmp_read, tmp.size() - tmp_read);
+                auto buf = net::buffer(tmp.data() + tmp_read, tmp.size() - tmp_read);
                 auto res = co_await rpipe.async_read_some(buf);
-                if (not res and res == madbfs::net::error::eof) {
+                if (not res and res == net::error::eof) {
                     eof = true;
                     break;
                 } else if (not res) {
-                    auto rest = tmp | madbfs::sv::take(tmp_read);
+                    auto rest = tmp | sv::take(tmp_read);
                     out.insert(out.end(), rest.begin(), rest.end());
                     co_return res.error();
                 }
                 tmp_read += *res;
             }
-            auto rest = tmp | madbfs::sv::take(tmp_read);
+            auto rest = tmp | sv::take(tmp_read);
             out.insert(out.end(), rest.begin(), rest.end());
         }
 
-        co_return madbfs::net::error_code{};
+        co_return net::error_code{};
     }
 }
 
+// cmd.hpp impl
 namespace madbfs::cmd
 {
     AExpect<String> exec(Span<const Str> cmd, Str in, bool check, bool merge_err)

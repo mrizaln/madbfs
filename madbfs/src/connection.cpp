@@ -10,11 +10,12 @@
 
 #include <random>
 
+using namespace madbfs;
+
+// helper functions/classes
 namespace
 {
-    madbfs::Await<madbfs::Uniq<madbfs::transport::Transport>> create_transport(
-        const madbfs::ConnectionStrategy& strat
-    )
+    Await<Uniq<transport::Transport>> create_transport(const ConnectionStrategy& strat)
     {
         using namespace madbfs;
         namespace conn = connection_strategy;
@@ -42,9 +43,7 @@ namespace
         }
     }
 
-    madbfs::AExpect<madbfs::Uniq<madbfs::transport::Transport>> create_optimized_transport(
-        const madbfs::ConnectionStrategy& strat
-    )
+    AExpect<Uniq<transport::Transport>> create_optimized_transport(const ConnectionStrategy& strat)
     {
         using namespace madbfs;
         namespace conn = connection_strategy;
@@ -66,10 +65,10 @@ namespace
         }
     }
 
-    madbfs::Str strategy_name(const madbfs::ConnectionStrategy& strat)
+    Str strategy_name(const ConnectionStrategy& strat)
     {
-        namespace conn = madbfs::connection_strategy;
-        return strat.visit(madbfs::Overload{
+        namespace conn = connection_strategy;
+        return strat.visit(Overload{
             [](const conn::Proxy&) { return "proxy"; },
             [](const conn::Adb&) { return "adb"; },
             [](const conn::Null&) { return "null"; },
@@ -78,6 +77,7 @@ namespace
     }
 }
 
+// connection.hpp impl
 namespace madbfs
 {
     Connection::~Connection() = default;

@@ -7,6 +7,9 @@
 #include <madbfs-common/util/slice.hpp>
 #include <madbfs-common/util/split.hpp>
 
+using namespace madbfs;
+
+// helper functions/classes
 namespace
 {
     /**
@@ -20,11 +23,11 @@ namespace
      * @return Parsed integer on success else `std::nullopt`.
      */
     template <std::integral T>
-    constexpr madbfs::Opt<T> parse_integral(madbfs::Str str, int base)
+    constexpr Opt<T> parse_integral(Str str, int base)
     {
         auto t         = T{};
         auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), t, base);
-        if (ptr != str.data() + str.size() or ec != madbfs::Errc{}) {
+        if (ptr != str.data() + str.size() or ec != Errc{}) {
             return {};
         }
         return t;
@@ -37,12 +40,12 @@ namespace
      *
      * @return Stripped path (aka filename only).
      */
-    madbfs::Str get_basename(madbfs::Str path)
+    Str get_basename(Str path)
     {
         if (path != "/") {
-            auto found = madbfs::sr::find(path | madbfs::sv::reverse, '/');
+            auto found = sr::find(path | sv::reverse, '/');
             if (found != path.rend()) {    // no '/' means already basename
-                return madbfs::Str{ found.base(), path.end() };
+                return Str{ found.base(), path.end() };
             }
         }
         return path;
@@ -55,15 +58,15 @@ namespace
      *
      * @return Time represented in `timespec`.
      */
-    timespec parse_date(madbfs::Str date)
+    timespec parse_date(Str date)
     {
         // apparently istringstream only have the overload for string_view from C++26 onwards. damn it!
-        auto in = std::istringstream{ madbfs::String{ date } };    // unnecessary copy... :(
+        auto in = std::istringstream{ String{ date } };    // unnecessary copy... :(
         auto tp = std::chrono::sys_time<std::chrono::nanoseconds>{};
 
         in >> std::chrono::parse("%F %T %z", tp);
         if (in.fail()) {
-            madbfs::log_d(__func__, "fail to parse {:?}", date);
+            log_d(__func__, "fail to parse {:?}", date);
         }
 
         auto secs  = std::chrono::time_point_cast<std::chrono::seconds>(tp);
@@ -79,13 +82,13 @@ namespace
      *
      * @return Parsed stat if success else `std::nullopt`.
      */
-    madbfs::Opt<madbfs::Pair<madbfs::Str, madbfs::rpc::resp::Stat>> parse_file_stat(madbfs::Str str)
+    Opt<Pair<Str, rpc::resp::Stat>> parse_file_stat(Str str)
     {
-        return madbfs::util::split_n<8>(str, '|').transform([](madbfs::util::SplitResult<8>&& res) {
+        return util::split_n<8>(str, '|').transform([](util::SplitResult<8>&& res) {
             auto [mode_hex, hardlinks, size, uid, gid, atime, mtime, ctime] = res.result;
-            return madbfs::Pair{
+            return Pair{
                 get_basename(res.remainder),
-                madbfs::rpc::resp::Stat{
+                rpc::resp::Stat{
                     .size  = parse_integral<off_t>(size, 10).value_or(0),
                     .links = parse_integral<nlink_t>(hardlinks, 10).value_or(0),
                     .mtime = parse_date(mtime),
@@ -108,7 +111,7 @@ namespace
      *
      *  NOTE: adb shell apparently needs double escaping
      */
-    madbfs::String quote(madbfs::Str path)
+    String quote(Str path)
     {
         return fmt::format("\"{}\"", path);
     }
@@ -116,31 +119,32 @@ namespace
     /**
      * @brief Check whether the device is connected through adb.
      */
-    madbfs::AExpect<void> check_connection()
+    AExpect<void> check_connection()
     {
         const auto* serial = ::getenv("ANDROID_SERIAL");
         if (serial == nullptr) [[unlikely]] {
             co_return std::unexpected{ std::errc::not_connected };
         }
 
-        auto devices = co_await madbfs::adb::list_devices();
+        auto devices = co_await adb::list_devices();
         if (not devices) {
             co_return std::unexpected{ std::errc::not_connected };
         }
 
-        auto found = madbfs::sr::find(*devices, serial, &madbfs::adb::Device::serial);
+        auto found = sr::find(*devices, serial, &adb::Device::serial);
         if (found == devices->end()) {
             co_return std::unexpected{ std::errc::not_connected };
-        } else if (found->status != madbfs::adb::DeviceStatus::Device) {
-            madbfs::log_d(__func__, "device connected but: {}", to_string(found->status));
+        } else if (found->status != adb::DeviceStatus::Device) {
+            log_d(__func__, "device connected but: {}", to_string(found->status));
             co_return std::unexpected{ std::errc::not_connected };
         }
 
-        co_return madbfs::Expect<void>{};
+        co_return Expect<void>{};
     }
 }
 
-namespace madbfs
+// filesystem operations handler for adb transport
+namespace
 {
     class Handler
     {
@@ -467,6 +471,7 @@ namespace madbfs
     };
 }
 
+// adb_transport.hpp impl
 namespace madbfs::transport
 {
     AdbTransport::~AdbTransport()

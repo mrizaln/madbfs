@@ -32,11 +32,12 @@
         return std::nullopt;                                                                                 \
     }
 
+using namespace madbfs;
+using namespace madbfs::rpc;
+
+// helper functions/classes
 namespace
 {
-    using namespace madbfs::aliases;
-    using namespace madbfs::rpc;
-
     /**
      * @brief Simple wrapper to convert `time_t` + nsec into `timespec`.
      *
@@ -90,6 +91,7 @@ namespace
 
     /**
      * @class PayloadBuilder
+     *
      * @brief Simple payload builder.
      */
     class PayloadBuilder
@@ -156,6 +158,7 @@ namespace
 
     /**
      * @class PayloadReader
+     *
      * @brief Simple payload reader.
      */
     class PayloadReader
@@ -252,6 +255,7 @@ namespace
 
     /**
      * @class RequestBuilder
+     *
      * @brief Simple payload builder for request.
      */
     class RequestBuilder : public PayloadBuilder
@@ -283,6 +287,7 @@ namespace
 
     /**
      * @class ResponseBuilder
+     *
      * @brief Simple payload builder for response.
      */
     class ResponseBuilder : public PayloadBuilder
@@ -312,64 +317,18 @@ namespace
             return buf;
         }
     };
-}
 
-namespace madbfs::rpc
-{
-    Str to_string(Procedure procedure)
-    {
-        switch (procedure) {
-        case Procedure::Stat: return "Stat";
-        case Procedure::Listdir: return "Listdir";
-        case Procedure::Readlink: return "Readlink";
-        case Procedure::Mknod: return "Mknod";
-        case Procedure::Mkdir: return "Mkdir";
-        case Procedure::Unlink: return "Unlink";
-        case Procedure::Rmdir: return "Rmdir";
-        case Procedure::Rename: return "Rename";
-        case Procedure::Truncate: return "Truncate";
-        case Procedure::Utimens: return "Utimens";
-        case Procedure::CopyFileRange: return "CopyFileRange";
-        case Procedure::Open: return "Open";
-        case Procedure::Close: return "Close";
-        case Procedure::Read: return "Read";
-        case Procedure::Write: return "Write";
-        case Procedure::Ping: return "Ping";
-        }
-
-        return "Unknown";
-    }
-
-    Str to_string(Request request)
-    {
-        return to_string(request.proc());
-    }
-
-    Str to_string(Response response)
-    {
-        return to_string(response.proc());
-    }
-
-    AExpect<void> handshake(Socket& sock)
-    {
-        const auto message = fmt::format("{}:{}\n", server_ready_string, MADBFS_VERSION_STRING);
-
-        auto n = co_await async::write_lv<char>(sock, message);
-        HANDLE_ERROR(n, message.size(), "failed to send handshake to server");
-
-        auto buffer = String(message.size(), '\0');
-        auto n1     = co_await async::read_lv<char>(sock, buffer);
-        log_d(__func__, "received: {:?}", Str{ buffer.data(), n1.value_or(0) });
-        HANDLE_ERROR(n1, buffer.size(), "failed to read handshake from server");
-
-        if (not sr::equal(buffer, message)) {
-            log_e(__func__, "mismatched message: [{:?} vs {:?}]", buffer, message);
-            co_return Unexpect{ Errc::bad_message };
-        }
-
-        co_return Expect<void>{};
-    }
-
+    /**
+     * @brief Build a request payload into buffer.
+     *
+     * @param buffer Output buffer.
+     * @param req Request of an operation.
+     * @param id Request unique identifier.
+     *
+     * @return The span of the buffer that is written.
+     *
+     * The buffer will be cleared on every invocation.
+     */
     Span<const u8> build_request(Vec<u8>& buffer, const Request& req, Id id)
     {
         buffer.clear();
@@ -479,15 +438,26 @@ namespace madbfs::rpc
         });
     }
 
+    /**
+     * @brief Build a response payload into buffer.
+     *
+     * @param buffer Output buffer.
+     * @param response Response of an operation.
+     * @param id Response unique id.
+     *
+     * @return The span of the buffer that is written.
+     *
+     * The buffer will be cleared on every invocation.
+     */
     Span<const u8> build_response(Vec<u8>& buffer, FallibleResponse response, Id id)
     {
         buffer.clear();
 
-        if (auto fail = std::get_if<rpc::FailedResponse>(&response); fail) {
+        if (auto fail = std::get_if<FailedResponse>(&response); fail) {
             return ResponseBuilder{ buffer, id, fail->proc, fail->status }.build();
         }
 
-        const auto& resp = *std::get_if<rpc::Response>(&response);
+        const auto& resp = *std::get_if<Response>(&response);
 
         auto builder = ResponseBuilder{ buffer, id, resp.proc(), Status{} };
 
@@ -548,15 +518,12 @@ namespace madbfs::rpc
     /**
      * @brief Parse raw buffer into request of desired procedure.
      *
-     * @param buffer Payload buffer.
+     * @param payload Payload buffer.
      * @param out_buf Output buffer for some procedures.
-     * @param proc Desired buffer.
+     * @param proc Desired procedure.
      *
      * @return The request on success or `std::nullopt` if the buffer is not a payload for desired procedure,
      * the payload is incomplete, or the payload not containing the correct values for the procedure.
-     *
-     * This function must only be used for non-Ping procedures. If Ping is provided, the function will return
-     * std::nullopt.
      */
     Opt<Request> parse_request(Span<const u8> payload, Vec<u8>& out_buf, Procedure proc)
     {
@@ -686,16 +653,13 @@ namespace madbfs::rpc
     }
 
     /**
-     * @brief Parse raw buffer info response of desired procedure.
+     * @brief Parse raw buffer info response of the associated request.
      *
      * @param buffer Input buffer.
-     * @param proc Desired procedure.
+     * @param req Associated request.
      *
-     * @return The response on success or `std::nullopt` if the buffer is not a payload for desired procedure,
-     * the payload is incomplete, or the payload not containing the correct values for the procedure.
-     *
-     * This function must only be used for non-Ping procedures. If Ping is provided, the function will return
-     * std::nullopt.
+     * @return The response on success or `std::nullopt` if the buffer is not a payload for associated
+     * request, the payload is incomplete, or the payload not containing the correct values for the request.
      */
     Opt<Response> parse_response(Span<const u8> buffer, Request req)
     {
@@ -733,7 +697,7 @@ namespace madbfs::rpc
 
             TRY(size, reader.read_int<u64>());
 
-            auto slices = Vec<Pair<util::Slice, rpc::resp::Stat>>{};
+            auto slices = Vec<Pair<util::Slice, resp::Stat>>{};
             slices.reserve(*size);
 
             for (auto _ : sv::iota(0uz, *size)) {
@@ -771,7 +735,7 @@ namespace madbfs::rpc
                 );
             }
 
-            auto entries = Vec<Pair<Str, rpc::resp::Stat>>{};
+            auto entries = Vec<Pair<Str, resp::Stat>>{};
             entries.reserve(slices.size());
 
             for (auto&& [slice, stat] : slices) {
@@ -834,6 +798,64 @@ namespace madbfs::rpc
         }
 
         return std::nullopt;
+    }
+}
+
+// rpc.hpp impl
+namespace madbfs::rpc
+{
+    Str to_string(Procedure procedure)
+    {
+        switch (procedure) {
+        case Procedure::Stat: return "Stat";
+        case Procedure::Listdir: return "Listdir";
+        case Procedure::Readlink: return "Readlink";
+        case Procedure::Mknod: return "Mknod";
+        case Procedure::Mkdir: return "Mkdir";
+        case Procedure::Unlink: return "Unlink";
+        case Procedure::Rmdir: return "Rmdir";
+        case Procedure::Rename: return "Rename";
+        case Procedure::Truncate: return "Truncate";
+        case Procedure::Utimens: return "Utimens";
+        case Procedure::CopyFileRange: return "CopyFileRange";
+        case Procedure::Open: return "Open";
+        case Procedure::Close: return "Close";
+        case Procedure::Read: return "Read";
+        case Procedure::Write: return "Write";
+        case Procedure::Ping: return "Ping";
+        }
+
+        return "Unknown";
+    }
+
+    Str to_string(Request request)
+    {
+        return to_string(request.proc());
+    }
+
+    Str to_string(Response response)
+    {
+        return to_string(response.proc());
+    }
+
+    AExpect<void> handshake(Socket& sock)
+    {
+        const auto message = fmt::format("{}:{}\n", server_ready_string, MADBFS_VERSION_STRING);
+
+        auto n = co_await async::write_lv<char>(sock, message);
+        HANDLE_ERROR(n, message.size(), "failed to send handshake to server");
+
+        auto buffer = String(message.size(), '\0');
+        auto n1     = co_await async::read_lv<char>(sock, buffer);
+        log_d(__func__, "received: {:?}", Str{ buffer.data(), n1.value_or(0) });
+        HANDLE_ERROR(n1, buffer.size(), "failed to read handshake from server");
+
+        if (not sr::equal(buffer, message)) {
+            log_e(__func__, "mismatched message: [{:?} vs {:?}]", buffer, message);
+            co_return Unexpect{ Errc::bad_message };
+        }
+
+        co_return Expect<void>{};
     }
 
     AExpect<void> send_request(Socket& socket, Vec<u8>& buffer, Request request, Id id)

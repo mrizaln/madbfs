@@ -10,17 +10,18 @@
 
 #include <cassert>
 
+using namespace madbfs;
+
 constexpr auto timespec_now  = timespec{ .tv_sec = 0, .tv_nsec = UTIME_NOW };
 constexpr auto timespec_omit = timespec{ .tv_sec = 0, .tv_nsec = UTIME_OMIT };
 
+// helper functions/classes
 namespace
 {
-    using namespace madbfs;
-
     // NOTE: Errc::not_connected, Errc::timed_out, and Errc::resource_unavailable_try_again should be
     // considered an OK error since it can happen if the device is disconnected. The error should not be
     // cached as node.
-    bool should_cache_error(madbfs::Errc err)
+    bool should_cache_error(Errc err)
     {
         return err != std::errc::not_connected    //
            and err != std::errc::timed_out        //
@@ -33,6 +34,7 @@ namespace
     }
 }
 
+// filesystem.hpp impl
 namespace madbfs
 {
     Filesystem::Filesystem(Connection& connection, Opt<Caching> caching, Opt<Seconds> ttl)

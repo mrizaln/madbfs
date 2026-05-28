@@ -5,6 +5,7 @@
 #include <madbfs-common/log.hpp>
 #include <madbfs-common/util/defer.hpp>
 
+// helper functions/classes
 namespace
 {
     madbfs::util::Deferred auto scoped_increment(madbfs::i64& counter)
@@ -14,6 +15,7 @@ namespace
     }
 }
 
+// cache.hpp impl: Page
 namespace madbfs
 {
     Page::Page(PageKey key, Uniq<char[]> buf, u32 size, u32 page_size)
@@ -73,6 +75,7 @@ namespace madbfs
     }
 }
 
+// cache.hpp impl: Cache
 namespace madbfs
 {
     Cache::Cache(Connection& connection, usize page_size, usize max_pages)
@@ -85,7 +88,7 @@ namespace madbfs
     AExpect<void> Cache::hint_open(Id id, path::Path path, OpenMode mode)
     {
         // only adding new entry, actual open will be performed on read/write
-        log_d(__func__, "[id={}|mode={}] {:?} ", id.inner(), std::to_underlying(mode), path);
+        log_d(__func__, "[id={}|mode={}] {:?}", id.inner(), std::to_underlying(mode), path);
 
         auto& entry = new_lookup(id, path).get();
         if (entry.path.str() != path.str()) {

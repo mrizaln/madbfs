@@ -2,7 +2,10 @@
 
 #include <madbfs-common/util/split.hpp>
 
-namespace madbfs::path
+using namespace madbfs;
+
+// helper functions/classes
+namespace
 {
     /**
      * @brief Split path string into its components.
@@ -15,7 +18,7 @@ namespace madbfs::path
      *
      * The components and the cleaned path are in index-based slice instead of string view.
      */
-    Opt<Slice> split_components(Vec<Slice>& comps_buf, Str path)
+    Opt<util::Slice> split_components(Vec<util::Slice>& comps_buf, Str path)
     {
         if (path.empty() or path.front() != '/') {
             return std::nullopt;
@@ -34,7 +37,7 @@ namespace madbfs::path
         }
 
         if (path == "/") {
-            return Slice{};
+            return util::Slice{};
         }
 
         auto index = 1uz;
@@ -55,10 +58,11 @@ namespace madbfs::path
             index = next;
         }
 
-        return Slice{ offset_prefix, path.size() };
+        return util::Slice{ offset_prefix, path.size() };
     }
 }
 
+// path.hpp impl: Path
 namespace madbfs::path
 {
     Str Path::parent() const
@@ -98,6 +102,7 @@ namespace madbfs::path
     }
 }
 
+// path.hpp impl: PathBuf
 namespace madbfs::path
 {
     Str PathBuf::parent() const
@@ -164,6 +169,7 @@ namespace madbfs::path
     }
 }
 
+// path.hpp impl: functions
 namespace madbfs::path
 {
     Opt<SemiPath> create(Str path)

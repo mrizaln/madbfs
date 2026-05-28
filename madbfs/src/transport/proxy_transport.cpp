@@ -10,10 +10,11 @@
 
 namespace bp = boost::process::v2;
 
+using namespace madbfs;
+
+// helper functions/classes
 namespace
 {
-    using namespace madbfs;
-
     AExpect<rpc::Socket> connect_to_server(u16 port)
     {
         auto exec   = co_await async::current_executor();
@@ -119,6 +120,7 @@ namespace
     }
 }
 
+// proxy_transport.hpp impl
 namespace madbfs::transport
 {
     struct ProxyTransport::Process
@@ -145,7 +147,7 @@ namespace madbfs::transport
         } };
     }
 
-    ProxyTransport::ProxyTransport(Uniq<Process> process, madbfs::rpc::Socket socket)
+    ProxyTransport::ProxyTransport(Uniq<Process> process, rpc::Socket socket)
         : m_process{ std::move(process) }
         , m_socket{ std::move(socket) }
         , m_channel{ m_socket.get_executor() }

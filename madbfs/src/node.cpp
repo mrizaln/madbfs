@@ -2,6 +2,7 @@
 
 #include "madbfs/connection.hpp"
 
+// node.hpp impl: Directory
 namespace madbfs::node
 {
     u64 Directory::NodeHash::operator()(const Uniq<Node>& node) const
@@ -65,6 +66,7 @@ namespace madbfs::node
     }
 }
 
+// node.hpp impl: Node
 namespace madbfs
 {
     void Node::expires_after(Seconds duration)

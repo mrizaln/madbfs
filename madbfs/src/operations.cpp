@@ -5,16 +5,19 @@
 
 #include <madbfs-common/log.hpp>
 
+using namespace madbfs;
+
+// helper functions/classes
 namespace
 {
     /**
      * @brief Get application instance.
      */
-    madbfs::Madbfs& get_data() noexcept
+    Madbfs& get_data() noexcept
     {
         auto ctx = ::fuse_get_context()->private_data;
         assert(ctx != nullptr);
-        return *static_cast<madbfs::Madbfs*>(ctx);
+        return *static_cast<Madbfs*>(ctx);
     }
 
     /**
@@ -26,10 +29,7 @@ namespace
      * @return The return value of the member function.
      */
     template <typename Ret, typename... Args>
-    Ret invoke_fs(
-        madbfs::Await<Ret> (madbfs::Filesystem::*fn)(Args...),
-        std::type_identity_t<Args>... args
-    ) noexcept
+    Ret invoke_fs(Await<Ret> (Filesystem::*fn)(Args...), std::type_identity_t<Args>... args) noexcept
     {
         auto& data = get_data();
         auto& ctx  = data.ctx();
@@ -37,13 +37,13 @@ namespace
 
         try {
             auto coro = (fs.*fn)(std::forward<Args>(args)...);
-            return madbfs::async::block(ctx, std::move(coro));
+            return async::block(ctx, std::move(coro));
         } catch (const std::exception& e) {
-            madbfs::log_c(__func__, "exception occurred: {}", e.what());
+            log_c(__func__, "exception occurred: {}", e.what());
         } catch (...) {
-            madbfs::log_c(__func__, "unknown exception occurred");
+            log_c(__func__, "unknown exception occurred");
         }
-        return madbfs::Unexpect{ madbfs::Errc::io_error };
+        return Unexpect{ Errc::io_error };
     }
 
     /**
@@ -61,9 +61,9 @@ namespace
         std::source_location loc = std::source_location::current()
     )
     {
-        using madbfs::log::Level;
+        using log::Level;
         auto log = [=]<typename... Args>(Level level, fmt::format_string<Args...>&& fmt, Args&&... args) {
-            madbfs::log::log_loc_named(loc, level, name, std::move(fmt), std::forward<Args>(args)...);
+            log::log_loc_named(loc, level, name, std::move(fmt), std::forward<Args>(args)...);
         };
 
         return [=](std::errc err) {
@@ -84,13 +84,13 @@ namespace
             case std::errc::read_only_file_system:
             case std::errc::filename_too_long:
             case std::errc::invalid_argument: {
-                if (madbfs::log::get_level() <= madbfs::log::Level::debug) {
-                    const auto& msg = madbfs::err_msg(err);
+                if (log::get_level() <= log::Level::debug) {
+                    const auto& msg = err_msg(err);
                     log(Level::warn, "{:?} returned with error code [{}]: {}", path, errint, msg);
                 }
             } break;
             default: {
-                const auto& msg = madbfs::err_msg(err);
+                const auto& msg = err_msg(err);
                 log(Level::err, "{:?} returned with error code [{}]: {}", path, errint, msg);
             }
             }
@@ -109,7 +109,7 @@ namespace
      * This function resolves the symlink by prepending the mountpoint to the target if the symlink target is
      * absolute. It only stores the target if the target is relative.
      */
-    madbfs::Expect<void> resolve_symlink(madbfs::Span<char> buf, madbfs::Str target)
+    Expect<void> resolve_symlink(Span<char> buf, Str target)
     {
         using namespace madbfs;
 
@@ -142,6 +142,7 @@ namespace
     }
 }
 
+// operations.hpp impl
 namespace madbfs::operations
 {
     void* init(fuse_conn_info* conn, fuse_config*) noexcept

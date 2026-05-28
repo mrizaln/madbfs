@@ -11,10 +11,11 @@
 
 #include <limits>
 
+using namespace madbfs;
+
+// helper functions/classes
 namespace
 {
-    using namespace madbfs;
-
     /**
      * @brief Check device status specified by its serial is exists.
      *
@@ -58,7 +59,7 @@ namespace
         }
 
         fmt::println("[madbfs] multiple devices detected,");
-        for (auto i : madbfs::sv::iota(0u, devices.size())) {
+        for (auto i : sv::iota(0u, devices.size())) {
             fmt::println("         - {}: {}", i + 1, devices[i].serial);
         }
 
@@ -142,6 +143,7 @@ namespace
     }
 }
 
+// args.hpp impl
 namespace madbfs::args
 {
     void show_help(const char* prog)

@@ -5,7 +5,10 @@
 
 #include <filesystem>
 
-namespace madbfs::ipc
+using namespace madbfs;
+
+// helper functions/classes
+namespace
 {
     namespace json = boost::json;
 
@@ -18,7 +21,7 @@ namespace madbfs::ipc
      *
      * @return Awaitable that returns message or error.
      */
-    AExpect<String> receive_message(Socket& sock)
+    AExpect<String> receive_message(ipc::Socket& sock)
     {
         auto buffer = String{};
         if (auto n = co_await async::read_lv(sock, buffer, max_msg_len); not n) {
@@ -35,7 +38,7 @@ namespace madbfs::ipc
      *
      * @return Awaitable that returns nothing or error.
      */
-    AExpect<void> send_message(Socket& sock, Str msg)
+    AExpect<void> send_message(ipc::Socket& sock, Str msg)
     {
         if (auto n = co_await async::write_lv<char>(sock, msg); not n) {
             co_return Unexpect{ async::to_generic_err(n.error(), Errc::not_connected) };
@@ -50,8 +53,11 @@ namespace madbfs::ipc
      *
      * @return Parsed `Op` or error string.
      */
-    Expect<Op, String> parse_op(Str msg)
+    Expect<ipc::Op, String> parse_op(Str msg)
     {
+        namespace op = ipc::op;
+        using ipc::Op;
+
         try {
             const auto json = json::parse(msg);
             const auto op   = json::value_to<String>(json.at("op"));
@@ -97,6 +103,7 @@ namespace madbfs::ipc
     }
 }
 
+// ipc.hpp impl: LogcatSink
 namespace madbfs::ipc
 {
     std::deque<LogcatSink::Msg>& LogcatSink::swap()
@@ -126,6 +133,7 @@ namespace madbfs::ipc
     }
 }
 
+// ipc.hpp impl: Client
 namespace madbfs::ipc
 {
     Expect<Client> Client::create(async::Context& context, Str socket_path)
@@ -243,6 +251,7 @@ namespace madbfs::ipc
     }
 }
 
+// ipc.hpp impl: Server
 namespace madbfs::ipc
 {
     Server::~Server()

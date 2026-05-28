@@ -4,6 +4,7 @@
 
 #include <madbfs-common/util/split.hpp>
 
+// adb.hpp impl
 namespace madbfs::adb
 {
     Str to_string(DeviceStatus status)
