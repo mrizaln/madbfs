@@ -208,6 +208,10 @@ Options for madbfs:
     --serial=<str>         serial number of the device to mount
                              (you can omit this [detection is similar to adb])
                              (will prompt if more than one device exists)
+    --root=<path>          directory to mount on device as root of the filesystem
+                             (by default madbfs mounts the root path of the device)
+                             (the path must be absolute and points to an existing path)
+                             (if the path is a symlink, it will be resolved first)
     --server=<path>        path to server file
                              (if omitted will search the file automatically)
                              (must have the same arch as your phone)
@@ -220,13 +224,15 @@ Options for madbfs:
                              (default: 256)
                              (minimum: 128)
                              (value will be rounded up to the next power of 2)
+                             (ignored if 'no-cache' is provided)
     --page-size=<int>      page size for cache & transfer in KiB
                              (default: 128)
                              (minimum: 64)
                              (maximum: 4096)
                              (value will be rounded up to the next power of 2)
+                             (ignored if 'no-cache' is provided)
     --ttl=<int>            set the TTL of the stat cache of the filesystem in seconds
-                             (default: 30)
+                             (default: 60)
                              (set to 0 to disable it)
     --timeout=<int>        set the timeout of every remote operation
                              (default: 2)
@@ -238,6 +244,7 @@ Options for madbfs:
                              (fall back to adb shell calls if connection failed)
                              (useful for debugging the server)
     --adb-only             don't launch server and don't try to connect
+    --no-cache             don't use data caching
 
 Options for libfuse:
     -h   --help            print help
@@ -264,12 +271,14 @@ To unmount the filesystem, you run this command like for any other FUSE filesyst
 fusermount -u <mountpoint>
 ```
 
+You can also use the [IPC](./IPC.md) operation `unmount` for unmounting. This will unmount the filesystem on the next operation immediately.
+
 ### Selecting device
 
-To mount your device you only need to specify the mount point if there is only one device. If there are more than one device then you can specify the serial using `--serial` option. If you omit the `--serial` option when there are multiple device connected to the computer, you will be prompted to specify the device you want to mount.
+You don't need to specify the device if there is only one device connected via `adb` on your computer. If there are more than one device then you can specify the serial using `--serial` option. If you omit the `--serial` option when there are multiple device connected to the computer, you will be prompted to specify the device you want to mount.
 
 ```sh
-$ ./madbfs mount
+$ madbfs <mountpoint>
 [madbfs] checking adb availability...
 [madbfs] multiple devices detected,
          - 1: 068832516O101622
@@ -285,26 +294,53 @@ $ ANDROID_SERIAL=068832516O101622 ./madbfs
 [madbfs] using serial '068832516O101622' from env variable 'ANDROID_SERIAL'
 ```
 
+### Mounting subdirectory
+
+`madbfs` supports mounting subdirectory. Use `--root` option to specify it.
+
+```sh
+$ madbfs --root=<root> <mountpoint>
+```
+
+The `<root>` is the subdirectory on your device you want to treat as the root of the filesystem (effectively mounting a subdirectory). The option only accepts absolute path and if the directory is a symlink, it will resolve it first (`/sdcard` -> `/storage/emulated/0`).
+
+Do note that mounting subdirectory might break symbolic links since it is possible that a link may contain components that are unreachable from the specified root. For example if you mount `/sdcard/` and have a link in `/sdcard/link` that points to `/storage/` the filesystem can't reach it, because `/storage/` is outside of `/sdcard/`.
+
 ### Specifying server and port number
 
 > only relevant if you want proxy transport support
 
-In order to use the proxy transport, `madbfs` needs to be able to find the `madbfs-server` binary. There are three approaches you can do in order for `madbfs` be able to find the server file:
+In order to use the proxy transport, `madbfs` needs to be able to find the `madbfs-server-*` binaries. There are three approaches you can do in order for `madbfs` be able to find the server file:
 
-- Place it where you run the `madbfs` program,
-- Place it in the same directory as `madbfs` program, or
+- Place them where you run the `madbfs` program,
+- Place them in the same directory as `madbfs` program, or
 - Specify explicitly the path of the file using `--server` option.
+  > You need to know your device abi to use this option
 
-If you want the filesystem to use only use `adb` transport, use `--adb-only` flag. This flag prevents `madbfs` from pushing the server into your phone and running it. If you rather want to manually run the server yourself (for debugging) for example, use `--no-server` flag instead.
+If you want the filesystem to use only use `adb` transport, use `--adb-only` flag. This flag prevents `madbfs` from pushing the server into your phone and running it. If you rather want to manually run the server yourself (for debugging for example), use `--no-server` flag instead.
 
 The proxy communicates with `madbfs` over TCP enabled by port forwarding and by default it will listen on port `23237` (`adbfs` on dial pad). If you find this port to be not suitable for your use you can always specify it with `--port` option.
+
+```sh
+$ madbfs --server=<path/to/server-with-abi> --port=23237 <mountpoint>
+```
+
+### To cache or not to cache
+
+By default `madbfs` caches file stat and file content (data) of files operated by the filesystem. While file stat caching is always active, file content caching can be disabled using `--no-cache` program option. This option will ignore other cache related options.
+
+```sh
+$ madbfs --no-cache <mountpoint>
+```
+
+The no-cache mode is basically a direct I/O, file content will always be read/written to device immediately via the connection method (proxy or adb transport).
 
 ### Cache size
 
 `madbfs` caches all the read/write operations on the files on the device. This cache is stored in memory. You can control the size of this cache using `--cache-size` option (in MiB). The default value is `256` (256 MiB).
 
 ```sh
-$ ./madbfs --cache-size=256 <mountpoint>    # 256 MiB of memory will be used as file cache
+$ madbfs --cache-size=256 <mountpoint>    # 256 MiB of memory will be used as file cache
 ```
 
 ### Page size
@@ -312,7 +348,7 @@ $ ./madbfs --cache-size=256 <mountpoint>    # 256 MiB of memory will be used as 
 In the cache, each file is divided into pages. The `--page-size` option dictates the size of this page (in KiB). Page size also dictates the size of the buffer used to read/write into the file on the device. You can adjust this value according to your use.
 
 ```sh
-$ ./madbfs --page-size=128 <mountpoint>    # read/write operations are communicated in 128 KiB chunks
+$ madbfs --page-size=128 <mountpoint>    # read/write operations are communicated in 128 KiB chunks
 
 ```
 
@@ -321,18 +357,10 @@ $ ./madbfs --page-size=128 <mountpoint>    # read/write operations are communica
 The default log file is stdout (specified by "-"; which goes to nowhere when not run in foreground mode). You can manually set the log file using `--log-file` option and set the log level using `--log-level`.
 
 ```sh
-$ ./madbfs --log-file=madbfs.log --log-level=debug <mountpoint>
+$ madbfs --log-file=madbfs.log --log-level=debug <mountpoint>
 ```
 
-### Debug mode
-
-As part of debugging functionality `libfuse` has provided debug mode through `-d` flag. You can use this to monitor `madbfs` operations (if you don't want to use log file or want to see the log in real-time). If the debugging information is too verbose, you can use `-f` instead to make madbfs run in foreground mode without printing `fuse` debug information.
-
-```sh
-$ ./madbfs --log-file=- --log-level=debug -f <mountpoint>                     # runs in foreground (not daemonized)
-$ ./madbfs --log-file=- --log-level=debug -d <mountpoint>                     # this will print the libfuse debug messages and madbfs log messages
-$ ./madbfs --log-file=- --log-level=debug -d <mountpoint> 2> /dev/null        # this will print only madbfs log messages since libfuse debug messages are printed to stderr
-```
+You can always watch the logs of the filesystem at runtime even if you don't specify a log-file beforehand by using IPC `logcat` operation (see [below](<#ipc-(and-madbfs-msg)>)).
 
 ### IPC (and `madbfs-msg`)
 
@@ -360,7 +388,17 @@ For example, the socket path for a device with serial `192.168.240.112:5555`:
 
 If at initialization this socket file exists, the IPC won't start. This may happen if the filesystem is terminated unexpectedly (crash or kill signal). You need to remove this file manually if that happens.
 
-For the specification of the message protocol used on the IPC and how to use it read [IPC.md](IPC.md) file. To make it easier for user to use the IPC without having to write their own socket code, I have created another executable: `madbfs-msg`. The possible operations are explained in [IPC.md](IPC.md) file as well.
+For the specification of the message protocol used on the IPC and how to use it read [IPC.md](./IPC.md) file. To make it easier for user to use the IPC without having to write their own socket code, I have created another executable: `madbfs-msg`. The possible operations are explained in [IPC.md](./IPC.md) file as well.
+
+### Debug mode
+
+As part of debugging functionality `libfuse` has provided debug mode through `-d` flag. You can use this to monitor `madbfs` operations (if you don't want to use log file or want to see the log in real-time). If the debugging information is too verbose, you can use `-f` instead to make madbfs run in foreground mode without printing `fuse` debug information.
+
+```sh
+$ madbfs --log-file=- --log-level=debug -f <mountpoint>                     # runs in foreground (not daemonized)
+$ madbfs --log-file=- --log-level=debug -d <mountpoint>                     # this will print the libfuse debug messages and madbfs log messages
+$ madbfs --log-file=- --log-level=debug -d <mountpoint> 2> /dev/null        # this will print only madbfs log messages since libfuse debug messages are printed to stderr
+```
 
 ## Benchmark
 
