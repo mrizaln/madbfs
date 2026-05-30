@@ -13,7 +13,7 @@ The payload must be a JSON object in the form that depends on the operation requ
 }
 ```
 
-Some operations only requires `"op"` field, while some requires `"value"` field. Below is the breakdown:
+Some operations only requires `"op"` field, while some requires `"value"` field. Below is the break down:
 
 - `help`
 
@@ -101,7 +101,7 @@ Some operations only requires `"op"` field, while some requires `"value"` field.
 
 ### Response
 
-The IPC (beside `logcat`) will reply immediately after an operation is completed. The reply is a JSON in the form of:
+The IPC, beside `logcat`, will reply immediately after an operation is completed. The reply is a JSON in the form of:
 
 ```json
 {
@@ -127,22 +127,45 @@ The `<value>` then will be different depending on the operation performed:
 
 - `info`
 
-  ```json
-  {
-    "status": "success"
-    "value": {
-      "connection": <"server"|"adb">,
-      "log_level": <str>,
-      "ttl": <uint>,
-      "timeout": <uint>,
-      "page_size": <uint>,
-      "cache_size": {
-          "max": <uint>,
-          "current":  <uint>
+  - when cache is used (normal):
+
+    ```json
+    {
+      "status": "success",
+      "value": {
+        "serial": <str>,
+        "transport": <"proxy"|"adb">,
+        "root": <path>,
+        "log_level": <str>,
+        "ttl": <uint>,
+        "timeout": <uint>,
+        "cache": {
+          "page_size": <uint>,
+          "cache_size": {
+            "max": <uint>,
+            "current": <uint>
+          }
+        }
       }
     }
-  }
-  ```
+    ```
+
+  - when no-cache is used (`--no-cache` option)
+
+    ```json
+    {
+      "status": "success",
+      "value": {
+        "serial": <str>,
+        "transport": <"proxy"|"adb">,
+        "root": <path>,
+        "log_level": <str>,
+        "ttl": <uint>,
+        "timeout": <uint>,
+        "cache": null,
+      }
+    }
+    ```
 
   > - `page_size` unit is in KiB
   > - `cache_size` unit is in MiB
