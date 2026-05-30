@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Storage for file handles to enable faster `Node` retrieval on read/write using its associated `fh` (no need to traverse the tree).
+- No-cache mode that is an approximation for direct I/O. File content cache is not enabled in this mode and operations use real file `fd` from device. File stat is still cached though.
+- Mounting subdirectory feature (custom root) (https://github.com/mrizaln/madbfs/issues/18).
+- Program option for using no-cache mode (`--no-cache`).
+- Program option for mounting subdirectory (`--root`).
+- New field on IPC `info` operation: `root` (the root the filesystem uses for the subdirectory mounting feature).
+- New field on IPC `info` operation: `serial` (serial of the connected device as seen by `adb`).
+
+### Changed
+
+- Rename `FileTree` to `Filesystem`.
+- `Filesystem` owns `Cache` now.
+- Move all operations logic from `Node` to `Filesystem`, this reduces maintenance burden and reduces indirection.
+- `Link` is lazy now, the target will only be read on first access.
+- Common connection errors are not cached now: `std::errc::not_connected` (`ENOTCONN`), `std::errc::timed_out` (`TIMEDOUT`), and `std::errc::resource_unavailable_try_again` (`EAGAIN`).
+- Allow non-connection failure on IPC responses.
+- IPC operations `invalidate_cache`, `set_page_size`, and `set_cache_size` will respond with failure (unix error message, check `errno(3)`) if invoked when using no-cache mode.
+- Response value for IPC `info` operation is changed: `page_cache` and `cache_size` fields are now under `cache` field which may be `null` if no-cache mode is used.
+- Change IPC `info` operation response field, `connection` to `transport` for consistency.
+- Return `std::errc::invalid_value` (`EINVAL`) instead of `std::errc::operation_not_supported` (`EOPNOTSUPP`) when FUSE operations is provided with malformed path.
+
+### Fixed
+
+- Missing `Stat` update on `mknod()`, `mkdir()`, `unlink()`, `rmdir()`, `rename()`, and `copy_file_range()`.
+- Flush on eviction uses incorrect function that doesn't reset dirty flag on evicted page.
+- Rename operation doesn't update `fd` map on `adb` transport mode.
+
 ## [0.10.1] - 2026-04-17
 
 ### Added
