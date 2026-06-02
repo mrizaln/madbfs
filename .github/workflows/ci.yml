@@ -18,6 +18,9 @@ jobs:
 
     - name: Setup conan client
       uses: conan-io/setup-conan@v1
+      with:
+        cache_packages: true
+        profile_detect: true
 
     - name: Run sccache-cache
       uses: mozilla-actions/sccache-action@v0.0.10
