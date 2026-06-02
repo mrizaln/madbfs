@@ -8,11 +8,6 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
 
-env:
-  NDK_VERSION: 29.0.13599879
-  SDK_MANAGER: /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager
-  ANDROID_NDK_HOME_BASE: /usr/local/lib/android/sdk/ndk
-
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -32,24 +27,18 @@ jobs:
         CMAKE_CXX_COMPILER_LAUNCHER: "sccache"
 
     - name: Configure C++ Development Tools
-      run: |
-        sudo apt install gcc-14 g++-14 cmake ninja-build git
-
-    - name: Install conan
-      run: conan profile detect --force
-      env:
-        CC: gcc-14
-        CXX: g++-14
+      run: sudo apt-get install cmake ninja-build
 
     - name: Setup Android NDK
       uses: nttld/setup-ndk@v1
+      id: setup-ndk
       with:
         ndk-version: r29
-      env:
-        ANDROID_NDK_HOME: "${{ steps.setup-ndk.outputs.ndk-path }}"
 
     - name: Build, Test, and Package
       run: ./package.sh "$PWD/.github/ci/conan-profile.ini"
+      env:
+        ANDROID_NDK_HOME: "${{ steps.setup-ndk.outputs.ndk-path }}"
 
     - name: Save Artifacts
       uses: actions/upload-artifact@v4
