@@ -6,40 +6,42 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+'      # only for semantic versioning
   pull_request:
     branches: [ "main" ]
-
-env:
-  NDK_VERSION: 29.0.13599879
-  SDK_MANAGER: /usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager
-  ANDROID_NDK_HOME_BASE: /usr/local/lib/android/sdk/ndk
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup conan client
+      uses: conan-io/setup-conan@v1
+      with:
+        version: 2.29.0
+        cache_packages: true
+        profile_detect: true
+
+    - name: Run sccache-cache
+      uses: mozilla-actions/sccache-action@v0.0.10
 
     - name: Configure C++ Development Tools
-      run: |
-        sudo apt install gcc-14 g++-14 cmake ninja-build git
+      run: sudo apt-get install cmake ninja-build
 
-    - name: Configure Conan 2 Package Manager
-      run: |
-        sudo apt install python3 python3-pip
-        pip3 install conan
-        conan profile detect --force
-      env:
-        CC: gcc-14
-        CXX: g++-14
-
-    - name: Configure Android NDK
-      run: |
-        yes | $SDK_MANAGER --licenses > /dev/null
-        $SDK_MANAGER --install "ndk;$NDK_VERSION"
-        echo ANDROID_NDK_HOME="$ANDROID_NDK_HOME_BASE/$NDK_VERSION" >> $GITHUB_ENV
+    - name: Setup Android NDK
+      uses: nttld/setup-ndk@v1
+      id: setup-ndk
+      with:
+        ndk-version: r29
 
     - name: Build, Test, and Package
       run: ./package.sh "$PWD/.github/ci/conan-profile.ini"
+      env:
+        ANDROID_NDK_HOME: "${{ steps.setup-ndk.outputs.ndk-path }}"
+        SCCACHE_GHA_ENABLED: true
+        CMAKE_C_COMPILER_LAUNCHER: "sccache"
+        CMAKE_CXX_COMPILER_LAUNCHER: "sccache"
 
     - name: Save Artifacts
       uses: actions/upload-artifact@v4
