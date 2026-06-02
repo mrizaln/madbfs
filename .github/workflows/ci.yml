@@ -19,6 +19,7 @@ jobs:
     - name: Setup conan client
       uses: conan-io/setup-conan@v1
       with:
+        version: 2.29.0
         cache_packages: true
         profile_detect: true
 
