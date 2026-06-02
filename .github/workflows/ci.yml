@@ -17,26 +17,35 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
     - name: Configure C++ Development Tools
       run: |
         sudo apt install gcc-14 g++-14 cmake ninja-build git
 
-    - name: Configure Conan 2 Package Manager
+    - name: Run sccache-cache
+      uses: mozilla-actions/sccache-action@v0.0.10
       run: |
-        sudo apt install python3 python3-pip
+        echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+        echo "CMAKE_C_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+        echo "CMAKE_CXX_COMPILER_LAUNCHER=sccache" >> $GITHUB_ENV
+
+    - name: Setup conan client
+      uses: conan-io/setup-conan@v1
+      run: |
         pip3 install conan
         conan profile detect --force
       env:
         CC: gcc-14
         CXX: g++-14
 
-    - name: Configure Android NDK
+    - name: Setup Android NDK
+      uses: nttld/setup-ndk@v1
+      with:
+        ndk-version: r29
       run: |
-        yes | $SDK_MANAGER --licenses > /dev/null
-        $SDK_MANAGER --install "ndk;$NDK_VERSION"
-        echo ANDROID_NDK_HOME="$ANDROID_NDK_HOME_BASE/$NDK_VERSION" >> $GITHUB_ENV
+        echo ANDROID_NDK_HOME="${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
 
     - name: Build, Test, and Package
       run: ./package.sh "$PWD/.github/ci/conan-profile.ini"
