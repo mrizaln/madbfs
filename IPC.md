@@ -134,7 +134,7 @@ The `<value>` then will be different depending on the operation performed:
       "status": "success",
       "value": {
         "serial": <str>,
-        "transport": <"proxy"|"adb">,
+        "transport": <"proxy"|"adb"|"null">,
         "root": <path>,
         "log_level": <str>,
         "ttl": <uint>,
@@ -157,7 +157,7 @@ The `<value>` then will be different depending on the operation performed:
       "status": "success",
       "value": {
         "serial": <str>,
-        "transport": <"proxy"|"adb">,
+        "transport": <"proxy"|"adb"|"null">,
         "root": <path>,
         "log_level": <str>,
         "ttl": <uint>,
