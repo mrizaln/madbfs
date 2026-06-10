@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-11
+
 ### Added
 
 - Storage for file handles to enable faster `Node` retrieval on read/write using its associated `fh` (no need to traverse the tree).
@@ -274,7 +276,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-file LRU page caching for file read/write.
 - `Path` and `PathBuf` class to separate `madbfs`'s virtual paths from real paths (`std::filesystem`).
 
-[unreleased]: https://github.com/mrizaln/madbfs/compare/v0.10.1...HEAD
+[unreleased]: https://github.com/mrizaln/madbfs/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/mrizaln/madbfs/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/mrizaln/madbfs/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/mrizaln/madbfs/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/mrizaln/madbfs/compare/v0.8.1...v0.9.0
