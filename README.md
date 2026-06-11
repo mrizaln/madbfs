@@ -197,6 +197,14 @@ There is no installation step required, as the application is built statically. 
 
 If you separate `madbfs` from the server binaries, you need to specify them yourself using `--server` option (explained in the next section). Doing this also means that you need to know your Android device ABI beforehand to select the correct server binary. Failing to do so will result in the server not running and the client will fall back to using the `adb` transport.
 
+#### Installing from the AUR
+
+`madbfs` can be installed using your prefered AUR helper, as with every other AUR package. Using `yay`, you'd run the following command as superuser:
+
+```
+yay -S madbfs-bin
+```
+
 ## Usage
 
 The help message can help you start using this program
