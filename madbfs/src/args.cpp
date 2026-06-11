@@ -230,7 +230,7 @@ namespace madbfs::args
                 ::fuse_lowlevel_version();
                 ::fuse_opt_free_args(&args);
                 ::free(opts.mountpoint);
-                co_return ParseResult{ 1 };
+                co_return ParseResult{ 0 };
             }
 
             if (opts.mountpoint == nullptr) {
