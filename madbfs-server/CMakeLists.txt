@@ -1,9 +1,12 @@
 cmake_minimum_required(VERSION 3.22)
+include(${CMAKE_CURRENT_SOURCE_DIR}/../madbfs-common/cmake/version.cmake)
+
 project(
-    madbfs-server
-    VERSION 0.11.0
-    LANGUAGES CXX
-    DESCRIPTION "Userspace filesystem for Android via adb using FUSE (proxy component)"
+  madbfs-server
+  VERSION ${MADBFS_PROJECT_VERSION}
+  LANGUAGES CXX
+  DESCRIPTION
+    "Userspace filesystem for Android via adb using FUSE (proxy component)"
 )
 
 include(cmake/prelude.cmake)
@@ -20,8 +23,8 @@ set(MADBFS_BUILD_IPC OFF CACHE BOOL "don't build ipc")
 
 # https://stackoverflow.com/a/8349410/16506263
 add_subdirectory(
-    ${CMAKE_CURRENT_SOURCE_DIR}/../madbfs-common
-    ${CMAKE_CURRENT_BINARY_DIR}/madbfs-common
+  ${CMAKE_CURRENT_SOURCE_DIR}/../madbfs-common
+  ${CMAKE_CURRENT_BINARY_DIR}/madbfs-common
 )
 
 add_library(madbfs-server-lib STATIC src/server.cpp src/request_handler.cpp)

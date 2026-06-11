@@ -3,6 +3,8 @@
 #include "madbfs/adb.hpp"
 #include "madbfs/cmd.hpp"
 
+#include <madbfs-gen/version.hpp>
+
 #include <madbfs-common/util/split.hpp>
 
 #include <fmt/base.h>
@@ -225,7 +227,7 @@ namespace madbfs::args
             }
 
             if (opts.show_version) {
-                fmt::println("madbfs version {}", MADBFS_VERSION_STRING);
+                fmt::println("madbfs version {}", MADBFS_VERSION_FULL);
                 fmt::println("FUSE library version {}", ::fuse_pkgversion());
                 ::fuse_lowlevel_version();
                 ::fuse_opt_free_args(&args);

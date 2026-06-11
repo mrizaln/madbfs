@@ -2,6 +2,8 @@
 #include <madbfs-common/rpc.hpp>
 #include <madbfs-server/server.hpp>
 
+#include <madbfs-gen/version.hpp>
+
 #include <fmt/base.h>
 
 #include <charconv>
@@ -85,7 +87,7 @@ try {
     fmt::println(madbfs::rpc::server_ready_string);
     std::fflush(stdout);    // ensure the message is sent
 
-    madbfs::log_i(__func__, "madbfs-server version {}", MADBFS_VERSION_STRING);
+    madbfs::log_i(__func__, "madbfs-server version {}", MADBFS_VERSION_FULL);
     madbfs::log_i(__func__, "launching tcp server on port: {}", args.port);
 
     auto res = madbfs::async::once(context, task());

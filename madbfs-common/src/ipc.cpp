@@ -1,6 +1,8 @@
 #include "madbfs-common/ipc.hpp"
 #include "madbfs-common/log.hpp"
 
+#include <madbfs-gen/version.hpp>
+
 #include <boost/json.hpp>
 
 #include <filesystem>
@@ -361,7 +363,7 @@ namespace madbfs::ipc
                 value = json::value{ { "operations", json::value_from(op::names) } };
                 break;
             case Op::index_of<op::Version>():
-                value = json::value{ { "version", MADBFS_VERSION_STRING } };
+                value = json::value{ { "version", MADBFS_VERSION_FULL } };
                 break;
             case Op::index_of<op::Logcat>():
                 m_logcat_subscribers.emplace_back(std::move(sock), op->as<op::Logcat>()->color);

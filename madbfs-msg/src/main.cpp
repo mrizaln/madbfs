@@ -2,6 +2,8 @@
 #include <madbfs-common/ipc.hpp>
 #include <madbfs-common/log.hpp>
 
+#include <madbfs-gen/version.hpp>
+
 #include <boost/json.hpp>
 #include <boost/program_options.hpp>
 #include <fmt/base.h>
@@ -129,7 +131,7 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
     }
 
     if (vm.count("version")) {
-        fmt::println(stdout, "{}", MADBFS_VERSION_STRING);
+        fmt::println(stdout, "{}", MADBFS_VERSION_FULL);
         return Exit{ 0 };
     }
 

@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
+include(./madbfs-common/cmake/version.cmake)
+
 project(
   madbfs
-  VERSION 0.11.0
+  VERSION ${MADBFS_PROJECT_VERSION}
   LANGUAGES CXX
   DESCRIPTION "Userspace filesystem for Android via adb using FUSE"
 )
