@@ -18,6 +18,9 @@ mkdir -p ${PACKAGE_DIR}/madbfs/
 
 echo "building madbfs and madbfs-server using build profile: ${CONAN_PROFILE}"
 
+# build server
+./madbfs-server/build_all.sh "$CONAN_PROFILE"
+
 # build client
 ./build.sh "$CONAN_PROFILE"
 
@@ -26,11 +29,6 @@ strip ${PACKAGE_DIR}/madbfs/madbfs
 
 cp build/Release/madbfs-msg/madbfs-msg ${PACKAGE_DIR}/madbfs/
 strip ${PACKAGE_DIR}/madbfs/madbfs-msg
-
-# build server
-./madbfs-server/build_all.sh "$CONAN_PROFILE"
-
-cp madbfs-server/build/android-all-release/* ${PACKAGE_DIR}/madbfs/
 
 # package
 cd ${PACKAGE_DIR}
