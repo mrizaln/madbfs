@@ -1,6 +1,8 @@
 #include "madbfs/transport/proxy_transport.hpp"
+
+#include "../embed/server.hpp"
+
 #include "madbfs/cmd.hpp"
-#include "madbfs/path.hpp"
 
 #include <madbfs-common/log.hpp>
 #include <madbfs-common/rpc.hpp>
@@ -15,6 +17,15 @@ using namespace madbfs;
 // helper functions/classes
 namespace
 {
+    AExpect<String> write_server(adb::Abi abi, Str target)
+    {
+        auto server_bytes = embed::get_server(abi);
+        auto server_str   = Str{ reinterpret_cast<const char*>(server_bytes.data()), server_bytes.size() };
+        auto ofile        = fmt::format("of={}", target);
+
+        co_return co_await cmd::exec({ "adb", "shell", "dd", ofile }, server_str);
+    }
+
     AExpect<rpc::Socket> connect_to_server(u16 port)
     {
         auto exec   = co_await async::current_executor();
@@ -36,7 +47,7 @@ namespace
         co_return socket;
     }
 
-    AExpect<Tup<Opt<bp::process>, rpc::Socket>> launch_and_connect(Opt<path::Path> server, u16 port)
+    AExpect<Tup<Opt<bp::process>, rpc::Socket>> launch_and_connect(Opt<adb::Abi> abi, u16 port)
     {
         auto exec      = co_await async::current_executor();
         auto serv_file = Str{ "/data/local/tmp/madbfs-server" };
@@ -48,8 +59,8 @@ namespace
             co_return Unexpect{ res.error() };
         }
 
-        if (not server) {
-            log_i(__func__, "server path not set, try connect");
+        if (not abi) {
+            log_i(__func__, "ABI is not set, try connect existing server");
             auto socket = co_await async::timeout(connect_to_server(port), Seconds{ 5 });
             if (not socket) {
                 co_return Unexpect{ socket.error() };
@@ -59,10 +70,10 @@ namespace
             co_return Tup{ Opt<bp::process>{}, std::move(*socket) };
         }
 
-        log_i(__func__, "server path set to {}, pushing server normally", *server);
+        log_i(__func__, "phone ABI is set to {}, pushing server normally", to_string(*abi));
 
         // push server executable to device
-        if (auto res = co_await cmd::exec({ "adb", "push", *server, serv_file }); not res) {
+        if (auto res = co_await write_server(*abi, serv_file); not res) {
             log_e(__func__, "failed to push '{}' to device: {}", serv_file, err_msg(res.error()));
             co_return Unexpect{ res.error() };
         }
@@ -133,9 +144,9 @@ namespace madbfs::transport
         stop(Errc::operation_canceled);
     }
 
-    AExpect<Uniq<ProxyTransport>> ProxyTransport::create(Opt<path::Path> server, u16 port)
+    AExpect<Uniq<ProxyTransport>> ProxyTransport::create(Opt<adb::Abi> abi, u16 port)
     {
-        auto conn = co_await launch_and_connect(server, port);
+        auto conn = co_await launch_and_connect(abi, port);
         if (not conn) {
             co_return Unexpect{ conn.error() };
         }

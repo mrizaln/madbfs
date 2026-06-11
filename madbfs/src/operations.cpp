@@ -158,13 +158,6 @@ namespace madbfs::operations
         auto* args = static_cast<args::ParsedOpt*>(::fuse_get_context()->private_data);
         assert(args != nullptr and "data should not be empty!");
 
-        if (auto server = args->connection.as<args::connection::Server>(); server) {
-            if (not server->path.is_absolute()) {
-                log_c(__func__, "server path is not absolute when it should! ignoring");
-                args->connection = args::connection::NoServer{ .port = server->port };
-            }
-        }
-
         auto caching = args->caching.transform([](auto& c) {
             auto page_size = c.pagesize * 1024;
             return Caching{ .page_size = page_size, .max_pages = (c.cachesize * 1024 * 1024) / page_size };

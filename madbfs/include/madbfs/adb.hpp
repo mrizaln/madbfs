@@ -20,6 +20,19 @@ namespace madbfs::adb
     };
 
     /**
+     * @enum Abi
+     *
+     * @brief Represent phone ABI.
+     */
+    enum class Abi
+    {
+        Armeabi_v7a,
+        Arm64_v8a,
+        X86,
+        X86_64,
+    };
+
+    /**
      * @class Device
      *
      * @brief Device information connected through adb.
@@ -38,6 +51,13 @@ namespace madbfs::adb
     Str to_string(DeviceStatus status);
 
     /**
+     * @brief Get human readable description of Abi.
+     *
+     * The string lifetime is static.
+     */
+    Str to_string(Abi abi);
+
+    /**
      * @brief Start connection with the devices.
      *
      * Starts adb server.
@@ -48,4 +68,11 @@ namespace madbfs::adb
      * @brief List connected devices.
      */
     AExpect<Vec<Device>> list_devices();
+
+    /**
+     * @brief Get ABI of device with specified serial.
+     *
+     * @param serial Device serial.
+     */
+    AExpect<Abi> get_abi(Str serial);
 }

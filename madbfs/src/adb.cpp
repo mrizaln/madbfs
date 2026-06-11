@@ -19,6 +19,17 @@ namespace madbfs::adb
         return "Unknown";
     }
 
+    Str to_string(Abi abi)
+    {
+        switch (abi) {
+        case Abi::Armeabi_v7a: return "armeabi-v7a";
+        case Abi::Arm64_v8a: return "arm64-v8a";
+        case Abi::X86: return "x86";
+        case Abi::X86_64: return "x86_64";
+        }
+        return "unknown";
+    }
+
     AExpect<void> start_server()
     {
         auto res = co_await cmd::exec({ "adb", "start-server" });
@@ -61,5 +72,23 @@ namespace madbfs::adb
         }
 
         co_return devices;
+    }
+
+    AExpect<Abi> get_abi(Str serial)
+    {
+        auto out = co_await cmd::exec({ "adb", "-s", serial, "shell", "getprop", "ro.product.cpu.abi" });
+        if (not out) {
+            co_return Unexpect{ out.error() };
+        }
+        auto str = util::strip(*out);
+
+        // clang-format off
+        if (str == "armeabi-v7a") co_return Abi::Armeabi_v7a;
+        if (str == "arm64-v8a")   co_return Abi::Arm64_v8a;
+        if (str == "x86")         co_return Abi::X86;
+        if (str == "x86_64")      co_return Abi::X86_64;
+        // clang-format on
+
+        co_return Unexpect{ Errc::not_supported };
     }
 }

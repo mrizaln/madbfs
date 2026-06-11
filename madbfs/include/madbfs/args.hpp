@@ -1,5 +1,6 @@
 #pragma once
 
+#include "madbfs/adb.hpp"
 #include "madbfs/path.hpp"
 
 #include <madbfs-common/async/async.hpp>
@@ -10,7 +11,6 @@
 #include <fuse_lowlevel.h>
 #include <fuse_opt.h>
 
-#include <filesystem>
 
 namespace madbfs::args
 {
@@ -53,7 +53,7 @@ namespace madbfs::args
         // clang-format off
         struct AdbOnly { };
         struct NoServer{ u16 port; };
-        struct Server  { std::filesystem::path path; u16 port; };
+        struct Server  { adb::Abi abi; u16 port; };
         // clang-format on
     };
 
