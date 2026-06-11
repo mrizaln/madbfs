@@ -22,12 +22,19 @@ target_sources(
     src/path.cpp
     src/transport/adb_transport.cpp
     src/transport/proxy_transport.cpp
+    src/embed/server.cpp
 )
 target_link_libraries(
   madbfs-lib
   PUBLIC madbfs-common fetch::linr boost::boost libfuse::libfuse
 )
 target_include_directories(madbfs-lib PUBLIC include)
+target_compile_options(madbfs-lib PRIVATE -Wall -Wextra -Wconversion)
+target_compile_definitions(
+  madbfs-lib
+  PRIVATE
+    MADBFS_SERVER_BINARY_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../madbfs-server/build/android-all-release
+)
 
 add_executable(madbfs src/main.cpp)
 target_link_libraries(madbfs PRIVATE madbfs-lib)
