@@ -26,8 +26,8 @@ namespace
             co_return custom->create();
         }
         case ConnectionStrategy::index_of<conn::Proxy>(): {
-            const auto& [server, port] = *strat.as<conn::Proxy>();
-            if (auto transport = co_await transport::ProxyTransport::create(server, port); transport) {
+            const auto& [abi, port] = *strat.as<conn::Proxy>();
+            if (auto transport = co_await transport::ProxyTransport::create(abi, port); transport) {
                 co_return std::move(*transport);
             }
             [[fallthrough]];
@@ -55,7 +55,7 @@ namespace
         }
         case ConnectionStrategy::index_of<conn::Proxy>(): {
             auto proxy = strat.as<conn::Proxy>();
-            co_return co_await transport::ProxyTransport::create(proxy->server, proxy->port);
+            co_return co_await transport::ProxyTransport::create(proxy->abi, proxy->port);
         }
         case ConnectionStrategy::index_of<conn::Adb>(): {
             co_return co_await transport::AdbTransport::create();

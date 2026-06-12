@@ -1,6 +1,6 @@
 #pragma once
 
-#include "madbfs/path.hpp"
+#include "madbfs/adb.hpp"
 #include "madbfs/transport/transport.hpp"
 
 namespace madbfs::transport
@@ -28,12 +28,14 @@ namespace madbfs::transport
         /**
          * @brief Create a new proxy transport.
          *
-         * @param server Server path.
+         * @param abi Phone ABI.
          * @param port The port the server will run on.
          *
          * The construction of the transport may fail like any other.
+         *
+         * ABI is used to identify which server to be pushed.
          */
-        static AExpect<Uniq<ProxyTransport>> create(Opt<path::Path> server, u16 port);
+        static AExpect<Uniq<ProxyTransport>> create(Opt<adb::Abi> abi, u16 port);
 
         // overrides
         // ---------

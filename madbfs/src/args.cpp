@@ -84,65 +84,6 @@ namespace
         co_return devices[choice - 1].serial;
     }
 
-    /**
-     * @brief Search for server binary file.
-     *
-     * @param exec_path Current executable path.
-     * @param server_name Name of the server file.
-     *
-     * @return Path to server binary if found otherwise `std::nullopt`.
-     */
-    inline Opt<std::filesystem::path> get_server_path(std::filesystem::path exec_path, Str server_name)
-    {
-        namespace fs = std::filesystem;
-
-        auto candidates = Vec<fs::path>{};
-        candidates.push_back(fs::current_path() / server_name);
-
-        // search in PATH
-        if (exec_path.filename() == exec_path and not exec_path.string().starts_with("./")) {
-            if (auto path_env = ::getenv("PATH"); path_env != nullptr) {
-                auto splitter = util::StringSplitter{ path_env, ':' };
-                while (auto path = splitter.next()) {
-                    auto file = fs::path{ *path } / exec_path.filename();
-                    if (not fs::exists(file)) {
-                        continue;
-                    }
-                    candidates.push_back(file.parent_path() / server_name);
-                    while (fs::is_symlink(file)) {
-                        auto read = fs::read_symlink(file);
-                        if (read.is_relative()) {
-                            read = file.parent_path() / read;
-                        }
-                        file = read;
-                        candidates.push_back(file.parent_path() / server_name);
-                    }
-                }
-            }
-        } else {
-            auto file = fs::absolute(exec_path);
-            candidates.push_back(file.parent_path() / server_name);
-            while (fs::is_symlink(file)) {
-                auto read = fs::read_symlink(file);
-                if (read.is_relative()) {
-                    read = file.parent_path() / read;
-                }
-                file = read;
-                candidates.push_back(file.parent_path() / server_name);
-            }
-        }
-
-        auto file = fs::path{};
-        for (auto candidate : candidates) {
-            if (fs::exists(candidate) and fs::is_regular_file(candidate)) {
-                file = candidate;
-                return file;
-            }
-            fmt::println("[madbfs] candidate not exist or not regular file: {}", candidate.c_str());
-        }
-
-        return std::nullopt;
-    }
 }
 
 // args.hpp impl
@@ -161,9 +102,6 @@ namespace madbfs::args
             "                             (by default madbfs mounts the root path of the device)\n"
             "                             (the path must be absolute and points to an existing path)\n"
             "                             (if the path is a symlink, it will be resolved first)\n"
-            "    --server=<path>        path to server file\n"
-            "                             (if omitted will search the file automatically)\n"
-            "                             (must have the same arch as your phone)\n"
             "    --log-level=<enum>     log level to use\n"
             "                             (default: \"warning\")\n"
             "                             (enum: {0:n})\n"
@@ -348,53 +286,14 @@ namespace madbfs::args
         auto connection = Connection{ connection::AdbOnly{} };
 
         if (madbfs_opt.adb_only) {
-            connection = connection::AdbOnly{};
             fmt::println("[madbfs] adb-only flag specified, won't launch server and won't try to connect");
         } else if (madbfs_opt.no_server) {
             connection = connection::NoServer{ .port = port };
             fmt::println("[madbfs] no-server flag specified, won't launch server but will try to connect");
-        } else if (madbfs_opt.server == nullptr) {
-            auto exe = std::filesystem::path{ argv[0] == nullptr ? "madbfs" : argv[0] };
-            auto abi = co_await cmd::exec(
-                { "adb", "-s", madbfs_opt.serial, "shell", "getprop", "ro.product.cpu.abi" }
-            );
-
-            auto server = Opt<std::filesystem::path>{};
-
-            if (not abi) {
-                fmt::println("[madbfs] the device's Android ABI can't be queried");
-            } else {
-                fmt::println("[madbfs] the device is running with Android ABI '{}'", util::strip(*abi));
-                auto server_name = fmt::format("madbfs-server-{}", util::strip(*abi));
-                fmt::println("[madbfs] server is not specified, attempting to search '{}'...", server_name);
-                server = get_server_path(exe, server_name);
-            }
-
-            if (not server) {
-                constexpr auto server_name = "madbfs-server";
-                fmt::println("[madbfs] trying to find '{}'...", server_name);
-                server = get_server_path(exe, server_name);
-            }
-
-            if (not server) {
-                fmt::println("[madbfs] can't find server, fallback to no-server");
-                connection = connection::NoServer{ .port = port };
-            } else {
-                fmt::println("[madbfs] server is found: {:?}", server->c_str());
-                connection = connection::Server{ .path = *server, .port = port };
-            }
+        } else if (auto abi = co_await adb::get_abi(madbfs_opt.serial); not abi) {
+            fmt::println("[madbfs] device ABI query failed: {} (fallback to adb)", err_msg(abi.error()));
         } else {
-            auto path = std::filesystem::absolute(madbfs_opt.server);
-            if (not std::filesystem::exists(path)) {
-                fmt::println("[madbfs] {:?} does not exist, fallback to no-server", path.c_str());
-                connection = connection::NoServer{ .port = port };
-            } else if (not std::filesystem::is_regular_file(path)) {
-                fmt::println("[madbfs] {:?} is not a regular file, fallback to no-server", path.c_str());
-                connection = connection::NoServer{ .port = port };
-            } else {
-                fmt::println("[madbfs] server path is set to {:?}", path.c_str());
-                connection = connection::Server{ .path = path, .port = port };
-            }
+            connection = connection::Server{ .abi = *abi, .port = port };
         }
 
         // if logfile is set to stdout but not in foreground mode, ignore it.

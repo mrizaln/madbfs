@@ -1,5 +1,6 @@
 #pragma once
 
+#include "madbfs/adb.hpp"
 #include "madbfs/path.hpp"
 #include "madbfs/stat.hpp"
 #include "madbfs/transport/transport.hpp"
@@ -42,8 +43,8 @@ namespace madbfs
          */
         struct Proxy
         {
-            Opt<path::PathBuf> server;
-            u16                port;
+            Opt<adb::Abi> abi;
+            u16           port;
         };
 
         /**

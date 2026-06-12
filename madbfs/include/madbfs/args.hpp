@@ -1,5 +1,6 @@
 #pragma once
 
+#include "madbfs/adb.hpp"
 #include "madbfs/path.hpp"
 
 #include <madbfs-common/async/async.hpp>
@@ -9,8 +10,6 @@
 #define FUSE_USE_VERSION 31
 #include <fuse_lowlevel.h>
 #include <fuse_opt.h>
-
-#include <filesystem>
 
 namespace madbfs::args
 {
@@ -26,7 +25,6 @@ namespace madbfs::args
     {
         const char* serial     = nullptr;
         const char* root       = nullptr;
-        const char* server     = nullptr;
         const char* log_level  = nullptr;
         const char* log_file   = nullptr;
         int         cache_size = 256;    // in MiB
@@ -42,7 +40,6 @@ namespace madbfs::args
         {
             ::free((void*)serial);
             ::free((void*)root);
-            ::free((void*)server);
             ::free((void*)log_level);
             ::free((void*)log_file);
         }
@@ -53,7 +50,7 @@ namespace madbfs::args
         // clang-format off
         struct AdbOnly { };
         struct NoServer{ u16 port; };
-        struct Server  { std::filesystem::path path; u16 port; };
+        struct Server  { adb::Abi abi; u16 port; };
         // clang-format on
     };
 
@@ -127,7 +124,6 @@ namespace madbfs::args
         // clang-format off
         { "--serial=%s",     offsetof(MadbfsOpt, serial),     true },
         { "--root=%s",       offsetof(MadbfsOpt, root),       true },
-        { "--server=%s",     offsetof(MadbfsOpt, server),     true },
         { "--log-level=%s",  offsetof(MadbfsOpt, log_level),  true },
         { "--log-file=%s",   offsetof(MadbfsOpt, log_file),   true },
         { "--cache-size=%d", offsetof(MadbfsOpt, cache_size), true },

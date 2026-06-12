@@ -73,7 +73,7 @@ These limitations lead me to decide to rebuild the project from ground up in ord
 
     The simplest transport. It executes all FUSE operations by running `adb shell` commands like `dd`, `stat`, and `touch`. No additional component is required.
 
-  - Proxy transport (optional)
+  - Proxy transport
 
     Communicates with a lightweight TCP server running natively on the Android device via a custom RPC protocol. It requires a server binary compiled for the phone architecture but has better I/O throughput than the `adb` transport.
 
@@ -89,7 +89,7 @@ These limitations lead me to decide to rebuild the project from ground up in ord
 
 ## Dependencies
 
-- `madbfs`
+- `madbfs` and `madbfs-msg`
 
   Runtime dependencies
 
@@ -97,7 +97,7 @@ These limitations lead me to decide to rebuild the project from ground up in ord
 
   Build dependencies
 
-  - GCC or Clang (support C++23 or above, tested on GCC 14, GCC 15, and Clang 20 )
+  - GCC or Clang (support C++23 or above, tested on GCC 15 and GCC 16)
   - CMake (version 3.22+)
   - Conan
 
@@ -108,7 +108,7 @@ These limitations lead me to decide to rebuild the project from ground up in ord
   - rapidhash
   - spdlog
 
-- `madbfs-server` (optional)
+- `madbfs-server`
 
   Build dependencies
 
@@ -129,73 +129,35 @@ Since the dependencies are managed by Conan, you need to make sure it's installe
 
 > don't forget to run `conan profile detect` if you use Conan for the first time
 
-- `madbfs`
+Navigate to the root of the repository then edit [`package.sh`](./package.sh) script. This step is necessary to set the Android native app build system and its parameters to be able to compile the servers. You may change these parameters:
 
-  Navigate to the root of the repository, then you install the dependencies:
+> you can left the parameters unchanged if you are using Android NDK version 29 (beta 1)
 
-  ```sh
-  conan install . --build=missing -s build_type=Release
-  ```
+- `API_LEVEL` ([see](https://apilevels.com/))
+- `COMPILER` (usually clang)
+- `COMPILER_VERSION` (_not ndk version! check by running the compiler on the NDK path_)
 
-  > - you might want to change the Conan profile by appending `-pr <profile_path>` to the command above.
-  > - for an example, you can see [this profile I use for CI](./.github/ci/conan-profile.ini) (you can also just use this one)
+Your `ANDROID_NDK_HOME` variable must be set before compiling and point to the appropriate Android NDK. If your `ANDROID_NDK_HOME` variable is not set, you can set it this:
 
-  Then compile the project:
+```sh
+export ANDROID_NDK_HOME=/path/to/your/android/ndk/home/
+```
 
-  ```sh
-  cmake --preset conan-release
-  cmake --build --preset conan-release
-  ```
+Then you compile the project:
 
-  The built binary will be in `build/Release/madbfs/` directory with the name `madbfs`. Since the libraries are statically linked to the binary you can place this binary anywhere you want (place it in PATH if you want it to be accessible from anywhere).
+```sh
+./package.sh
+```
 
-- `madbfs-server`
+> - you can optionally pass an argument to this function to specify custom conan profile ([example](.github/ci/conan-profile.ini))
 
-  > you may skip this process if you don't mind not having proxy transport support
-
-  Navigate to the root of the repository then go to `madbfs-server/` subdirectory. You then can proceed by editing the [`build_all.sh`](./madbfs-server/build_all.sh) script. This step is necessary to set the Android native app build system and its parameters to be able to compile the server. You may change these parameters
-
-  - API_LEVEL
-    > see [this](https://apilevels.com/)
-  - COMPILER
-    > usually clang
-  - COMPILER_VERSION
-    > not ndk version! (check by running the compiler on the NDK path)
-
-  Your `ANDROID_NDK_HOME` variable must be set before compiling and point to the appropriate Android NDK. If your `ANDROID_NDK_HOME` variable is not set, you can set it yourself like so before going to the next step:
-
-  ```sh
-  export ANDROID_NDK_HOME=/path/to/your/android/ndk/home/
-  ```
-
-  The compilation step is simpler:
-
-  ```sh
-  ./build_all.sh
-  ```
-
-  The script above will build the server for all the currently supported Android ABIs (see [this](https://developer.android.com/ndk/guides/abis)). The binaries will be built in its own `build/android-<arch>-release` directory. A stripped version of all the binaries are copied to `build/android-all-release` directory.
-
-- Package
-
-  To allow for easier packaging, I have created [a script](./package.sh) that compiles both `madbfs` and `madbfs-server` in one go:
-
-  ```sh
-  ./package.sh
-  ```
-
-  > - you must configure the Android NDK variables first on [`build_all.sh`](./madbfs-server/build_all.sh) script and set the `ANDROID_NDK_HOME` environment variable before using this script.
-  > - you can given an argument to this script to set your Conan profile for building the `madbfs` client.
-
-  This will build and package `madbfs` into a `tar.gz` file in `build/package/` directory.
+The script above will build `madbfs-server` for all the currently supported Android ABIs (see [this](https://developer.android.com/ndk/guides/abis)). Then just after, will build `madbfs` and `madbfs-msg` (and tests). The `madbfs` client embeds all of the `madbfs-server` inside itself on compilation. The end result is a `tar.gz` file in `build/package/` directory that contains `madbfs` and `madbfs-msg`.
 
 ## Installation
 
 You can download `madbfs` from the [GitHub releases page](https://github.com/mrizaln/madbfs/releases).
 
-There is no installation step required, as the application is built statically. You can place the binaries wherever you prefer. However, make sure to place the server binaries (`madbfs-server-*`) in the same directory as `madbfs` (the client), or else `madbfs` won't be able to find the server and will fall back to using the `adb` transport.
-
-If you separate `madbfs` from the server binaries, you need to specify them yourself using `--server` option (explained in the next section). Doing this also means that you need to know your Android device ABI beforehand to select the correct server binary. Failing to do so will result in the server not running and the client will fall back to using the `adb` transport.
+There is no installation step required, as the application is built statically. You can place the binaries wherever you prefer.
 
 #### Installing from the AUR
 
@@ -220,9 +182,6 @@ Options for madbfs:
                              (by default madbfs mounts the root path of the device)
                              (the path must be absolute and points to an existing path)
                              (if the path is a symlink, it will be resolved first)
-    --server=<path>        path to server file
-                             (if omitted will search the file automatically)
-                             (must have the same arch as your phone)
     --log-level=<enum>     log level to use
                              (default: "warning")
                              (enum: "trace", "debug", "info", "warning", "error", "critical", "off")
@@ -318,14 +277,7 @@ Do note that mounting subdirectory might break symbolic links since it is possib
 
 > only relevant if you want proxy transport support
 
-In order to use the proxy transport, `madbfs` needs to be able to find the `madbfs-server-*` binaries. There are three approaches you can do in order for `madbfs` be able to find the server file:
-
-- Place them where you run the `madbfs` program,
-- Place them in the same directory as `madbfs` program, or
-- Specify explicitly the path of the file using `--server` option.
-  > You need to know your device abi to use this option
-
-If you want the filesystem to use only use `adb` transport, use `--adb-only` flag. This flag prevents `madbfs` from pushing the server into your phone and running it. If you rather want to manually run the server yourself (for debugging for example), use `--no-server` flag instead.
+If you want the filesystem to use only use `adb` transport, use `--adb-only` flag. This flag prevents `madbfs` from pushing the server into your phone and running it. If you rather want to manually run the server yourself (for debugging purpose), use `--no-server` flag instead.
 
 The proxy communicates with `madbfs` over TCP enabled by port forwarding and by default it will listen on port `23237` (`adbfs` on dial pad). If you find this port to be not suitable for your use you can always specify it with `--port` option.
 

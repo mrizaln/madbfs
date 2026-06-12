@@ -195,8 +195,7 @@ namespace madbfs
                 return Connection{ ctx, connection_strategy::Proxy{ std::nullopt, c.port } };
             },
             [&](args::connection::Server c) {
-                auto path = path::create(c.path.c_str()).transform([](auto p) { return p.path.owned(); });
-                return Connection{ ctx, connection_strategy::Proxy{ path, c.port } };
+                return Connection{ ctx, connection_strategy::Proxy{ c.abi, c.port } };
             },
         });
     }
@@ -343,6 +342,7 @@ namespace madbfs
                     return Unexpect{ Errc::invalid_argument };
                 }
                 result[i] = std::move(*path);
+                continue;
             }
 
             strings[i].clear();
@@ -357,7 +357,7 @@ namespace madbfs
             result[i] = std::move(*path);
         }
 
-        return std::move(result);
+        return result;
     }
 
     AExpect<json::value> Madbfs::ipc_handler(ipc::FsOp op)

@@ -29,5 +29,5 @@ add_subdirectory(madbfs-msg)
 if(MADBFS_ENABLE_TESTS)
   message(STATUS "madbfs: Building tests")
   enable_testing()
-  add_subdirectory(test)
+  add_subdirectory(test)    # add custom target: build_tests
 endif()
