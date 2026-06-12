@@ -1,6 +1,8 @@
 find_package(ut)
 include(cmake/fetched-libs.cmake)
 
+add_custom_target(build_tests)
+
 function(create_test_exe name)
   add_executable(${name} ${CMAKE_CURRENT_SOURCE_DIR}/${name}.cpp)
   target_link_libraries(${name} PRIVATE madbfs-lib Boost::ut fetch::dtlx)
@@ -17,6 +19,8 @@ function(create_test_exe name)
   if(MADBFS_AUTORUN_TESTS)
     add_custom_command(TARGET ${name} POST_BUILD COMMAND $<TARGET_FILE:${name}>)
   endif()
+
+  add_dependencies(build_tests ${name})
 endfunction()
 
 enable_testing()

@@ -32,9 +32,10 @@ target_include_directories(madbfs-lib PUBLIC include)
 target_compile_options(madbfs-lib PRIVATE -Wall -Wextra -Wconversion)
 target_compile_definitions(
   madbfs-lib
-  PRIVATE
-    MADBFS_SERVER_BINARY_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../madbfs-server/build/android-all-release
+  PRIVATE MADBFS_SERVER_BINARY_DIR=${MADBFS_SERVER_BINARY_DIR}
 )
+
+message(STATUS "madbfs-server binary dir: ${MADBFS_SERVER_BINARY_DIR}")
 
 add_executable(madbfs src/main.cpp)
 target_link_libraries(madbfs PRIVATE madbfs-lib)
