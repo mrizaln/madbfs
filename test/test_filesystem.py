@@ -45,7 +45,6 @@ TEST_FILE = CURRENT_DIR / "test_file.txt"
 TEST_DATA = bytearray()
 PROJECT_ROOT = CURRENT_DIR / ".."
 BINARY_PATH = PROJECT_ROOT / "build/Release/madbfs/madbfs"
-SERVER_PATH = PROJECT_ROOT / "madbfs-server/build/android-all-release/madbfs-server"
 
 READDIR_BIG_SIZE = 200
 
@@ -150,10 +149,6 @@ def environ(request) -> tuple[Environ, Case]:
     abi = run(cmd, check=True, stdout=PIPE)
     abi = abi.stdout.decode("utf-8").strip()
 
-    server_path = SERVER_PATH.parent / f"{SERVER_PATH.name}-{abi}"
-    if request.param.use_server and not server_path.exists():
-        pytest.fail(f"server path '{server_path}' doesn't exists. compile it first!")
-
     mount_point = CURRENT_DIR / "mount"
 
     if not mount_point.exists():
@@ -170,8 +165,9 @@ def environ(request) -> tuple[Environ, Case]:
         "-f",
         f"--log-file={log_path}",
         f"--log-level={DEFAULT_LOG_LEVEL}",
-        f"--server={server_path}" if request.param.use_server else "--no-server",
     ]
+    if not request.param.use_server:
+        mount_cmd.append("--no-server")
 
     if not request.param.use_cache:
         mount_cmd.append("--no-cache")
