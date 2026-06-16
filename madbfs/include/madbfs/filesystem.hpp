@@ -1,6 +1,6 @@
 #pragma once
 
-#include "madbfs/cache.hpp"
+#include "madbfs/cache/lru_cache.hpp"
 #include "madbfs/file_handle_store.hpp"
 #include "madbfs/node.hpp"
 #include "madbfs/path.hpp"
@@ -43,11 +43,12 @@ namespace madbfs
         /**
          * @brief Create a new filesystem.
          *
+         * @param ctx Async context.
          * @param connection Reference to active conneciton to device.
          * @param caching Cache parameters or empty for no caching.
          * @param ttl Filesystem node's stat expiration time before re-fetching.
          */
-        Filesystem(Connection& connection, Opt<Caching> caching, Opt<Seconds> ttl);
+        Filesystem(async::Context& ctx, Connection& connection, Opt<Caching> caching, Opt<Seconds> ttl);
 
         /**
          * @brief Destroy filesystem.
@@ -105,9 +106,11 @@ namespace madbfs
         Expect<void> symlink(path::Path path, Str target);
 
         /**
-         * @brief Initialize root directory by getting its stat early.
+         * @brief Initialize the filesystem.
+         *
+         * This initializes the cache and fetch root directory stat.
          */
-        AExpect<void> initialize_root();
+        AExpect<void> initialize();
 
         /**
          * @brief Shut down the filesystem and stop every async operation.
@@ -133,12 +136,12 @@ namespace madbfs
         /**
          * @brief Get cache structure.
          */
-        const Opt<Cache>& cache() const { return m_cache; }
+        const Opt<cache::LruCache>& cache() const { return m_cache; }
 
         /**
          * @brief Get cache structure.
          */
-        Opt<Cache>& cache() { return m_cache; }
+        Opt<cache::LruCache>& cache() { return m_cache; }
 
         /**
          * @brief Get root node.
@@ -210,9 +213,9 @@ namespace madbfs
 
         Connection& m_connection;
 
-        Node            m_root;
-        Opt<Cache>      m_cache;
-        FileHandleStore m_handles;
+        Node                 m_root;
+        Opt<cache::LruCache> m_cache;
+        FileHandleStore      m_handles;
 
         Opt<Seconds> m_ttl              = std::nullopt;
         bool         m_root_initialized = false;

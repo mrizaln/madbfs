@@ -28,19 +28,26 @@ namespace
            and err != std::errc::resource_unavailable_try_again;
     }
 
-    Opt<Cache> construct_cache(Connection& connection, Opt<Caching> caching)
+    Opt<cache::LruCache> construct_cache(async::Context& ctx, Connection& connection, Opt<Caching> caching)
     {
-        return caching.transform([&](auto c) { return Cache{ connection, c.page_size, c.max_pages }; });
+        return caching.transform([&](auto c) mutable {
+            return async::block(ctx, cache::LruCache::create(connection, c.page_size, c.max_pages));
+        });
     }
 }
 
 // filesystem.hpp impl
 namespace madbfs
 {
-    Filesystem::Filesystem(Connection& connection, Opt<Caching> caching, Opt<Seconds> ttl)
+    Filesystem::Filesystem(
+        async::Context& ctx,
+        Connection&     connection,
+        Opt<Caching>    caching,
+        Opt<Seconds>    ttl
+    )
         : m_connection{ connection }
         , m_root{ "/", nullptr, {}, node::Directory{} }
-        , m_cache{ construct_cache(connection, caching) }
+        , m_cache{ construct_cache(ctx, connection, caching) }
         , m_ttl{ ttl }
     {
     }
@@ -872,7 +879,7 @@ namespace madbfs
         return dir.insert(std::move(node), false).transform(sink_void);
     }
 
-    AExpect<void> Filesystem::initialize_root()
+    AExpect<void> Filesystem::initialize()
     {
         if (not std::exchange(m_root_initialized, true)) {
             if (auto stat = co_await m_connection.stat(path::Path{}); stat.has_value()) {
@@ -880,6 +887,10 @@ namespace madbfs
             } else {
                 co_return Unexpect{ stat.error() };
             }
+        }
+
+        if (m_cache) {
+            co_await m_cache->initialize();
         }
 
         co_return Expect<void>{};
