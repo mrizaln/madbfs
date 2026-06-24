@@ -192,6 +192,11 @@ def environ(request) -> tuple[Environ, Case]:
     )
 
 
+def print_madbfs_version():
+    cmd = run([BINARY_PATH, "--version"], stdout=PIPE, stderr=PIPE, text=True)
+    logger.info(f"madbfs --version: {cmd.stdout.split('\n')[0].split()[-1]}")
+
+
 def ipc_connect(serial: str) -> socket:
     sock = socket(AF_UNIX, SOCK_STREAM)
 
@@ -288,6 +293,10 @@ def os_open(name, flags):
         yield fd
     finally:
         os.close(fd)
+
+
+# test starts from here
+# --------------------
 
 
 def tst_readdir(work_dir: Path):
@@ -650,7 +659,7 @@ def tst_open_rename(work_dir: Path):
 
 # first args is there just for symmetry, it's unused
 def tst_ipc(_: str, serial: str, custom_root: bool, use_server: bool, use_cache: bool):
-    version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+    version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(-dev\+g[0-9a-f]{7})?$")
     transport = "proxy" if use_server else "adb"
     root = CUSTOM_ROOT_PATH if custom_root else "/"
     timeout = DEFAULT_TIMEOUT
@@ -810,6 +819,8 @@ def test_filesystem(environ):
         f"[serial={serial}, abi={abi}, server={use_server}, cache={use_cache}, custom_root={custom_root}, log={log_file}]"
     )
 
+    print_madbfs_version()
+
     cmd = cmd_base + [f"--serial={serial}", str(mount_point)]
     proc = Popen(cmd, stdout=PIPE, universal_newlines=True)
 
@@ -840,6 +851,8 @@ def test_filesystem(environ):
             run_time = time.perf_counter() - start_time
             logger.info(f"testing: {fn.__name__} in {run_time}s", stacklevel=2)
 
+        start_time = time.perf_counter()
+
         call(tst_readdir)
         call(tst_readdir_big)
         call(tst_open_read)
@@ -860,6 +873,8 @@ def test_filesystem(environ):
         call(tst_open_unlink)
         call(tst_open_rename)
         call(tst_ipc, serial, custom_root, use_server, use_cache)
+
+        logger.info(f"all tests complete in {time.perf_counter() - start_time}s")
     except:
         # NOTE: if tests are failing, the work_dir might not be cleaned up correctly. I
         # won't clean them up here since I might want to inspect the file in the work_dir
