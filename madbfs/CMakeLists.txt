@@ -30,9 +30,11 @@ target_link_libraries(
 )
 target_include_directories(madbfs-lib PUBLIC include)
 target_compile_options(madbfs-lib PRIVATE -Wall -Wextra -Wconversion)
-target_compile_definitions(
-  madbfs-lib
-  PRIVATE MADBFS_SERVER_BINARY_DIR=${MADBFS_SERVER_BINARY_DIR}
+
+set_source_files_properties(
+  src/embed/server.cpp
+  PROPERTIES
+    COMPILE_DEFINITIONS MADBFS_SERVER_BINARY_DIR=${MADBFS_SERVER_BINARY_DIR}
 )
 
 message(STATUS "madbfs-server binary dir: ${MADBFS_SERVER_BINARY_DIR}")
