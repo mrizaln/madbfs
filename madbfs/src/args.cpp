@@ -167,7 +167,6 @@ namespace madbfs::args
             if (opts.show_version) {
                 fmt::println("madbfs version {}", MADBFS_VERSION_FULL);
                 fmt::println("FUSE library version {}", ::fuse_pkgversion());
-                ::fuse_lowlevel_version();
                 ::fuse_opt_free_args(&args);
                 ::free(opts.mountpoint);
                 co_return ParseResult{ 0 };

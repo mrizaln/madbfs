@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/dad81c5a-993e-480d-a329-d8fc560a69de
 
 ## Motivation
 
-I want to manage my Android phone storage from my computer without using MTP (it's awful).
+I want to manage my Android phone storage from my computer without using MTP.
 
 This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbfs-rootless) project. While `adbfs-rootless` works most of the time under light load it has reliability issues. Under high load (such as when a thumbnailer service is running) `adbfs-rootless` tends to crash, making it unusable until it is forcefully unmounted and its cache cleaned.
 
@@ -99,6 +99,7 @@ These limitations lead me to decide to rebuild the project from ground up in ord
 
   - GCC or Clang (support C++23 or above, tested on GCC 15 and GCC 16)
   - CMake (version 3.22+)
+  - Ninja
   - Conan
 
   Library dependencies
@@ -114,6 +115,7 @@ These limitations lead me to decide to rebuild the project from ground up in ord
 
   - Android NDK (support C++23 or above, tested on NDK version 29 (beta 1))
   - CMake (version 3.22+)
+  - Ninja
   - Conan
 
   Library dependencies
@@ -125,33 +127,106 @@ These limitations lead me to decide to rebuild the project from ground up in ord
 
 > if you just want a prebuilt binaries, jump to [installation](#installation)
 
-Since the dependencies are managed by Conan, you need to make sure it's installed and configured correctly (consult the documentation on how to do it, [here](https://docs.conan.io/2/installation.html)) on your system.
+Since this project dependencies are managed by Conan, you need to make sure it's installed and configured correctly on your system (consult the [documentation](https://docs.conan.io/2/installation.html) on how to do it).
 
-> don't forget to run `conan profile detect` if you use Conan for the first time
+There are two CMake project that produces executables:
 
-Navigate to the root of the repository then edit [`package.sh`](./package.sh) script. This step is necessary to set the Android native app build system and its parameters to be able to compile the servers. You may change these parameters:
+- `madbfs`: produces `madbfs` and `madbfs-msg`
+- `madbfs-server`: produces multiple `madbfs-server` for each architecture Android supports
 
-> you can left the parameters unchanged if you are using Android NDK version 29 (beta 1)
+`madbfs` project is compiled once for the host machine, while `madbfs-server` is compiled multiple times for different architectures using Android NDK. `madbfs` embeds the produced `madbfs-server` in order to simplify the software usage. This requirement makes it so that the compilation step of the project is quite strict. Because of that, I have written a handy script to automate this process.
 
-- `API_LEVEL` ([see](https://apilevels.com/))
-- `COMPILER` (usually clang)
-- `COMPILER_VERSION` (_not ndk version! check by running the compiler on the NDK path_)
-
-Your `ANDROID_NDK_HOME` variable must be set before compiling and point to the appropriate Android NDK. If your `ANDROID_NDK_HOME` variable is not set, you can set it this:
+### Using script
 
 ```sh
-export ANDROID_NDK_HOME=/path/to/your/android/ndk/home/
+./build.sh    # try adding --help to this script
 ```
 
-Then you compile the project:
+In order to use this script, you are required have `ANDROID_NDK_HOME` variable defined and point to valid Android NDK.
 
-```sh
-./package.sh
-```
+The script above will produce build directories at this specified stage:
 
-> - you can optionally pass an argument to this function to specify custom conan profile ([example](.github/ci/conan-profile.ini))
+- `madbfs`: `build/<Build_type>/`
+- `madbfs-server`: `madbfs-server/build/android-<arch>-<build_type>/` and `madbfs-server/build/android-all-<build_type>/`
 
-The script above will build `madbfs-server` for all the currently supported Android ABIs (see [this](https://developer.android.com/ndk/guides/abis)). Then just after, will build `madbfs` and `madbfs-msg` (and tests). The `madbfs` client embeds all of the `madbfs-server` inside itself on compilation. The end result is a `tar.gz` file in `build/package/` directory that contains `madbfs` and `madbfs-msg`.
+> - `madbfs` executable can be obtained at `build/<Build_type>/madbfs/madbfs`
+> - `madbfs-msg` executable can be obtained at `build/<Build_type>/madbfs-msg/madbfs-msg`
+
+When the script is invoked with `--package` option, it will produce a `tar.gz` file containing `madbfs` and `madbfs-msg` and its hash at:
+
+- `build/package-<madbfs_Build_type>-<madbfs-server_Build_type>`
+
+### Manually
+
+- **`madbfs-server`**
+
+  While Conan is a package manager, it can also be used as toolchain for cross-compiling via profile. A profile for build environment and host environment is required. I used profiles at `./.github/workflows/` both for development and CI. If you read `profile-server.ini` you might notice that `settings.arch` and `conf.tools.android:ndk_path` values are not set concretely, instead it uses environment variable. This is because the profile needs to be reused for multiple architecture and not hardcode Android NDK path on the profile respectively.
+
+  > Conan uses build-host naming convention instead of host-target for cross-compilation
+
+  For this instruction, I will use the profiles above.
+
+  The first step is moving to `madbfs-server` directory from the root. Then you need to get build dependencies using Conan. At this point `ANDROID_NDK_HOME` and `MADBFS_SERVER_ARCH` (for `conf.tools.android:ndk_path` and `settings.arch` respectively) need to be define already.
+
+  Assume the `${variables}` point to valid arch, profiles, and build type (capitalized)
+
+  ```sh
+  export ANDROID_NDK_HOME=path/to/android/ndk
+  export MADBFS_SERVER_ARCH=${arch}
+
+  conan install . --build missing -pr:b "${profile_client}" -pr:h "${profile_server}" -s build_type=${build_type}
+  ```
+
+  > you can also use `-c:h tools.android:ndk_path=path/to/android/ndk` and `-s:h arch=${arch}` Conan options to specify the NDK path and arch respectively instead of environment variable
+
+  Then you can generate and compile them:
+
+  ```sh
+  cmake --preset conan-android-${arch}-${build_type,,}
+  cmake --build --preset conan-android-${arch}-${build_type,,}
+  ```
+
+  > `,,` is bash parameter expansion for lowering string case
+
+  This will produce `madbfs-server` executable at `./build/android-<arch>-<build_type>/madbfs-server`
+
+  Do this repeatedly for all supported arch.
+
+- **`madbfs` (and `madbfs-msg`)**
+
+  > This instruction will only focus on `madbfs` since `madbfs-msg` compilation is simple and doesn't need additional configuration.
+
+  First, move to the root of the project, then install the dependencies.
+
+  Assume the `${variables}` point to valid arch, profiles, and build type (capitalized)
+
+  ```sh
+  # notice that both build and host profiles point to ${profile_client} because it will be used on the build machine
+  conan install . --build missing -pr:b "${profile_client}" -pr:h "${profile_client}" "&:build_type=${build_type}" -s build_type=Release
+  ```
+
+  Then you need to prepare a directory that contains the `madbfs-server` for all architecture. The executables should be renamed to have each of their ABI (not arch): `madbfs-server-abi`. This step is required because `madbfs` expects `madbfs-server` files to have specified type but on which directory.
+
+  ```sh
+  mkdkir -p ${servers_path}
+
+  # ...
+  cp ./build/android-${arch}-${build_type,,} ${servers_path}/madbfs-server-${abi}   # for each arch
+  ```
+
+  To tell where `madbfs` can find the server files, you need to pass `MADBF_SERVER_BINARY_DIR` to CMake, which is done at generation time
+
+  ```sh
+  cmake --preset conan-${build_type,,} -D MADBFS_SERVER_BINARY_DIR="${servers_path}"
+  ```
+
+  Building `madbfs` is then just this:
+
+  ```sh
+  cmake --build --preset conan-${build_type,,}
+  ```
+
+  The executable can be found at `./build/<Build_type>/madbfs/madbfs` (and `./build/<Build_type>/madbfs-msg/madbfs-msg`)
 
 ## Installation
 
@@ -275,9 +350,7 @@ Do note that mounting subdirectory might break symbolic links since it is possib
 
 ### Specifying server and port number
 
-> only relevant if you want proxy transport support
-
-If you want the filesystem to use only use `adb` transport, use `--adb-only` flag. This flag prevents `madbfs` from pushing the server into your phone and running it. If you rather want to manually run the server yourself (for debugging purpose), use `--no-server` flag instead.
+If you want the filesystem to use only use `adb` transport, use `--adb-only` flag. This flag prevents `madbfs` from pushing the server into your phone and running it. If you rather want to manually run the server yourself (for debugging purpose for example), use `--no-server` flag instead.
 
 The proxy communicates with `madbfs` over TCP enabled by port forwarding and by default it will listen on port `23237` (`adbfs` on dial pad). If you find this port to be not suitable for your use you can always specify it with `--port` option.
 

@@ -36,7 +36,7 @@ jobs:
         ndk-version: r29
 
     - name: Build, Test, and Package
-      run: ./package.sh "$PWD/.github/ci/conan-profile.ini"
+      run: ./build.sh --package
       env:
         ANDROID_NDK_HOME: "${{ steps.setup-ndk.outputs.ndk-path }}"
         SCCACHE_GHA_ENABLED: true
@@ -47,6 +47,8 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: madbfs
-        path: ./build/package/madbfs.tar.gz
+        path: |
+          ./build/package-Release-Release/madbfs.tar.gz
+          ./build/package-Release-Release/madbfs.tar.gz.sha256
 
 # todo: add filesystem test job (requires android emulation to exist)

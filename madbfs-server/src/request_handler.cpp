@@ -14,6 +14,8 @@
 
 // android API changes: https://android.googlesource.com/platform/bionic/+/HEAD/docs/status.md
 
+using namespace madbfs;
+
 namespace
 {
     /**
@@ -21,28 +23,28 @@ namespace
      *
      * The req is used for the type information only, the value doesn't matter at all.
      */
-    madbfs::rpc::FailedResponse failed(const madbfs::rpc::IsRequest auto& req, madbfs::rpc::Status status)
+    rpc::FailedResponse failed(const rpc::IsRequest auto& req, rpc::Status status)
     {
-        return { .proc = madbfs::rpc::to_proc(req), .status = status };
+        return { .proc = rpc::to_proc(req), .status = status };
     }
 
     /**
      * @brief Get Status from errno, with extra logging.
      */
     template <fmt::formattable T>
-    madbfs::rpc::Status errno_status(
-        madbfs::Str          name,
+    rpc::Status errno_status(
+        const char*          name,
         T&&                  ident,
-        madbfs::Str          msg,
+        Str                  msg,
         std::source_location loc = std::source_location::current()
     )
     {
-        using madbfs::log::Level;
-        using madbfs::log::log_loc;
+        using log::Level;
+        using log::log_loc;
 
         auto err = errno;
-        log_loc(loc, Level::err, "{}: {} [{:}]: {}", name, msg, ident, strerror(err));
-        return static_cast<madbfs::rpc::Status>(err);
+        log::log_loc_named(loc, Level::err, name, "{} [{:}]: {}", msg, ident, strerror(err));
+        return static_cast<rpc::Status>(err);
     }
 }
 
