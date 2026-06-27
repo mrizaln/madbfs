@@ -6,12 +6,17 @@
 #include <cassert>
 #include <limits>
 
-static constexpr auto nowhere = std::numeric_limits<madbfs::usize>::max();
+namespace
+{
+    static constexpr auto nowhere = std::numeric_limits<madbfs::usize>::max();
+
+    static auto page_store_counter = std::atomic<madbfs::u32>{ 0 };
+}
 
 // page.hpp impl: Page
 namespace madbfs::cache
 {
-    Page::Page(u8* data, usize page_size)
+    Page::Page(u8* data, u32 page_size)
         : m_data{ data + page_size / 8 }                // the actual data is offset by 1/8 of page_size
         , m_dirty_map{ Span{ data, page_size / 8 } }    // the first 1/8 of page_size is for dirty map
         , m_capacity{ static_cast<u32>(page_size) }
@@ -82,8 +87,9 @@ namespace madbfs::cache
 // page.hpp impl: PageStore
 namespace madbfs::cache
 {
-    PageStore::PageStore(usize page_size, usize max_pages)
-        : m_page_size{ page_size }
+    PageStore::PageStore(u32 page_size, u32 max_pages)
+        : m_store_id{ 1 + page_store_counter.fetch_add(1, std::memory_order::relaxed) }
+        , m_page_size{ page_size }
         , m_max_pages{ max_pages }
     {
         assert(page_size % 8 == 0);
@@ -112,11 +118,12 @@ namespace madbfs::cache
         auto& node    = m_pages[m_front];
         auto  old_key = std::exchange(node.key, key);
 
-        return { .page_id = PageId{ m_front }, .key = old_key };
+        return { .page_id = PageId{ static_cast<u32>(m_front), m_store_id }, .key = old_key };
     }
 
     KeyedPage PageStore::get(PageId id, bool update_position)
     {
+        assert(id.store_id == m_store_id && "Page belongs to different PageStore!");
         assert(id.inner < m_max_pages);
 
         auto& node = m_pages[id.inner];
@@ -131,6 +138,7 @@ namespace madbfs::cache
 
     void PageStore::release(PageId id)
     {
+        assert(id.store_id == m_store_id && "Page belongs to different PageStore!");
         assert(id.inner < m_max_pages);
         m_pages[id.inner].key = std::nullopt;
     }

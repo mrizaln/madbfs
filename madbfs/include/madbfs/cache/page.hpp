@@ -14,8 +14,8 @@ namespace madbfs::cache
      */
     struct PageKey
     {
-        Id    id;
-        usize index;
+        Id    id;       // file identifier
+        usize index;    // index of the file
 
         bool operator==(const PageKey&) const = default;
     };
@@ -27,7 +27,8 @@ namespace madbfs::cache
      */
     struct PageId
     {
-        usize inner = 0;
+        u32 inner    = 0;
+        u32 store_id = 0;
     };
 
     /**
@@ -148,7 +149,7 @@ namespace madbfs::cache
          * @param data Pointer to array of bytes.
          * @param page_size The size of the page.
          */
-        Page(u8* data, usize page_size);
+        Page(u8* data, u32 page_size);
 
         u8*      m_data;
         DirtyMap m_dirty_map;
@@ -203,7 +204,7 @@ namespace madbfs::cache
          * @param page_size The number of bytes a page have in bytes.
          * @param max_pages The number of pages the storage will have.
          */
-        PageStore(usize page_size, usize max_pages);
+        PageStore(u32 page_size, u32 max_pages);
 
         /**
          * @brief Acquire new page.
@@ -258,8 +259,8 @@ namespace madbfs::cache
          */
         usize count() const;
 
-        usize page_size() const { return m_page_size; }
-        usize max_pages() const { return m_max_pages; }
+        u32 page_size() const { return m_page_size; }
+        u32 max_pages() const { return m_max_pages; }
 
     private:
         struct PageNode
@@ -281,7 +282,9 @@ namespace madbfs::cache
         /**
          * @brief Return the size of the stride of each page in the data storage (in bytes).
          */
-        usize page_stride() const { return m_page_size + m_page_size / 8; }
+        u32 page_stride() const { return m_page_size + m_page_size / 8; }
+
+        u32 m_store_id = 0;
 
         Vec<u8>       m_data;     // the bytes storage for the pages
         Vec<PageNode> m_pages;    // LRU
@@ -289,7 +292,7 @@ namespace madbfs::cache
         usize m_front = 0;
         usize m_back  = 0;
 
-        usize m_page_size = 0;
-        usize m_max_pages = 0;
+        u32 m_page_size = 0;
+        u32 m_max_pages = 0;
     };
 }
