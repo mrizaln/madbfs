@@ -126,7 +126,7 @@ namespace
 
         AExpect<u64> get_write_fd_or_open(Connection& connection)
         {
-            if (not read_fd) {
+            if (not write_fd) {
                 co_return (co_await connection.open(path, OpenMode::Write))    //
                     .transform([&](u64 fd) { return write_fd.emplace(fd); });
             }
@@ -370,16 +370,34 @@ namespace madbfs::cache
                 co_return Unexpect{ Errc::bad_file_descriptor };
             }
 
-            auto work = [&](usize idx) { return read_at(*entry, out, id, idx, first, last, offset); };
-            auto res  = co_await async::wait_all(indices | sv::transform(work));
+            // NOTE: To parallelize operation using `wait_all()`, all operation being performed must be safe
+            // to be parallelized. For example, since the cache opens file lazily, `read_at()` might invoke
+            // `open()` of `Connection`. The `open()` invocation must be done once, that is the reason for
+            // this cache and it being lazy. But, because of this parallel invocation, the invocation can be
+            // done more than once. Contract is not fulfilled. It will lead to "fd leak" on the device where
+            // fd open and close is imbalanced. It will lead to EMFILE (24): Too many open files.
+
+            // auto work = [&](usize idx) { return read_at(*entry, out, id, idx, first, last, offset); };
+            // auto res  = co_await async::wait_all(indices | sv::transform(work));
+            //
+            // auto read = 0uz;
+            // for (auto&& res : res) {
+            //     if (not res) {
+            //         log_e(__func__, "failed to read [{}]: {}", id.inner(), err_msg(res.error()));
+            //         co_return Unexpect{ res.error() };
+            //     }
+            //     read += res.value();
+            // }
 
             auto read = 0uz;
-            for (auto&& res : res) {
+            for (auto index : indices) {
+                auto res = co_await read_at(*entry, out, id, index, first, last, offset);
                 if (not res) {
                     log_e(__func__, "failed to read [{}]: {}", id.inner(), err_msg(res.error()));
                     co_return Unexpect{ res.error() };
+                } else {
+                    read += res.value();
                 }
-                read += res.value();
             }
 
             co_return read;
@@ -409,19 +427,30 @@ namespace madbfs::cache
             }
             entry->dirty = true;
 
-            auto work = [&](usize idx) { return write_at(*entry, in, id, idx, first, last, offset); };
-            auto res  = co_await async::wait_all(indices | sv::transform(work));
+            // NOTE: read note on `handle_read()`
+
+            // auto work = [&](usize idx) { return write_at(*entry, in, id, idx, first, last, offset); };
+            // auto res  = co_await async::wait_all(indices | sv::transform(work));
+            //
+            // auto written = 0uz;
+            // for (auto&& res : res) {
+            //     if (not res) {
+            //         log_e(__func__, "failed to write [{}]: {}", id.inner(), err_msg(res.error()));
+            //         co_return Unexpect{ res.error() };
+            //     }
+            //     written += res.value();
+            // }
 
             auto written = 0uz;
-            for (auto&& res : res) {
+            for (auto index : indices) {
+                auto res = co_await write_at(*entry, in, id, index, first, last, offset);
                 if (not res) {
                     log_e(__func__, "failed to write [{}]: {}", id.inner(), err_msg(res.error()));
                     co_return Unexpect{ res.error() };
+                } else {
+                    written += res.value();
                 }
-                written += res.value();
             }
-
-            log_d(__func__, "write {} bytes", written);
 
             co_return written;
         }
@@ -728,6 +757,10 @@ namespace madbfs::cache
          */
         AExpect<usize> handle_set_page_size(usize new_page_size)
         {
+            if (m_pages.page_size() == new_page_size) {
+                co_return 0;
+            }
+
             std::ignore = co_await handle_invalidate_all();    // already wait busy all here
 
             m_pages = PageStore{ static_cast<u32>(new_page_size), m_pages.max_pages() };
@@ -745,6 +778,10 @@ namespace madbfs::cache
          */
         AExpect<usize> handle_set_max_pages(usize new_max_pages)
         {
+            if (m_pages.max_pages() == new_max_pages) {
+                co_return 0;
+            }
+
             std::ignore = co_await handle_invalidate_all();    // already wait busy all here
 
             m_pages = PageStore{ m_pages.page_size(), static_cast<u32>(new_max_pages) };
