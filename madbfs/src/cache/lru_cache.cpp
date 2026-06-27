@@ -166,7 +166,7 @@ namespace madbfs::cache
         Impl(net::any_io_executor exec, Connection& connection, usize page_size, usize max_pages)
             : m_connection{ connection }
             , m_channel{ exec }
-            , m_pages{ page_size, max_pages }
+            , m_pages{ static_cast<u32>(page_size), static_cast<u32>(max_pages) }
         {
         }
 
@@ -558,7 +558,7 @@ namespace madbfs::cache
          */
         AExpect<usize> handle_invalidate_one(Id id, bool should_flush)
         {
-            // TODO: wait busy but file level
+            co_await wait_busy_file(id);
 
             log_i(__func__, "invalidate one: {}", id.inner());
 
@@ -585,12 +585,13 @@ namespace madbfs::cache
          *
          * This function never fails.
          *
+         * Removes all entries in lookup tables and release all pages.
+         *
          * see: `LruCache::invalidate_all()`
          */
         AExpect<usize> handle_invalidate_all()
         {
-            // TODO: wait busy all
-
+            co_await wait_busy_all();
             m_busy_queue.clear();
 
             for (auto id : m_table | sv::keys) {
@@ -618,7 +619,7 @@ namespace madbfs::cache
          */
         AExpect<usize> handle_invalidate_fds(bool close)
         {
-            // TODO: wait busy all
+            co_await wait_busy_all();
 
             auto to_close = Vec<u64>{};
 
@@ -654,11 +655,10 @@ namespace madbfs::cache
          */
         AExpect<usize> handle_clean_stale_fds()
         {
-            // TODO: wait busy all
-
             using namespace std::chrono_literals;
 
-            // TODO: made these two members so no repeated allocation?
+            co_await wait_busy_all();
+
             auto finished_fds    = std::vector<u64>{};
             auto stale_to_remove = std::vector<u64>{};
 
@@ -739,9 +739,9 @@ namespace madbfs::cache
         {
             std::ignore = co_await handle_invalidate_all();    // already wait busy all here
 
-            // TODO: implement
-
+            m_pages = PageStore{ static_cast<u32>(new_page_size), m_pages.max_pages() };
             log_i(__func__, "page size changed to: {}", new_page_size);
+
             co_return 0;
         }
 
@@ -756,9 +756,9 @@ namespace madbfs::cache
         {
             std::ignore = co_await handle_invalidate_all();    // already wait busy all here
 
-            // TODO: implement
-
+            m_pages = PageStore{ m_pages.page_size(), static_cast<u32>(new_max_pages) };
             log_i(__func__, "max pages can be stored changed to: {}", new_max_pages);
+
             co_return 0;
         }
 
@@ -823,26 +823,27 @@ namespace madbfs::cache
                 co_return Unexpect{ ptr.error() };
             }
 
+            const auto page_size = static_cast<usize>(m_pages.page_size());
+
             auto& page = **ptr;
 
             auto local_offset = 0uz;
-            auto local_size   = m_pages.page_size();
+            auto local_size   = page_size;
 
             if (index == first) {
-                local_offset = static_cast<usize>(offset) % m_pages.page_size();
+                local_offset = static_cast<usize>(offset) % page_size;
                 local_size   = local_size - local_offset;
             }
 
             if (index == last) {
-                auto off    = static_cast<usize>(offset) % m_pages.page_size();
-                local_size  = (out.size() + off - 1) % m_pages.page_size() + 1;
+                auto off    = static_cast<usize>(offset) % page_size;
+                local_size  = (out.size() + off - 1) % page_size + 1;
                 local_size -= local_offset;
             }
 
             auto out_off = 0uz;
             if (index >= first + 1) {
-                out_off = (index - first) * m_pages.page_size()
-                        - static_cast<usize>(offset) % m_pages.page_size();
+                out_off = (index - first) * page_size - static_cast<usize>(offset) % page_size;
             }
 
             auto out_span = Span{ out.data() + out_off, local_size };
@@ -936,26 +937,27 @@ namespace madbfs::cache
                 co_return Unexpect{ ptr.error() };
             }
 
+            const auto page_size = static_cast<usize>(m_pages.page_size());
+
             auto& page = **ptr;
 
             auto local_offset = 0uz;
-            auto local_size   = m_pages.page_size();
+            auto local_size   = page_size;
 
             if (index == first) {
-                local_offset = static_cast<usize>(offset) % m_pages.page_size();
+                local_offset = static_cast<usize>(offset) % page_size;
                 local_size   = local_size - local_offset;
             }
 
             if (index == last) {
-                auto off    = static_cast<usize>(offset) % m_pages.page_size();
-                local_size  = (in.size() + off - 1) % m_pages.page_size() + 1;
+                auto off    = static_cast<usize>(offset) % page_size;
+                local_size  = (in.size() + off - 1) % page_size + 1;
                 local_size -= local_offset;
             }
 
             auto in_off = 0uz;
             if (index >= first + 1) {
-                in_off = (index - first) * m_pages.page_size()
-                       - static_cast<usize>(offset) % m_pages.page_size();
+                in_off = (index - first) * page_size - static_cast<usize>(offset) % page_size;
             }
 
             auto in_span = Span{ in.data() + in_off, local_size };
@@ -1154,6 +1156,30 @@ namespace madbfs::cache
                 }
             }
             co_return Expect<void>{};
+        }
+
+        /**
+         * @brief Wait for the promise if the specified file (via id) exists.
+         *
+         * @param id Unique identifier for file.
+         */
+        Await<void> wait_busy_file(Id id)
+        {
+            for (auto [key, fut] : m_busy_queue) {
+                if (key.id == id) {
+                    co_await fut.async_wait();    // let's just assume every page futures success
+                }
+            }
+        }
+
+        /**
+         * @brief Wait all busy operations.
+         */
+        Await<void> wait_busy_all()
+        {
+            for (auto [key, fut] : m_busy_queue) {
+                co_await fut.async_wait();    // let's just assume every page futures success
+            }
         }
 
         /**
