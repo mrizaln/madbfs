@@ -585,7 +585,7 @@ namespace madbfs::cache
          *
          * This function never fails.
          *
-         * Removes all entries in lookup tables and release all pages.
+         * Remove and release all page entries in lookup table.
          *
          * see: `LruCache::invalidate_all()`
          */
@@ -594,15 +594,15 @@ namespace madbfs::cache
             co_await wait_busy_all();
             m_busy_queue.clear();
 
-            for (auto id : m_table | sv::keys) {
+            for (auto& [id, entry] : m_table) {
                 if (auto res = co_await handle_flush(id); not res) {
                     log_e(__func__, "failed to flush {}: {}", id.inner(), err_msg(res.error()));
                 }
+                entry.pages.clear();
             }
 
             std::ignore = co_await handle_invalidate_fds(true);
 
-            m_table.clear();
             m_pages.release_all();
 
             co_return 0;
