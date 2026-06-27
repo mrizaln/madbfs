@@ -558,8 +558,6 @@ namespace madbfs::cache
          */
         AExpect<usize> handle_invalidate_one(Id id, bool should_flush)
         {
-            co_await wait_busy_file(id);
-
             log_i(__func__, "invalidate one: {}", id.inner());
 
             if (should_flush) {
@@ -591,9 +589,6 @@ namespace madbfs::cache
          */
         AExpect<usize> handle_invalidate_all()
         {
-            co_await wait_busy_all();
-            m_busy_queue.clear();
-
             for (auto& [id, entry] : m_table) {
                 if (auto res = co_await handle_flush(id); not res) {
                     log_e(__func__, "failed to flush {}: {}", id.inner(), err_msg(res.error()));
@@ -619,8 +614,6 @@ namespace madbfs::cache
          */
         AExpect<usize> handle_invalidate_fds(bool close)
         {
-            co_await wait_busy_all();
-
             auto to_close = Vec<u64>{};
 
             for (auto& entry : m_table | sv::values) {
@@ -656,8 +649,6 @@ namespace madbfs::cache
         AExpect<usize> handle_clean_stale_fds()
         {
             using namespace std::chrono_literals;
-
-            co_await wait_busy_all();
 
             auto finished_fds    = std::vector<u64>{};
             auto stale_to_remove = std::vector<u64>{};
@@ -863,10 +854,6 @@ namespace madbfs::cache
          */
         AExpect<Page*> lookup_page_for_read(FileEntry& entry, PageKey key)
         {
-            if (auto res = co_await wait_busy(key); not res) {
-                co_return Unexpect{ res.error() };
-            }
-
             // cache hit
             if (auto it = entry.pages.find(key.index); it != entry.pages.end()) {
                 auto [page, _] = m_pages.get(it->second, true);
@@ -879,19 +866,13 @@ namespace madbfs::cache
                 co_return Unexpect{ fd.error() };
             }
 
-            auto promise         = co_await register_busy(key);
             auto [page_id, page] = co_await acquire_or_evict(key);
 
             auto offset = static_cast<off_t>(key.index * m_pages.page_size());
             auto len    = co_await on_miss(*fd, page.buf(), offset);
 
             if (not len) {
-                promise.set_value(len.error());
-                m_busy_queue.erase(key);
                 co_return Unexpect{ len.error() };
-            } else if (not m_busy_queue.contains(key)) {
-                promise.set_value(Errc::operation_canceled);
-                co_return Unexpect{ Errc::operation_canceled };
             }
 
             // since I manually written into page buffer, I need to set the size manually as well
@@ -899,9 +880,6 @@ namespace madbfs::cache
             page.set_size(static_cast<u32>(total));
 
             entry.pages.emplace(key.index, page_id);
-
-            promise.set_value(Errc{});
-            m_busy_queue.erase(key);
 
             co_return &page;
         }
@@ -975,10 +953,6 @@ namespace madbfs::cache
          */
         AExpect<Page*> lookup_page_for_write(FileEntry& entry, PageKey key)
         {
-            if (auto res = co_await wait_busy(key); not res) {
-                co_return Unexpect{ res.error() };
-            }
-
             // cache hit
             if (auto it = entry.pages.find(key.index); it != entry.pages.end()) {
                 auto [page, _] = m_pages.get(it->second, true);
@@ -1006,10 +980,6 @@ namespace madbfs::cache
         {
             log_t(__func__, "flush: [id={}|idx={}]", key.id.inner(), key.index);
 
-            if (auto res = co_await wait_busy(key); not res) {
-                co_return Unexpect{ res.error() };
-            }
-
             // when a flush operation of this key was inflight and then there is another flush operation of
             // this key, after the wait_busy() above completes, the page won't be dirty anymore, the latter
             // operation must return immediately
@@ -1017,16 +987,11 @@ namespace madbfs::cache
                 co_return Expect<void>{};
             }
 
-            auto promise = co_await register_busy(key);
-
             if (page.is_fully_dirty()) {
                 auto off = key.index * m_pages.page_size();
                 auto res = co_await on_flush(fd, page.buf(), static_cast<off_t>(off));
 
                 page.clear_dirty();
-                promise.set_value(res ? Errc{} : res.error());
-                m_busy_queue.erase(key);
-
                 co_return res.transform(sink_void);
             }
 
@@ -1037,17 +1002,11 @@ namespace madbfs::cache
                 auto span = buf.subspan(start, end - start);
 
                 if (auto res = co_await on_flush(fd, span, static_cast<off_t>(off)); not res) {
-                    promise.set_value(res.error());
-                    m_busy_queue.erase(key);
-
                     co_return Unexpect{ res.error() };
                 }
             }
 
             page.clear_dirty();
-            promise.set_value(Errc{});
-            m_busy_queue.erase(key);
-
             co_return Expect<void>{};
         }
 
@@ -1129,60 +1088,6 @@ namespace madbfs::cache
         }
 
         /**
-         * @brief Mark the key as busy and creates a promise for it.
-         *
-         * @param key Unique key identifying page of file.
-         */
-        Await<saf::promise<Errc>> register_busy(PageKey key)
-        {
-            auto promise = saf::promise<Errc>{ co_await async::current_executor() };
-            auto future  = promise.get_future().share();
-            m_busy_queue.emplace(key, std::move(future));
-            co_return promise;
-        }
-
-        /**
-         * @brief Wait for the promise of the specified key if exists.
-         *
-         * @param key Unique key identifying page of file.
-         */
-        AExpect<void> wait_busy(PageKey key)
-        {
-            if (auto queued = m_busy_queue.find(key); queued != m_busy_queue.end()) {
-                auto fut = queued->second;
-                co_await fut.async_wait();
-                if (auto err = fut.get(); static_cast<bool>(err)) {
-                    co_return Unexpect{ err };
-                }
-            }
-            co_return Expect<void>{};
-        }
-
-        /**
-         * @brief Wait for the promise if the specified file (via id) exists.
-         *
-         * @param id Unique identifier for file.
-         */
-        Await<void> wait_busy_file(Id id)
-        {
-            for (auto [key, fut] : m_busy_queue) {
-                if (key.id == id) {
-                    co_await fut.async_wait();    // let's just assume every page futures success
-                }
-            }
-        }
-
-        /**
-         * @brief Wait all busy operations.
-         */
-        Await<void> wait_busy_all()
-        {
-            for (auto [key, fut] : m_busy_queue) {
-                co_await fut.async_wait();    // let's just assume every page futures success
-            }
-        }
-
-        /**
          * @brief Get a new page from the LRU or evict old ones.
          *
          * @param key A key of the new page.
@@ -1204,8 +1109,6 @@ namespace madbfs::cache
 
         PageStore   m_pages;    // page storage as well as LRU
         LookupTable m_table;    // lookup table for fast page access
-
-        BusyQueue m_busy_queue;    // pages that are still pulling data
 
         Vec<Tup<Id, FdKind>> m_stale_fds;
     };
