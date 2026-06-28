@@ -84,6 +84,33 @@ namespace madbfs::cache
         Span<u8> buf();
 
         /**
+         * @brief Check whether the content of the page is synced with file on the device.
+         *
+         * There may be a case where the content of the page is not fully indicative of the content of file on
+         * the device. This is the case when you write at the middle of an existing file. In order to simplify
+         * writes, you might allocate a new page filled with zeros and only filled some with data. These
+         * zeroed-out data are not the reality of the content of the file itself, but just placeholder. You
+         * then need to sync the data when a read is performed, replaced the zeroes with actual data.
+         *
+         * A synced page can be defined as a page that has all the non-dirty data be indicative of the content
+         * of the corresponding file on the device at specified page (block).
+         *
+         * This flag is actually not really modifying anything on the isntance of the Page. You are
+         * responsible for setting this flag. I decided to place it here as it is the most appropriate place.
+         *
+         * The default value of this flag is `false`. But the value when you `acquire()` them is whatever the
+         * previous value of the flag on that page.
+         */
+        bool is_synced() const { return m_synced; }
+
+        /**
+         * @brief Set whether the content of the page is already synced with file on the device.
+         *
+         * @param value Value of the flag.
+         */
+        void set_synced(bool value) { m_synced = value; }
+
+        /**
          * @brief Check if the page has dirty regions.
          *
          * Use `iter_dirty()` to iterate over the dirty regions.
@@ -157,6 +184,7 @@ namespace madbfs::cache
         u32 m_size     = 0;
         u32 m_capacity = 0;    // page size
 
+        bool m_synced      = false;    // indicate that the page content is synced with file on device
         bool m_dirty       = false;
         bool m_fully_dirty = false;
     };
@@ -218,7 +246,8 @@ namespace madbfs::cache
          *
          * The `Page` returned may be an old `Page` that has data from previous usage (use the key to identify
          * it). If you want to zeroes the data, you need to do that manually (setting the size to zero, then
-         * truncate to the desired size is one way to do it).
+         * truncate to the desired size is one way to do it). If you don't want to modify the size of the page
+         * then you could write to the buffer directly via `Page::buf()`.
          */
         KeyedPageId acquire(Opt<PageKey> key);
 

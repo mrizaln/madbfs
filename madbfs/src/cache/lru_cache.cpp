@@ -76,7 +76,6 @@ namespace
 
     using Channel     = async::Channel<Work>;
     using LookupTable = std::unordered_map<Id, FileEntry>;
-    using BusyQueue   = std::unordered_map<PageKey, saf::shared_future<Errc>>;
 
     /**
      * @class LookupEntry
@@ -761,7 +760,7 @@ namespace madbfs::cache
                 co_return 0;
             }
 
-            std::ignore = co_await handle_invalidate_all();    // already wait busy all here
+            std::ignore = co_await handle_invalidate_all();
 
             m_pages = PageStore{ static_cast<u32>(new_page_size), m_pages.max_pages() };
             log_i(__func__, "page size changed to: {}", new_page_size);
@@ -782,7 +781,7 @@ namespace madbfs::cache
                 co_return 0;
             }
 
-            std::ignore = co_await handle_invalidate_all();    // already wait busy all here
+            std::ignore = co_await handle_invalidate_all();
 
             m_pages = PageStore{ m_pages.page_size(), static_cast<u32>(new_max_pages) };
             log_i(__func__, "max pages can be stored changed to: {}", new_max_pages);
@@ -881,20 +880,58 @@ namespace madbfs::cache
         }
 
         /**
+         * @brief Sync the content of the page with the file on the device.
+         *
+         * @param page The page to be synced.
+         *
+         * To sync the page means to write all the dirty blocks.
+         */
+        AExpect<void> sync_page(FileEntry& entry, Page& page, PageKey key)
+        {
+            if (not page.is_dirty()) {
+                co_return Expect<void>{};
+            }
+
+            auto wlock = scoped_increment(entry.write_inflight);
+            if (auto fd = co_await entry.get_write_fd_or_open(m_connection); not fd) {
+                co_return Unexpect{ fd.error() };
+            } else if (auto res = co_await flush_at(*fd, page, key); not res) {
+                co_return Unexpect{ res.error() };
+            }
+
+            co_return Expect<void>{};
+        }
+
+        /**
          * @brief Loo kup for a page or evict an old one to be used for read operation.
          *
          * @param entry File entry information on the lookup table.
          * @param key Unique key identifying a file and page index to be used for read operation.
-         *
-         * This function will wait for "busy" status to be gone on the specified key, then register a "busy"
-         * status for using the same key if the lookup missed (cache miss).
          */
         AExpect<Page*> lookup_page_for_read(FileEntry& entry, PageKey key)
         {
+            auto  page_id  = Opt<PageId>{};
+            Page* page_ptr = nullptr;    // C++ comittee stupidest decision: not allowing optional reference
+
             // cache hit
             if (auto it = entry.pages.find(key.index); it != entry.pages.end()) {
                 auto [page, _] = m_pages.get(it->second, true);
-                co_return &page;
+                if (page.is_synced()) {
+                    co_return &page;
+                }
+
+                log_t(__func__, "page is not synced [id={}|idx={}]", key.id.inner(), key.index);
+
+                // a page that hasn't been synced can be said as cache miss
+
+                // TODO: maybe create another map that tracks whether each bytes are synced to the file on the
+                // device, then only pull those that are not synced? this requires additional 1/8 th of memory
+                // though. See the current Page implementation.
+
+                if (auto res = co_await sync_page(entry, page, key); not res) {
+                    co_return Unexpect{ res.error() };
+                }
+                page_ptr = &page;
             }
 
             // cache miss
@@ -903,10 +940,14 @@ namespace madbfs::cache
                 co_return Unexpect{ fd.error() };
             }
 
-            auto [page_id, page] = co_await acquire_or_evict(key);
+            if (not page_ptr) {
+                auto [id, page] = co_await acquire_or_evict(key);
+                page_id         = id;
+                page_ptr        = &page;
+            }
 
             auto offset = static_cast<off_t>(key.index * m_pages.page_size());
-            auto len    = co_await on_miss(*fd, page.buf(), offset);
+            auto len    = co_await on_miss(*fd, page_ptr->buf(), offset);
 
             if (not len) {
                 co_return Unexpect{ len.error() };
@@ -914,11 +955,14 @@ namespace madbfs::cache
 
             // since I manually written into page buffer, I need to set the size manually as well
             auto total = static_cast<usize>(offset) + *len;
-            page.set_size(static_cast<u32>(total));
+            page_ptr->set_size(static_cast<u32>(total));
 
-            entry.pages.emplace(key.index, page_id);
+            if (page_id) {
+                entry.pages.emplace(key.index, *page_id);
+                page_ptr->set_synced(true);
+            }
 
-            co_return &page;
+            co_return page_ptr;
         }
 
         /**
@@ -999,6 +1043,7 @@ namespace madbfs::cache
             // cache miss
             auto [page_id, page] = co_await acquire_or_evict(key);
             entry.pages.emplace(key.index, page_id);
+            page.set_synced(false);
 
             co_return &page;
         }
@@ -1009,24 +1054,20 @@ namespace madbfs::cache
          * @param fd Real file descriptor of file on the device.
          * @param page The page to be flushed.
          * @param key The associated unique key of the page that will be flushed.
-         *
-         * As like `lookup_page_for_read()`, this function will wait for "busy" status to be gone and then
-         * register its own "busy" status using the same key.
          */
         AExpect<void> flush_at(u64 fd, Page& page, PageKey key)
         {
-            log_t(__func__, "flush: [id={}|idx={}]", key.id.inner(), key.index);
-
-            // when a flush operation of this key was inflight and then there is another flush operation of
-            // this key, after the wait_busy() above completes, the page won't be dirty anymore, the latter
-            // operation must return immediately
             if (not page.is_dirty()) {
                 co_return Expect<void>{};
             }
 
+            log_t(__func__, "flush: [id={}|idx={}]", key.id.inner(), key.index);
+
             if (page.is_fully_dirty()) {
                 auto off = key.index * m_pages.page_size();
                 auto res = co_await on_flush(fd, page.buf(), static_cast<off_t>(off));
+
+                log_t(__func__, "flush: [id={}|idx={}] fully", key.id.inner(), key.index);
 
                 page.clear_dirty();
                 co_return res.transform(sink_void);
@@ -1034,9 +1075,13 @@ namespace madbfs::cache
 
             auto buf = page.buf();
 
+            log_t(__func__, "flush: [id={}|idx={}] partially", key.id.inner(), key.index);
+
             for (auto [start, end] : page.iter_dirty()) {
                 auto off  = key.index * m_pages.page_size() + start;
                 auto span = buf.subspan(start, end - start);
+
+                log_t(__func__, "flush: [id={}|idx={}] span=[{}, {})", key.id.inner(), key.index, start, end);
 
                 if (auto res = co_await on_flush(fd, span, static_cast<off_t>(off)); not res) {
                     co_return Unexpect{ res.error() };
@@ -1138,6 +1183,7 @@ namespace madbfs::cache
                 co_await evict(page, *old_key);
             }
 
+            sr::fill(page.buf(), 0);    // zeroes the page
             co_return Pair<PageId, Page&>{ id, page };
         }
 
