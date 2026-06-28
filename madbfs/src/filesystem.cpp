@@ -642,6 +642,11 @@ namespace madbfs
             co_return Unexpect{ may_file.error() };
         }
 
+        // flush first
+        if (m_cache) {
+            std::ignore = co_await m_cache->flush(may_node->get().id());
+        }
+
         if (auto res = co_await m_connection.truncate(path, size); not res) {
             co_return Unexpect{ res.error() };
         }
