@@ -254,7 +254,7 @@ namespace madbfs
         , m_work_guard{ m_async_ctx.get_executor() }
         , m_work_thread{ [this] { work_thread_function(m_async_ctx); } }
         , m_connection{ prepare_connection(m_async_ctx, connection) }
-        , m_fs{ m_connection, caching, ttl }
+        , m_fs{ m_async_ctx, m_connection, caching, ttl }
         , m_ipc{ create_ipc(m_async_ctx) }
         , m_watchdog_timer{ m_async_ctx }
         , m_reaper_timer{ m_async_ctx }
@@ -286,8 +286,8 @@ namespace madbfs
             }
         });
 
-        if (auto result = async::block(m_async_ctx, m_fs.initialize_root()); not result) {
-            log_c(__func__, "Failed to initialize root");
+        if (auto result = async::block(m_async_ctx, m_fs.initialize()); not result) {
+            log_c(__func__, "Failed to initialize filesystem");
         }
     }
 

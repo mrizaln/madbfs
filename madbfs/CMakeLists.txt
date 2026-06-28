@@ -11,7 +11,6 @@ target_sources(
   PRIVATE
     src/adb.cpp
     src/args.cpp
-    src/cache.cpp
     src/cmd.cpp
     src/connection.cpp
     src/file_handle_store.cpp
@@ -23,6 +22,9 @@ target_sources(
     src/transport/adb_transport.cpp
     src/transport/proxy_transport.cpp
     src/embed/server.cpp
+    src/cache/dirty_map.cpp
+    src/cache/page.cpp
+    src/cache/lru_cache.cpp
 )
 target_link_libraries(
   madbfs-lib
