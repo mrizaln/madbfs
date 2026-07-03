@@ -75,7 +75,7 @@ namespace madbfs::cache
     private:
         Span<const u8>  m_bits    = {};
         Opt<DirtyRange> m_storage = std::nullopt;
-        usize          m_index   = 0;
+        usize           m_index   = 0;
     };
 
     /**
@@ -94,6 +94,8 @@ namespace madbfs::cache
          * @param bits Contiguous byte array.
          *
          * The buffer must live for the entire lifetime of this instance.
+         *
+         * The buffer size must be divisible by 8.
          */
         DirtyMap(Span<u8> bits);
 

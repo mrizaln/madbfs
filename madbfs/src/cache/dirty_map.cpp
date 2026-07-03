@@ -1,10 +1,14 @@
 #include "madbfs/cache/dirty_map.hpp"
 
 #include <cassert>
+#include <climits>
 #include <ranges>
+
+static_assert(CHAR_BIT == 8);
 
 using namespace madbfs;
 
+// helper functions/classes
 namespace
 {
     /**
@@ -13,32 +17,43 @@ namespace
      * @param start Start position.
      * @param end End position.
      */
-    template <typename Fn>
+    template <Invocable<u64&, u64> Fn>
     void modify(Span<u8> bits, usize start, usize end, Fn&& fn)
     {
         assert(end > start);
         assert(end <= bits.size() * 8);
 
-        // inclusive
-        const auto first = start / 8;
-        const auto last  = (end - 1) / 8;
+        constexpr auto max     = std::numeric_limits<u64>::max();
+        constexpr auto size    = sizeof(u64);
+        constexpr auto bitsize = size * 8;
 
-        const auto first_mask = 0xFF << start % 8;
-        const auto last_mask  = 0xFF >> (7 - (end - 1) % 8);
+        // inclusive
+        const auto first = start / bitsize;
+        const auto last  = (end - 1) / bitsize;
+
+        const auto first_mask = max << start % bitsize;
+        const auto last_mask  = max >> (bitsize - 1 - (end - 1) % bitsize);
+
+        auto apply = [&](usize index, u64 mask) {
+            auto uint = u64{};
+            std::memcpy(&uint, bits.data() + index * size, size);
+            fn(uint, mask);
+            std::memcpy(bits.data() + index * size, &uint, size);
+        };
 
         if (last == first) {
-            fn(bits[first], static_cast<u8>(first_mask & last_mask));
+            apply(first, first_mask & last_mask);
         } else {
-
-            fn(bits[first], static_cast<u8>(first_mask));
+            apply(first, first_mask);
             for (auto idx : sv::iota(first + 1, last)) {
-                fn(bits[idx], 0xFF);
+                apply(idx, max);
             }
-            fn(bits[last], static_cast<u8>(last_mask));
+            apply(last, last_mask);
         }
     }
 }
 
+// dirty_map.hpp impl: DirtyIter
 namespace madbfs::cache
 {
     DirtyIter::DirtyIter(Span<const u8> bits)
@@ -129,26 +144,28 @@ namespace madbfs::cache
     }
 }
 
+// dirty_map.hpp impl: DirtyMap
 namespace madbfs::cache
 {
     DirtyMap::DirtyMap(Span<u8> bits)
         : m_bits{ bits }
     {
+        assert(bits.size() % 8 == 0);
     }
 
     void DirtyMap::set(usize start, usize end)
     {
-        modify(m_bits, start, end, [](u8& byte, u8 mask) { byte |= mask; });
+        modify(m_bits, start, end, [](u64& bits, u64 mask) { bits |= mask; });
     }
 
     void DirtyMap::unset(usize start, usize end)
     {
-        modify(m_bits, start, end, [](u8& byte, u8 mask) { byte &= ~mask; });
+        modify(m_bits, start, end, [](u64& bits, u64 mask) { bits &= ~mask; });
     }
 
     void DirtyMap::toggle(usize start, usize end)
     {
-        modify(m_bits, start, end, [](u8& byte, u8 mask) { byte ^= mask; });
+        modify(m_bits, start, end, [](u64& bits, u64 mask) { bits ^= mask; });
     }
 
     void DirtyMap::assign(usize start, usize end, bool value)
