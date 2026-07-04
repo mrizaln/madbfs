@@ -109,7 +109,7 @@ namespace madbfs::args
             "                             (default: \"-\" for stdout)\n"
             "    --cache-size=<int>     maximum size of the cache in MiB\n"
             "                             (default: 256)\n"
-            "                             (minimum: 128)\n"
+            "                             (minimum: 32)\n"
             "                             (value will be rounded up to the next power of 2)\n"
             "                             (ignored if 'no-cache' is provided)\n"
             "    --page-size=<int>      page size for cache & transfer in KiB\n"
@@ -303,7 +303,7 @@ namespace madbfs::args
         auto caching = Opt<Caching>{};
         if (not madbfs_opt.no_cache) {
             caching = Caching{
-                .cachesize = std::max(std::bit_ceil(static_cast<usize>(madbfs_opt.cache_size)), 128uz),
+                .cachesize = std::max(std::bit_ceil(static_cast<usize>(madbfs_opt.cache_size)), 32uz),
                 .pagesize = std::clamp(std::bit_ceil(static_cast<usize>(madbfs_opt.page_size)), 64uz, 4096uz),
             };
         }
