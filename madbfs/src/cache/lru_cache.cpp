@@ -596,7 +596,7 @@ namespace madbfs::cache
 
             if (auto entry = m_table.extract(id); not entry.empty()) {
                 if (entry.mapped().dirty and not should_flush) {
-                    log_w(__func__, "[{}] is dirty but invalidated without flush!", id.inner());
+                    log_w(__func__, "[{}] is dirty but invalidated without flush!", entry.mapped().path);
                 }
                 for (auto page : entry.mapped().pages | sv::values) {
                     m_pages.release(page);
@@ -676,14 +676,16 @@ namespace madbfs::cache
          */
         AExpect<usize> handle_clean_stale_fds()
         {
-            using namespace std::chrono_literals;
+            if (m_stale_fds.empty()) {
+                co_return 0;
+            }
+
+            log_d(__func__, "start erasing stale fds [count={}]", m_stale_fds.size());
 
             auto finished_fds    = std::vector<u64>{};
             auto stale_to_remove = std::vector<u64>{};
 
-            log_d(__func__, "start erasing stale fds [count={}]", m_stale_fds.size());
-
-            // NOTE: m_stale_fds must not be operated on between yielding points, else the data might be not
+            // NOTE: m_stale_fds must not be operated-on between yielding points, else the data might be not
             // synchronized
 
             for (auto i : sv::iota(0uz, m_stale_fds.size())) {
@@ -697,14 +699,23 @@ namespace madbfs::cache
 
                 auto& entry = lookup->second;
                 auto  fd    = Opt<u64>{};
+                auto  swap  = false;
 
                 switch (kind) {
-                case FdKind::Read: entry.read_inflight == 0 ? entry.read_fd.swap(fd) : void(); break;
-                case FdKind::Write: entry.write_inflight == 0 ? entry.write_fd.swap(fd) : void(); break;
+                case FdKind::Read: {
+                    if ((swap = entry.read_inflight == 0)) {
+                        entry.read_fd.swap(fd);
+                    }
+                } break;
+                case FdKind::Write: {
+                    if ((swap = entry.write_inflight == 0)) {
+                        entry.write_fd.swap(fd);
+                    }
+                } break;
                 }
 
-                if (fd) {
-                    finished_fds.emplace_back(*fd);
+                if (swap) {
+                    fd ? finished_fds.push_back(*fd) : void();
                     stale_to_remove.push_back(i);
                 } else {
                     log_d(
@@ -721,7 +732,6 @@ namespace madbfs::cache
             for (auto i : stale_to_remove | sv::reverse) {
                 m_stale_fds.erase(m_stale_fds.begin() + static_cast<isize>(i));
             }
-            stale_to_remove.clear();
 
             // >> yielding point
             for (auto fd : finished_fds) {
@@ -730,9 +740,10 @@ namespace madbfs::cache
                 }
             }
 
-            finished_fds.clear();
-
             log_d(__func__, "finish erasing stale fds [count={}]", stale_to_remove.size());
+
+            stale_to_remove.clear();
+            finished_fds.clear();
 
             for (auto it = m_table.begin(); it != m_table.end();) {
                 if (const auto& [id, entry] = *it; entry.is_free()) {
@@ -920,9 +931,9 @@ namespace madbfs::cache
                     co_return &page;
                 }
 
-                log_t(__func__, "page is not synced [id={}|idx={}]", key.id.inner(), key.index);
-
                 // a page that hasn't been synced can be said as cache miss
+
+                log_t(__func__, "page is not synced [id={}|idx={}]", key.id.inner(), key.index);
 
                 // TODO: maybe create another map that tracks whether each bytes are synced to the file on the
                 // device, then only pull those that are not synced? this requires additional 1/8 th of memory
@@ -1053,14 +1064,14 @@ namespace madbfs::cache
          * @param fd Real file descriptor of file on the device.
          * @param page The page to be flushed.
          * @param key The associated unique key of the page that will be flushed.
+         *
+         * This function clears dirty information.
          */
         AExpect<void> flush_at(u64 fd, Page& page, PageKey key)
         {
             if (not page.is_dirty()) {
                 co_return Expect<void>{};
             }
-
-            log_t(__func__, "flush: [id={}|idx={}]", key.id.inner(), key.index);
 
             if (page.is_fully_dirty()) {
                 auto off = key.index * m_pages.page_size();
