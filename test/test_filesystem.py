@@ -44,15 +44,17 @@ CURRENT_DIR = Path(os.path.dirname(__file__))
 TEST_FILE = CURRENT_DIR / "test_file.txt"
 TEST_DATA = bytearray()
 PROJECT_ROOT = CURRENT_DIR / ".."
-BINARY_PATH = PROJECT_ROOT / "build/Release/madbfs/madbfs"
+BINARY_PATH = Path(
+    os.getenv("MADBFS_BINARY_PATH") or PROJECT_ROOT / "build/Release/madbfs/madbfs"
+)
 
-READDIR_BIG_SIZE = 200
+READDIR_BIG_SIZE = 100
 
-DEFAULT_PAGE_SIZE = 128  # in KiB
-DEFAULT_CACHE_SIZE = 256  # in MiB
+PAGE_SIZE = 128  # in KiB
+CACHE_SIZE = 32  # in MiB
+LOG_LEVEL = "trace"  # on this test only
 DEFAULT_TTL = 60  # in seconds
 DEFAULT_TIMEOUT = 2  # in seconds
-DEFAULT_LOG_LEVEL = "debug"  # on this test only
 CUSTOM_ROOT_PATH = "/data/local/tmp"
 
 logger = logging.getLogger(__name__)
@@ -164,7 +166,9 @@ def environ(request) -> tuple[Environ, Case]:
         BINARY_PATH,
         "-f",
         f"--log-file={log_path}",
-        f"--log-level={DEFAULT_LOG_LEVEL}",
+        f"--log-level={LOG_LEVEL}",
+        f"--page-size={PAGE_SIZE}",
+        f"--cache-size={CACHE_SIZE}",
     ]
     if not request.param.use_server:
         mount_cmd.append("--no-server")
@@ -205,7 +209,7 @@ def ipc_connect(serial: str) -> socket:
 
     while tries <= max:
         try:
-            path = os.environ["XDG_RUNTIME_DIR"]
+            path = os.environ["XDG_RUNTIME_DIR"] or "/tmp"
             sock.connect(f"{path}/madbfs@{serial}.sock")
             return sock
         except ConnectionRefusedError:
@@ -376,7 +380,7 @@ def tst_open_write_big(work_dir: Path):
     os_create(file)
     test_data_big = bytearray()
 
-    target_size = DEFAULT_PAGE_SIZE * 1024 * 512
+    target_size = int(1024 * 1024 * CACHE_SIZE * 2.2)
 
     with open(__file__, "rb") as fh:
         buf = fh.read()
@@ -695,14 +699,14 @@ def tst_ipc(_: str, serial: str, custom_root: bool, use_server: bool, use_cache:
         assert resp["value"]["serial"] == serial
         assert resp["value"]["transport"] == transport
         assert resp["value"]["root"] == root
-        assert resp["value"]["log_level"] == DEFAULT_LOG_LEVEL
+        assert resp["value"]["log_level"] == LOG_LEVEL
         assert resp["value"]["ttl"] == DEFAULT_TTL
         assert resp["value"]["timeout"] == timeout
         if use_cache:
             assert resp["value"]["cache"] is not None
-            assert resp["value"]["cache"]["page_size"] == DEFAULT_PAGE_SIZE
+            assert resp["value"]["cache"]["page_size"] == PAGE_SIZE
             assert resp["value"]["cache"]["cache_size"]
-            assert resp["value"]["cache"]["cache_size"]["max"] == DEFAULT_CACHE_SIZE
+            assert resp["value"]["cache"]["cache_size"]["max"] == CACHE_SIZE
             assert isinstance(resp["value"]["cache"]["cache_size"]["current"], int)
         else:
             assert resp["value"]["cache"] is None
@@ -731,7 +735,7 @@ def tst_ipc(_: str, serial: str, custom_root: bool, use_server: bool, use_cache:
             assert resp["status"] == "success"
             assert resp["value"]
             assert resp["value"]["page_size"]
-            assert resp["value"]["page_size"]["old"] == DEFAULT_PAGE_SIZE
+            assert resp["value"]["page_size"]["old"] == PAGE_SIZE
             assert resp["value"]["page_size"]["new"] == 256
             assert resp["value"]["cache_size"]
             assert isinstance(resp["value"]["cache_size"]["old"], int)
@@ -750,7 +754,7 @@ def tst_ipc(_: str, serial: str, custom_root: bool, use_server: bool, use_cache:
             assert resp["status"] == "success"
             assert resp["value"]
             assert resp["value"]["cache_size"]
-            assert resp["value"]["cache_size"]["old"] == DEFAULT_CACHE_SIZE
+            assert resp["value"]["cache_size"]["old"] == CACHE_SIZE
             assert resp["value"]["cache_size"]["new"] == (128 if use_cache else 0)
         else:
             assert resp["status"] == "error"
@@ -789,14 +793,12 @@ def tst_ipc(_: str, serial: str, custom_root: bool, use_server: bool, use_cache:
         assert resp["status"] == "success"
         assert resp["value"]
         assert resp["value"]["log_level"]
-        assert resp["value"]["log_level"]["old"] == DEFAULT_LOG_LEVEL
+        assert resp["value"]["log_level"]["old"] == LOG_LEVEL
         assert resp["value"]["log_level"]["new"] == "info"
 
     # restore immediately since I need the logs to still be in debug :P
     with ipc_connect(serial) as sock:
-        Protocol.send(
-            sock, json.dumps({"op": "set_log_level", "value": DEFAULT_LOG_LEVEL})
-        )
+        Protocol.send(sock, json.dumps({"op": "set_log_level", "value": LOG_LEVEL}))
         resp = Protocol.receive(sock)
         assert resp is not None
 
@@ -830,7 +832,7 @@ def test_filesystem(environ):
     # generate at least 3 pages worth of data
     with open(__file__, "rb") as fh:
         test_file_data = fh.read()
-        while len(TEST_DATA) < 3 * DEFAULT_PAGE_SIZE * 1024:
+        while len(TEST_DATA) < 3 * PAGE_SIZE * 1024:
             TEST_DATA.extend(test_file_data)
         TEST_FILE.write_bytes(TEST_DATA)
 
