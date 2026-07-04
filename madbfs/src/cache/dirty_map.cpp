@@ -144,6 +144,10 @@ namespace madbfs::cache
     }
 }
 
+// TODO: add a count for full word (64 bits). increase the count when currently modified word is changed from
+// not-full to full. decrease the count when currently modified word is changed from full to not-full. based
+// on this count, we can determine if the DirtyMap is fully set.
+
 // dirty_map.hpp impl: DirtyMap
 namespace madbfs::cache
 {
@@ -155,17 +159,39 @@ namespace madbfs::cache
 
     void DirtyMap::set(usize start, usize end)
     {
-        modify(m_bits, start, end, [](u64& bits, u64 mask) { bits |= mask; });
+        modify(m_bits, start, end, [&](u64& bits, u64 mask) {
+            constexpr auto full = std::numeric_limits<u64>::max();
+
+            auto prev  = bits;
+            bits      |= mask;
+
+            m_full_count += prev != full and bits == full;
+        });
     }
 
     void DirtyMap::unset(usize start, usize end)
     {
-        modify(m_bits, start, end, [](u64& bits, u64 mask) { bits &= ~mask; });
+        modify(m_bits, start, end, [&](u64& bits, u64 mask) {
+            constexpr auto full = std::numeric_limits<u64>::max();
+
+            auto prev  = bits;
+            bits      &= ~mask;
+
+            m_full_count -= (prev == full and bits != full);
+        });
     }
 
     void DirtyMap::toggle(usize start, usize end)
     {
-        modify(m_bits, start, end, [](u64& bits, u64 mask) { bits ^= mask; });
+        modify(m_bits, start, end, [&](u64& bits, u64 mask) {
+            constexpr auto full = std::numeric_limits<u64>::max();
+
+            auto prev  = bits;
+            bits      ^= mask;
+
+            m_full_count += (prev != full and bits == full);
+            m_full_count -= (prev == full and bits != full);
+        });
     }
 
     void DirtyMap::assign(usize start, usize end, bool value)
@@ -176,5 +202,11 @@ namespace madbfs::cache
     void DirtyMap::zeroes()
     {
         sr::fill(m_bits, 0);
+        m_full_count = 0;
+    }
+
+    bool DirtyMap::fully_set() const
+    {
+        return m_full_count >= m_bits.size() / 8;
     }
 }

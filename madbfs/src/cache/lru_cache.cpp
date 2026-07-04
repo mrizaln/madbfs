@@ -927,6 +927,8 @@ namespace madbfs::cache
                 // TODO: maybe create another map that tracks whether each bytes are synced to the file on the
                 // device, then only pull those that are not synced? this requires additional 1/8 th of memory
                 // though. See the current Page implementation.
+                // NOTE: I don't think having additional cost of 1/8 th of memory for rare moments where a
+                // read is happening on non-fully dirty, unsynced page is worth it.
 
                 if (auto res = co_await sync_page(entry, page, key); not res) {
                     co_return Unexpect{ res.error() };
@@ -1020,10 +1022,7 @@ namespace madbfs::cache
             }
 
             auto in_span = Span{ in.data() + in_off, local_size };
-            auto written = page.write(in_span, local_offset);
-            page.set_dirty(local_offset, local_offset + written);
-
-            co_return written;
+            co_return page.write(in_span, local_offset);
         }
 
         /**

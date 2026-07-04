@@ -82,6 +82,9 @@ namespace madbfs::cache
      * @class DirtyMap
      *
      * @brief Represent byte-addressable dirty pages.
+     *
+     * The bits are processed internally by representing it as 64-bit integer (word). Thus, the requirement
+     * of the size of the input bytes be divisible by 8.
      */
     class DirtyMap
     {
@@ -137,6 +140,11 @@ namespace madbfs::cache
         void zeroes();
 
         /**
+         * @brief Check whether all bits are set.
+         */
+        bool fully_set() const;
+
+        /**
          * @brief Get a new iterator for dirty region.
          */
         DirtyIter begin() const { return DirtyIter{ m_bits }; }
@@ -148,6 +156,7 @@ namespace madbfs::cache
 
     private:
         Span<u8> m_bits;
+        usize    m_full_count = 0;    // number of words that are all set
     };
 
     static_assert(std::input_iterator<DirtyIter>);

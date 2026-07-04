@@ -27,8 +27,8 @@ namespace madbfs::cache
      */
     struct PageId
     {
-        u32 inner    = 0;
-        u32 store_id = 0;
+        u32 inner    = 0;    // actual index to the LRU array
+        u32 store_id = 0;    // unique id per PageStore
     };
 
     /**
@@ -38,7 +38,7 @@ namespace madbfs::cache
      *
      * Every `Page` instance is managed by `PageStore`. Each page has metadata that are 1/8th of the size of
      * the page, so in effect, evey page takes up used up 9/8 of page size of memory. The metadata is used to
-     * track which bytes are dirty/written which user can control via `set_dirty()`.
+     * track which bytes are dirty/written if `write()` is called.
      */
     class Page
     {
@@ -64,6 +64,8 @@ namespace madbfs::cache
          * @param offset Write offset.
          *
          * @return Number of bytes written into the page.
+         *
+         * This function will set the dirty map based on the offset and the size of the input.
          */
         usize write(Span<const char> in, usize offset);
 
@@ -75,6 +77,7 @@ namespace madbfs::cache
          * @return Truncated size.
          *
          * If the new size is bigger than current size of the page, the gap will be filled with zeroes.
+         * Truncate won't set the dirty map.
          */
         usize truncate(usize size);
 
@@ -93,7 +96,8 @@ namespace madbfs::cache
          * then need to sync the data when a read is performed, replaced the zeroes with actual data.
          *
          * A synced page can be defined as a page that has all the non-dirty data be indicative of the content
-         * of the corresponding file on the device at specified page (block).
+         * of the corresponding file on the device at specified page (block). This also means that a fully
+         * dirty page can be considered synced.
          *
          * This flag is actually not really modifying anything on the isntance of the Page. You are
          * responsible for setting this flag. I decided to place it here as it is the most appropriate place.
@@ -101,7 +105,7 @@ namespace madbfs::cache
          * The default value of this flag is `false`. But the value when you `acquire()` them is whatever the
          * previous value of the flag on that page.
          */
-        bool is_synced() const { return m_synced; }
+        bool is_synced() const { return m_synced or is_fully_dirty(); }
 
         /**
          * @brief Set whether the content of the page is already synced with file on the device.
@@ -122,25 +126,10 @@ namespace madbfs::cache
          *
          * The entire region is dirty, you can use `buf()` for the entirety in this case.
          */
-        bool is_fully_dirty() const { return m_fully_dirty; }
+        bool is_fully_dirty() const { return m_dirty and m_dirty_map.fully_set(); }
 
         /**
-         * @brief Set the bytes specified from start to end as dirty.
-         *
-         * @param start Start byte index.
-         * @param end End byte index.
-         *
-         * The range is exclusive: [start, end)
-         */
-        void set_dirty(usize start, usize end);
-
-        /**
-         * @brief Mark the entire page as dirty.
-         */
-        void set_fully_dirty();
-
-        /**
-         * @brief Mark the page as not dirty.
+         * @brief Mark the page as not dirty/clear the dirty map.
          */
         void clear_dirty();
 
@@ -184,9 +173,8 @@ namespace madbfs::cache
         u32 m_size     = 0;
         u32 m_capacity = 0;    // page size
 
-        bool m_synced      = false;    // indicate that the page content is synced with file on device
-        bool m_dirty       = false;
-        bool m_fully_dirty = false;
+        bool m_synced = false;    // indicate that the page content is synced with file on device
+        bool m_dirty  = false;    // a flag to indicate that any write is done at all to page
     };
 
     /**

@@ -47,6 +47,9 @@ namespace madbfs::cache
         std::copy_n(in.data(), end - offset, m_data + offset);
         m_size = std::max(end, m_size);
 
+        m_dirty_map.set(offset, end);
+        m_dirty = true;
+
         return end - offset;
     }
 
@@ -64,23 +67,10 @@ namespace madbfs::cache
         return { m_data, m_capacity };
     }
 
-    void Page::set_dirty(usize start, usize end)
-    {
-        m_dirty_map.set(start, end);
-        m_dirty       = true;
-        m_fully_dirty = (start == 0 and end == m_capacity);
-    }
-
     void Page::clear_dirty()
     {
         m_dirty_map.zeroes();
-        m_dirty       = false;
-        m_fully_dirty = false;
-    }
-
-    void Page::set_fully_dirty()
-    {
-        set_dirty(0, m_capacity);
+        m_dirty = false;
     }
 }
 
