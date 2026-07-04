@@ -82,5 +82,6 @@ namespace madbfs::operations
         .fallocate       = nullptr,
         .copy_file_range = madbfs::operations::copy_file_range,
         .lseek           = nullptr,
+        .statx           = nullptr,
     };
 }

@@ -51,9 +51,18 @@ BOOST_DEFAULT_OPTIONS = {
 class Recipe(ConanFile):
     settings = ["os", "compiler", "build_type", "arch"]
     generators = ["CMakeToolchain", "CMakeDeps"]
-    requires = ["boost/1.87.0", "libfuse/3.16.2", "rapidhash/1.0", "spdlog/1.15.1"]
-    test_requires = ["boost-ext-ut/1.1.9"]
     default_options = BOOST_DEFAULT_OPTIONS
+
+    requires = [
+        "boost/1.89.0",
+        "libfuse/3.18.2",
+        "rapidhash/3.0",
+        "spdlog/1.17.0",
+    ]
+
+    test_requires = [
+        "boost-ext-ut/2.3.1",
+    ]
 
     def layout(self):
         cmake_layout(self)
