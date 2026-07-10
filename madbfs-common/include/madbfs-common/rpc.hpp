@@ -9,6 +9,49 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+/**
+ * This is a low-level RPC mechanism for communication between madbfs client and madbfs server on device. The
+ * design decision for this RPC is to be as simple as possible and while also type safe and flexible by giving
+ * the user the control of the buffer being used in each request/response invocation.
+ *
+ * The flow of using this RPC is the following.
+ *
+ * For server:
+ * - Create an acceptor socket with a specified port number.
+ * - When a connection is received do a `rpc::handshake()`. Maintain the connection if success.
+ * - Create a loop that will become the request handler.
+ * - Within it:
+ *   - Call `rpc::receive_request_header()`.
+ *   - If success, you need to receive the full `Request` payload by calliing `rpc::receive_request()` with
+ *     the corresponding header.
+ *   - Handle the `Request` on the loop itself or on another thread.
+ *   - After handling the `Request`, you should have the corresponding `ResponseResult`.
+ *   - Send the response using `rpc::send_response()`.
+ *
+ * For client:
+ * - Create a Socket.
+ * - Connect to the server with the specified port number.
+ * - Do a `rpc::handshake()` if connection is successful.
+ * - After handshake is success, you can do the fullowing until the conneciton is lost:
+ *   - Create a `Request` and an `Id`, then send it via `rpc::send_request()`.
+ *   - Some `Request` require a buffer that will be used for the corresponding `Response`, which means you
+ *     need to hold onto that buffer until a `Response` with the same `Id` is received. After that, the
+ *     lifetime of the backing buffer must match or exceed the `Response`.
+ *   - You also need to make a copy of the `Request` instance itself that is being sent for later.
+ *   - To receive the response, you call `rpc::receive_response_header()` first. This header should contain
+ *     the request `Id` in which you can check whether the `Request` fails. If it fails, the corresponding
+ *     buffer for the `Request` can be released.
+ *   - If succeeds, you can call `rpc::receive_response()` with you supplying the same `Request` before in
+ *     order for the function to be able to fill the aforementioned backing buffer.
+ *
+ * Note:
+ * - As explained in the 'For client' section, some `Request` require a buffer for the corresponding
+ *   `Response`, and `Request` must be held onto for `rpc::receive_response()` call. I want to clarify that
+ *   both the `Request` and `Request` do not own the buffer and only references them (whether via a reference
+ *   or span). Thus, this also means that copying `Request` and `Response` should be cheap as they are only a
+ *   view to a buffer. The exception is for `rpc::resp::Listdir` which contains a vector of string view into
+ *   buffer on its corresponding `rpc::req::Listdir` instance you supplied.
+ */
 namespace madbfs::rpc
 {
     using Socket = async::tcp::Socket;
