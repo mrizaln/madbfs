@@ -363,7 +363,7 @@ namespace madbfs::ipc
                 value = json::value{ { "operations", json::value_from(op::names) } };
                 break;
             case Op::index_of<op::Version>():
-                value = json::value{ { "version", MADBFS_VERSION_FULL } };
+                value = json::value{ { "version", version::get_version_full() } };
                 break;
             case Op::index_of<op::Logcat>():
                 m_logcat_subscribers.emplace_back(std::move(sock), op->as<op::Logcat>()->color);

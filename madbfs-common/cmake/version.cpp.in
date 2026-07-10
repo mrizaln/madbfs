@@ -1,0 +1,19 @@
+#include "madbfs-gen/version.hpp"
+
+namespace madbfs::version
+{
+    const char* get_version_full()
+    {
+        return "@MADBFS_VERSION_FULL@";
+    }
+
+    const char* get_version_base()
+    {
+        return "@CMAKE_PROJECT_VERSION@";
+    }
+
+    const char* get_git_hash()
+    {
+        return "@MADBFS_GIT_HASH@";
+    }
+}

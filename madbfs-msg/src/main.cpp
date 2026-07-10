@@ -131,7 +131,7 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
     }
 
     if (vm.count("version")) {
-        fmt::println(stdout, "{}", MADBFS_VERSION_FULL);
+        fmt::println(stdout, "{}", madbfs::version::get_version_full());
         return Exit{ 0 };
     }
 

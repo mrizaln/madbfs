@@ -87,7 +87,7 @@ try {
     fmt::println(madbfs::rpc::server_ready_string);
     std::fflush(stdout);    // ensure the message is sent
 
-    madbfs::log_i(__func__, "madbfs-server version {}", MADBFS_VERSION_FULL);
+    madbfs::log_i(__func__, "madbfs-server version {}", madbfs::version::get_version_full());
     madbfs::log_i(__func__, "launching tcp server on port: {}", args.port);
 
     auto res = madbfs::async::once(context, task());

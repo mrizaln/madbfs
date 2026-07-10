@@ -41,8 +41,8 @@ target_include_directories(madbfs-common PUBLIC include)
 target_compile_features(madbfs-common PUBLIC cxx_std_23)
 set_target_properties(madbfs-common PROPERTIES CXX_EXTENSIONS OFF)
 
-include(./cmake/generate-version.cmake)
-target_include_directories(madbfs-common PUBLIC ${CMAKE_BINARY_DIR}/generated)
+include(./cmake/generate-version.cmake) # emits target: madbfs-version
+target_link_libraries(madbfs-common PUBLIC madbfs-version)
 
 if(MADBFS_ENABLE_RAPIDHASH_BLANKET_IMPL)
   target_compile_definitions(madbfs-common PUBLIC MADBFS_RAPIDHASH_ENABLED=1)
