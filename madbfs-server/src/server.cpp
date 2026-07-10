@@ -63,7 +63,7 @@ namespace madbfs::server
                 async::spawn(
                     m_pool,
                     handle_request(std::move(*req)),
-                    [&, id](std::exception_ptr e, rpc::FallibleResponse resp) {
+                    [&, id](std::exception_ptr e, rpc::ResponseResult resp) {
                         log::log_exception(e, "handler");
                         async::spawn(
                             m_channel.get_executor(),
@@ -100,7 +100,7 @@ namespace madbfs::server
         }
     }
 
-    Await<rpc::FallibleResponse> Connection::handle_request(rpc::Request req)
+    Await<rpc::ResponseResult> Connection::handle_request(rpc::Request req)
     {
         co_return std::move(req).visit([&](rpc::IsRequest auto&& req) {
             return m_handler.handle_req(std::move(req));

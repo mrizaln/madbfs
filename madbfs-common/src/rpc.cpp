@@ -451,7 +451,7 @@ namespace
      *
      * The buffer will be cleared on every invocation.
      */
-    Span<const u8> build_response(Vec<u8>& buffer, FallibleResponse response, Id id)
+    Span<const u8> build_response(Vec<u8>& buffer, ResponseResult response, Id id)
     {
         buffer.clear();
 
@@ -868,7 +868,7 @@ namespace madbfs::rpc
         co_return Expect<void>{};
     }
 
-    AExpect<void> send_response(Socket& socket, Vec<u8>& buffer, FallibleResponse response, Id id)
+    AExpect<void> send_response(Socket& socket, Vec<u8>& buffer, ResponseResult response, Id id)
     {
         auto payload = build_response(buffer, response, id);
         auto n       = co_await async::write_exact(socket, payload);

@@ -226,7 +226,7 @@ namespace madbfs::rpc
         Status    status;
     };
 
-    using FallibleResponse = Var<Response, FailedResponse>;
+    using ResponseResult = Var<Response, FailedResponse>;
 
     /**
      * @brief Check whether a type is a variant of `Request`.
@@ -318,7 +318,7 @@ namespace madbfs::rpc
      * @param response Response data for the procedure.
      * @param id Response Unique response identifier.
      */
-    AExpect<void> send_response(Socket& socket, Vec<u8>& buffer, FallibleResponse response, Id id);
+    AExpect<void> send_response(Socket& socket, Vec<u8>& buffer, ResponseResult response, Id id);
 
     /**
      * @brief Read request header from socket.

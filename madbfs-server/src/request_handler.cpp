@@ -50,7 +50,7 @@ namespace
 
 namespace madbfs::server
 {
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Listdir req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::Listdir req)
     {
         auto& [path, buf] = req;
         log_d("listdir", "path={:?}", path.data());
@@ -115,7 +115,7 @@ namespace madbfs::server
         return rpc::resp::Listdir{ .entries = std::move(entries) };
     }
 
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Stat req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::Stat req)
     {
         const auto& [path] = req;
         log_d("stat", "path={:?}", path.data());
@@ -137,7 +137,7 @@ namespace madbfs::server
         };
     }
 
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Readlink req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::Readlink req)
     {
         auto&& [path, out_buf] = req;
         log_d("readlink", "path={:?}", path.data());
@@ -157,7 +157,7 @@ namespace madbfs::server
         };
     }
 
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Mknod req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::Mknod req)
     {
         const auto& [path, mode, dev] = req;
         log_d("mknod", "path={:?} mode={:#08o} dev={:#04x}", path.data(), mode, dev);
@@ -169,7 +169,7 @@ namespace madbfs::server
         return rpc::resp::Mknod{};
     }
 
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Mkdir req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::Mkdir req)
     {
         const auto& [path, mode] = req;
         log_d("mkdir", "path={:?} mode={:#08o}", path.data(), mode);
@@ -181,7 +181,7 @@ namespace madbfs::server
         return rpc::resp::Mkdir{};
     }
 
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Unlink req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::Unlink req)
     {
         const auto& [path] = req;
         log_d("unlink", "path={:?}", path.data());
@@ -193,7 +193,7 @@ namespace madbfs::server
         return rpc::resp::Unlink{};
     }
 
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Rmdir req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::Rmdir req)
     {
         const auto& [path] = req;
         log_d("rmdir", "path={:?}", path.data());
@@ -205,7 +205,7 @@ namespace madbfs::server
         return rpc::resp::Rmdir{};
     }
 
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Rename req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::Rename req)
     {
         const auto& [from, to, flags] = req;
         log_d("rename", "from={:?} -> to={:?} [flags={}]", from, to, flags);
@@ -238,7 +238,7 @@ namespace madbfs::server
         return rpc::resp::Rename{};
     }
 
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Truncate req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::Truncate req)
     {
         const auto& [path, size] = req;
         log_d("truncate", "path={:?} size={}", path.data(), size);
@@ -250,7 +250,7 @@ namespace madbfs::server
         return rpc::resp::Truncate{};
     }
 
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Utimens req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::Utimens req)
     {
         const auto& [path, atime, mtime] = req;
 
@@ -265,7 +265,7 @@ namespace madbfs::server
         return rpc::resp::Utimens{};
     }
 
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::CopyFileRange req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::CopyFileRange req)
     {
         const auto& [in, in_off, out, out_off, size] = req;
         log_d("copy_file_range", "from={:?} -> to={:?}", in.data(), out.data());
@@ -358,7 +358,7 @@ namespace madbfs::server
         return rpc::resp::CopyFileRange{ .size = static_cast<usize>(copied) };
     }
 
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Open req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::Open req)
     {
         const auto& [path, mode] = req;
         log_d("open", "path={:?} mode={}", path.data(), static_cast<int>(mode));
@@ -371,7 +371,7 @@ namespace madbfs::server
         return rpc::resp::Open{ .fd = static_cast<u64>(fd) };
     }
 
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Close req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::Close req)
     {
         const auto& [fd] = req;
         log_d("close", "fd={}", fd);
@@ -383,7 +383,7 @@ namespace madbfs::server
         return rpc::resp::Close{};
     }
 
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Read req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::Read req)
     {
         const auto& [fd, offset, out] = req;
         log_d("read", "fd={} offset={} size={}", fd, offset, out.size());
@@ -402,7 +402,7 @@ namespace madbfs::server
         return rpc::resp::Read{ .read = Span{ out.data(), static_cast<usize>(len) } };
     }
 
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Write req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::Write req)
     {
         const auto& [fd, offset, in] = req;
         log_d("write", "fd={} offset={}, size={}", fd, offset, in.size());
@@ -421,7 +421,7 @@ namespace madbfs::server
         return rpc::resp::Write{ .size = static_cast<usize>(len) };
     }
 
-    rpc::FallibleResponse RequestHandler::handle_req(rpc::req::Ping req)
+    rpc::ResponseResult RequestHandler::handle_req(rpc::req::Ping req)
     {
         return rpc::resp::Ping{ .num = req.num };
     }
