@@ -1,7 +1,7 @@
 #include "madbfs/transport/proxy_transport.hpp"
 
-#include "madbfs/cmd.hpp"
 #include "madbfs/adb.hpp"
+#include "madbfs/cmd.hpp"
 
 #include <madbfs-common/log.hpp>
 #include <madbfs-common/rpc.hpp>
@@ -86,7 +86,11 @@ namespace
         log_i(__func__, "trying to run server");
 
         // run server
-        auto cmd      = bp::environment::find_executable("adb");
+        auto cmd = bp::environment::find_executable("adb");
+        if (cmd.empty()) {
+            co_return Unexpect{ Errc::no_such_file_or_directory };
+        }
+
         auto port_str = fmt::format("{}", port);
         auto args     = std::to_array<boost::string_view>({
             "shell",

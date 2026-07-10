@@ -177,9 +177,12 @@ namespace madbfs::cmd
 
         auto to_boost_str = [](auto s) { return boost::string_view{ s.data(), s.size() }; };
 
-        auto exe  = bp::environment::find_executable(cmd[0]);
-        auto args = cmd | sv::drop(1) | sv::transform(to_boost_str);
+        auto exe = bp::environment::find_executable(cmd[0]);
+        if (exe.empty()) {
+            co_return Unexpect{ Errc::no_such_file_or_directory };
+        }
 
+        auto args = cmd | sv::drop(1) | sv::transform(to_boost_str);
         auto proc = bp::process{ exec, exe, args, bp::process_stdio{ pipe_in, pipe_out, pipe_err } };
         auto ec   = net::error_code{};
 

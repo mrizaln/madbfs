@@ -194,7 +194,7 @@ namespace madbfs::args
         };
 
         if (fuse_opt_parse(&args, &madbfs_opt, madbfs_opt_spec.data(), NULL) != 0) {
-            fmt::println(stderr, "error: failed to parse options\n");
+            fmt::println(stderr, "error: failed to parse options");
             show_help(argv[0]);
             co_return ParseResult{ 1 };
         }
@@ -217,11 +217,12 @@ namespace madbfs::args
 
         fmt::println("[madbfs] checking adb availability...");
         if (auto status = co_await adb::start_server(); not status) {
-            fmt::println(stderr, "\nerror: failed to start adb server [{}].", err_msg(status.error()));
+            fmt::println(stderr, "\nerror: failed to start adb server: {}", err_msg(status.error()));
             fmt::println(stderr, "\nnote: make sure adb is installed and in PATH.");
             fmt::println(stderr, "note: make sure phone debugging permission is enabled.");
             fmt::println(stderr, "      phone with its screen locked might denies adb connection.");
             fmt::println(stderr, "      you might need to unlock your device first to be able to use adb.");
+            ::fuse_opt_free_args(&args);
             co_return ParseResult{ 1 };
         }
 
