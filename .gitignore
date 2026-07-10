@@ -3,3 +3,4 @@
 **/*.log
 .cache/
 mount/
+docs/html

@@ -1,0 +1,28 @@
+DOXYFILE_ENCODING      = UTF-8
+PROJECT_NAME           = "@PROJECT_NAME@"
+PROJECT_BRIEF          = "@PROJECT_DESCRIPTION@"
+OUTPUT_DIRECTORY       = "@PROJECT_SOURCE_DIR@/docs"
+ALLOW_UNICODE_NAMES    = YES
+OUTPUT_LANGUAGE        = English
+TAB_SIZE               = 4
+MARKDOWN_SUPPORT       = YES
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+INPUT                  = "@PROJECT_SOURCE_DIR@/madbfs/include/", "@PROJECT_SOURCE_DIR@/madbfs-common/include/", "@PROJECT_SOURCE_DIR@/madbfs-server/include/", "@PROJECT_SOURCE_DIR@/README.md"
+INPUT_ENCODING         = UTF-8
+FILE_PATTERNS          = *.hpp
+RECURSIVE              = YES
+ENABLE_PREPROCESSING   = NO
+SORT_MEMBER_DOCS       = NO
+
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+INTERNAL_DOCS          = NO
+
+GENERATE_TREEVIEW      = YES # optional. Also works without treeview
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+HTML_EXTRA_STYLESHEET  = "@AWESOME_CSS_DIR@/doxygen-awesome.css"
+
+USE_MDFILE_AS_MAINPAGE = "@PROJECT_SOURCE_DIR@/README.md"
+BUILTIN_STL_SUPPORT    = YES

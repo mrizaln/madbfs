@@ -11,8 +11,9 @@ project(
 # use unity build. turn off if you don't want to
 set(CMAKE_UNITY_BUILD OFF)
 
-set(MADBFS_ENABLE_TESTS ON CACHE BOOL "Enable tests")
-set(MADBFS_AUTORUN_TESTS OFF CACHE BOOL "Automatically ran tests")
+option(MADBFS_ENABLE_TESTS "Enable tests" ON)
+option(MADBFS_AUTORUN_TESTS "Automatically ran tests" OFF)
+option(MADBFS_BUILD_DOCS "Build docs" ON)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -29,5 +30,10 @@ add_subdirectory(madbfs-msg)
 if(MADBFS_ENABLE_TESTS)
   message(STATUS "madbfs: Building tests")
   enable_testing()
-  add_subdirectory(test)    # add custom target: build_tests
+  add_subdirectory(test) # add custom target: build_tests
 endif()
+
+if(MADBFS_BUILD_DOCS)
+  add_subdirectory(docs)
+endif()
+
