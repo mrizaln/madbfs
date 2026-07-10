@@ -75,4 +75,13 @@ namespace madbfs::adb
      * @param serial Device serial.
      */
     AExpect<Abi> get_abi(Str serial);
+
+    /**
+     * @brief Get madbfs server for specified abi
+     *
+     * @param abi Phone ABI.
+     *
+     * @return Server binary data.
+     */
+    std::span<const std::uint8_t> get_server(madbfs::adb::Abi abi);
 }

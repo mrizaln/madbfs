@@ -1,8 +1,7 @@
 #include "madbfs/transport/proxy_transport.hpp"
 
-#include "../embed/server.hpp"
-
 #include "madbfs/cmd.hpp"
+#include "madbfs/adb.hpp"
 
 #include <madbfs-common/log.hpp>
 #include <madbfs-common/rpc.hpp>
@@ -19,7 +18,7 @@ namespace
 {
     AExpect<String> write_server(adb::Abi abi, Str target)
     {
-        auto server_bytes = embed::get_server(abi);
+        auto server_bytes = adb::get_server(abi);
         auto server_str   = Str{ reinterpret_cast<const char*>(server_bytes.data()), server_bytes.size() };
         auto ofile        = fmt::format("of={}", target);
 

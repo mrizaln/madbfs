@@ -21,7 +21,6 @@ target_sources(
     src/path.cpp
     src/transport/adb_transport.cpp
     src/transport/proxy_transport.cpp
-    src/embed/server.cpp
     src/cache/dirty_map.cpp
     src/cache/page.cpp
     src/cache/lru_cache.cpp
@@ -34,7 +33,7 @@ target_include_directories(madbfs-lib PUBLIC include)
 target_compile_options(madbfs-lib PRIVATE -Wall -Wextra -Wconversion)
 
 set_source_files_properties(
-  src/embed/server.cpp
+  src/adb.cpp
   PROPERTIES
     COMPILE_DEFINITIONS MADBFS_SERVER_BINARY_DIR=${MADBFS_SERVER_BINARY_DIR}
 )
