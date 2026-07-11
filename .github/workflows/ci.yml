@@ -68,9 +68,8 @@ jobs:
 
     - name: Copy madbfs to system bin directory
       run: |
-        unzip madbfs.zip
-        tar -xf madbfs.tar.gz
-        sudo cp madbfs/madbfs /usr/local/bin/madbfs
+        tar -xf madbfs.tar.gz --directory=/tmp madbfs/madbfs
+        sudo cp /tmp/madbfs/madbfs /usr/local/bin/madbfs
         sudo chmod +x /usr/local/bin/madbfs
 
     - name: Enable KVM
