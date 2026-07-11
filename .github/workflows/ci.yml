@@ -55,7 +55,7 @@ jobs:
     needs: build
     runs-on: ubuntu-26.04
     env:
-      API_LEVEL: 21
+      API_LEVEL: 29
       MADBFS_BINARY_PATH: /usr/local/bin/madbfs
 
     steps:
