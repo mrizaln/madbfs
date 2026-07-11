@@ -8,12 +8,12 @@ project(
   DESCRIPTION "Userspace filesystem for Android via adb using FUSE"
 )
 
-# use unity build. turn off if you don't want to
-set(CMAKE_UNITY_BUILD OFF)
+# # use unity build. turn off if you don't want to
+# set(CMAKE_UNITY_BUILD OFF)
 
 option(MADBFS_ENABLE_TESTS "Enable tests" ON)
 option(MADBFS_AUTORUN_TESTS "Automatically ran tests" OFF)
-option(MADBFS_BUILD_DOCS "Build docs" ON)
+option(MADBFS_BUILD_DOCS "Build docs" OFF)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
