@@ -26,7 +26,7 @@ jobs:
     - name: Run sccache-cache
       uses: mozilla-actions/sccache-action@v0.0.10
 
-    - name: Configure C++ Development Tools
+    - name: Configure C++ development tools
       run: sudo apt-get install cmake ninja-build
 
     - name: Setup Android NDK
@@ -51,4 +51,58 @@ jobs:
           ./build/package-Release-Release/madbfs.tar.gz
           ./build/package-Release-Release/madbfs.tar.gz.sha256
 
-# todo: add filesystem test job (requires android emulation to exist)
+  filesystem_test:
+    needs: build
+    runs-on: ubuntu-26.04
+    env:
+      API_LEVEL: 21
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Get madbfs
+      uses: actions/download-artifact@v4
+      with:
+        name: madbfs
+
+    - name: Copy madbfs to system bin directory
+      run: |
+        unzip madbfs.zip
+        tar -xf madbfs.tar.gz
+        sudo cp madbfs/madbfs /usr/local/bin/madbfs
+        sudo chmod +x /usr/local/bin/madbfs
+
+    - name: Enable KVM
+      run: |
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
+
+    - name: AVD cache
+      uses: actions/cache@v4
+      id: avd-cache
+      with:
+        path: |
+          ~/.android/avd/*
+          ~/.android/adb*
+        key: avd-${{ env.API_LEVEL }}
+
+    - name: Create AVD and generate snapshot for caching
+      if: steps.avd-cache.outputs.cache-hit != 'true'
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: ${{ env.API_LEVEL }}
+        force-avd-creation: false
+        emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+        disable-animations: false
+        script: echo "Generated AVD snapshot for caching."
+
+    - name: Run filesystem test
+      uses: reactivecircus/android-emulator-runner@v2
+      with:
+        api-level: ${{ env.API_LEVEL }}
+        force-avd-creation: false
+        emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+        disable-animations: true
+        script: MABDFS_BINARY_PATH=/usr/local/bin/madbfs ./test-filesystem.py -x
