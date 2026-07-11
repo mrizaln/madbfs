@@ -105,3 +105,11 @@ jobs:
         emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
         disable-animations: true
         script: MABDFS_BINARY_PATH=/usr/local/bin/madbfs ./test-filesystem.py -x
+
+    - name: Save test logs
+      if: success() || failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs
+        path: ./test/log/
+
