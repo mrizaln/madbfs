@@ -56,6 +56,7 @@ jobs:
     runs-on: ubuntu-26.04
     env:
       API_LEVEL: 21
+      MADBFS_BINARY_PATH: /usr/local/bin/madbfs
 
     steps:
     - name: Checkout code
@@ -69,8 +70,8 @@ jobs:
     - name: Copy madbfs to system bin directory
       run: |
         tar -xf madbfs.tar.gz --directory=/tmp madbfs/madbfs
-        sudo cp /tmp/madbfs/madbfs /usr/local/bin/madbfs
-        sudo chmod +x /usr/local/bin/madbfs
+        sudo cp /tmp/madbfs/madbfs ${{ env.MADBFS_BINARY_PATH }}
+        sudo chmod +x ${{ env.MADBFS_BINARY_PATH }}
 
     - name: Enable KVM
       run: |
@@ -106,9 +107,8 @@ jobs:
         disable-animations: true
         script: |
           export ANDROID_SERIAL=$(adb devices | head -n2 | tail -n1 | cut -f1)
-          export MADBFS_BINARY_PATH=/usr/local/bin/madbfs
           pip install pytest
-          ./test/test_filesystem.py -x
+          pytest -x ./test/test_filesystem.py
 
     - name: Save test logs
       if: success() || failure()
