@@ -5,8 +5,12 @@
 #include <madbfs-common/log.hpp>
 #include <madbfs-common/util/split.hpp>
 
+#include <zstr.hpp>
+
+#include <spanstream>
+
 #if not defined(MADBFS_SERVER_BINARY_DIR)
-#error "You must define MADBFS_SERVER_BINARY_BUILD_DIR so this file can embed the server binaries"
+#error "You must define MADBFS_SERVER_BINARY_DIR so this file can embed the server binaries"
 #endif
 
 // clang-format off
@@ -16,24 +20,51 @@
 #define MADBFS_SERVER_X86_64      MADBFS_SERVER_BINARY_DIR/madbfs-server-x86_64
 // clang-format on
 
+using namespace madbfs;
+
 #define STRINGIFY_X(x) #x
 #define STRINGIFY(x)   STRINGIFY_X(x)
 
-constexpr std::uint8_t server_armeabi_v7a[] = {
+constexpr u8 server_armeabi_v7a[] = {
 #embed STRINGIFY(MADBFS_SERVER_ARMEABI_V7A)
 };
 
-constexpr std::uint8_t server_arm64_v8a[] = {
+constexpr u8 server_arm64_v8a[] = {
 #embed STRINGIFY(MADBFS_SERVER_ARM64_V8A)
 };
 
-constexpr std::uint8_t server_x86[] = {
+constexpr u8 server_x86[] = {
 #embed STRINGIFY(MADBFS_SERVER_X86)
 };
 
-constexpr std::uint8_t server_x86_64[] = {
+constexpr u8 server_x86_64[] = {
 #embed STRINGIFY(MADBFS_SERVER_X86_64)
 };
+
+namespace
+{
+    Vec<u8> inflate(std::span<const u8> input)
+    {
+        constexpr auto buf_size = 256 * 1024;
+
+        auto out = Vec<u8>{};
+        auto buf = Array<char, buf_size>{};
+
+        auto ss  = std::ispanstream{ Span{ reinterpret_cast<const char*>(input.data()), input.size() } };
+        auto zis = zstr::istream{ ss, buf_size, true };
+
+        while (true) {
+            zis.read(buf.data(), buf_size);
+            std::streamsize count = zis.gcount();
+            if (count == 0) {
+                break;
+            }
+            out.insert(out.end(), buf.begin(), buf.begin() + count);
+        }
+
+        return out;
+    }
+}
 
 // adb.hpp impl
 namespace madbfs::adb
@@ -123,14 +154,14 @@ namespace madbfs::adb
         co_return Unexpect{ Errc::not_supported };
     }
 
-    Span<const u8> get_server(Abi abi)
+    Vec<u8> get_server(Abi abi)
     {
         switch (abi) {
-        case Abi::Armeabi_v7a: return server_armeabi_v7a;
-        case Abi::Arm64_v8a: return server_arm64_v8a;
-        case Abi::X86: return server_x86;
-        case Abi::X86_64: return server_x86_64;
-        default: [[unlikely]] log_e(__func__, "Unknown ABI"); std::terminate();
+        case Abi::Armeabi_v7a: return inflate(server_armeabi_v7a);
+        case Abi::Arm64_v8a: return inflate(server_arm64_v8a);
+        case Abi::X86: return inflate(server_x86);
+        case Abi::X86_64: return inflate(server_x86_64);
+        default: [[unlikely]] log_e(__func__, "Invalid ABI"); std::terminate();
         }
     }
 }

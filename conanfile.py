@@ -58,6 +58,7 @@ class Recipe(ConanFile):
         "libfuse/3.18.2",
         "rapidhash/3.0",
         "spdlog/1.17.0",
+        "zstr/1.0.7",
     ]
 
     test_requires = [

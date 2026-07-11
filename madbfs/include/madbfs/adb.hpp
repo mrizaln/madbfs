@@ -83,5 +83,5 @@ namespace madbfs::adb
      *
      * @return Server binary data.
      */
-    std::span<const std::uint8_t> get_server(madbfs::adb::Abi abi);
+    Vec<u8> get_server(madbfs::adb::Abi abi);
 }
