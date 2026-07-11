@@ -104,7 +104,11 @@ jobs:
         force-avd-creation: false
         emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
         disable-animations: true
-        script: MABDFS_BINARY_PATH=/usr/local/bin/madbfs ./test-filesystem.py -x
+        script: |
+          export ANDROID_SERIAL=$(adb devices | head -n2 | tail -n1 | cut -f1)
+          export MADBFS_BINARY_PATH=/usr/local/bin/madbfs
+          pip install pytest
+          ./test/test_filesystem.py -x
 
     - name: Save test logs
       if: success() || failure()
