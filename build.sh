@@ -36,7 +36,7 @@ center_echo() {
 
 # build server binaries in subshell
 # ---------------------------------
-# build_server <build_type> <profile_client> <profile_server>
+# build_server <build_type: str> <profile_client: str> <profile_server: str>
 #   build_type: Debug, Release, RelWithDebInfo
 build_server() (
     local build_type="$1"
@@ -64,25 +64,26 @@ build_server() (
             "${STRIP_BINARY}" "./build/android-${arch}-release/madbfs-server"
         fi
 
-        # copy to centralized dir for preparation of building madbfs client
-        cp "./build/android-${arch}-${build_type,,}/madbfs-server" "${servers_path}/madbfs-server-${abi}"
+        # compress and copy to centralized dir for preparation of building madbfs client
+        gzip -cn9 "./build/android-${arch}-${build_type,,}/madbfs-server" >"${servers_path}/madbfs-server-${abi}"
     done
 )
 
 # build client
 # ------------
-# build_server <build_type> <profile_client> <servers_path>
+# build_server <build_type: str> <profile_client: str> <servers_path: str> <unity_build: bool>
 #   build_type: Debug, Release, RelWithDebInfo
 build_client() {
     local build_type="$1"
     local profile_client="$2"
     local servers_path="$(realpath "$3")" # must be absolute path for #embed
+    local unity_build=$([[ "$4" == true ]] && echo "ON" || echo "OFF")
 
     center_echo "build madbfs"
 
     # build: madbfs, madbfs-msg, test
     conan install . --build missing -pr:b "${profile_client}" -pr:h "${profile_client}" -s "&:build_type=${build_type}" -s build_type=Release
-    cmake --preset conan-${build_type,,} -D MADBFS_SERVER_BINARY_DIR="${servers_path}"
+    cmake --preset conan-${build_type,,} -D MADBFS_SERVER_BINARY_DIR="${servers_path}" -D CMAKE_UNITY_BUILD=${unity_build}
     cmake --build --preset conan-${build_type,,}
 
     if [[ "${build_type}" == "Release" ]]; then
@@ -123,7 +124,7 @@ capitalize_build_type() {
 }
 
 main() {
-    TEMP=$(getopt -o "h,t:,b:,p:" -l "help,target:,build-type:,profile:,package" -n "$0" -- "$@")
+    TEMP=$(getopt -o "h,t:,b:,p:" -l "help,target:,build-type:,profile:,package,unity-build" -n "$0" -- "$@")
 
     eval set -- "$TEMP"
     unset TEMP
@@ -134,6 +135,7 @@ main() {
     local profile_client="${DEFAULT_PROFILE_CLIENT}"
     local profile_server="${DEFAULT_PROFILE_SERVER}"
     local package=false
+    local unity_build=false
 
     while true; do
         case "$1" in
@@ -152,7 +154,8 @@ main() {
                 "    -p, --profile         conan profile for building madbfs client and server (in order)\n" \
                 "                            (PROFILE: path/to/conan/profile)\n" \
                 "                            (default: $(realpath --relative-to . ${DEFAULT_PROFILE_CLIENT}):$(realpath --relative-to . ${DEFAULT_PROFILE_SERVER}))\n" \
-                "    --package             create a tar archive of the resulting binaries\n"
+                "    --package             create a tar archive of the resulting binaries\n" \
+                "    --unity-build         enable unity build (for madbfs client)\n"
             shift
             exit 0
             ;;
@@ -193,6 +196,11 @@ main() {
             shift 1
             continue
             ;;
+        "--unity-build")
+            unity_build=true
+            shift 1
+            continue
+            ;;
         "--")
             shift
             break
@@ -221,7 +229,7 @@ main() {
         echo -e "\tmadbfs-server (build_type: ${build_type_server} | profile: ${profile_server})"
 
         build_server "${build_type_server}" "${profile_client}" "${profile_server}"
-        build_client "${build_type_client}" "${profile_client}" "${servers_path}"
+        build_client "${build_type_client}" "${profile_client}" "${servers_path}" "${unity_build}"
         ;;
     "client")
         echo -e "\tmadbfs        (build_type: ${build_type_client} | profile: ${profile_client})"
@@ -232,7 +240,7 @@ main() {
             exit 1
         fi
 
-        build_client "${build_type_client}" "${profile_client}" "${servers_path}"
+        build_client "${build_type_client}" "${profile_client}" "${servers_path}" "${unity_build}"
         ;;
     "server")
         echo -e "\tmadbfs-server (build_type: ${build_type_server} | profile: ${profile_server})"
