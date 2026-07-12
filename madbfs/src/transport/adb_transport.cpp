@@ -12,6 +12,8 @@ using namespace madbfs;
 // helper functions/classes
 namespace
 {
+    static constexpr auto block_size = 128 * 1024;
+
     /**
      * @brief Parse integral types from string.
      *
@@ -354,6 +356,8 @@ namespace
             const auto ifile = fmt::format("if=\"{}\"", req.in_path);
             const auto seek  = fmt::format("seek={}", req.out_offset);
             const auto ofile = fmt::format("of=\"{}\"", req.out_path);
+            const auto ibs   = fmt::format("ibs={}", block_size);
+            const auto obs   = fmt::format("obs={}", block_size);
 
             // count_bytes: https://stackoverflow.com/a/40792605/16506263
             // notrunc    : https://unix.stackexchange.com/a/146923
@@ -364,10 +368,12 @@ namespace
                 "iflag=skip_bytes,count_bytes",
                 skip,
                 count,
+                ibs,
                 ifile,
                 "oflag=seek_bytes",
                 "conv=notrunc",
                 seek,
+                obs,
                 ofile,
             });
 
@@ -422,10 +428,12 @@ namespace
             const auto  skip  = fmt::format("skip={}", offset);
             const auto  count = fmt::format("count={}", out.size());
             const auto  ifile = fmt::format("if=\"{}\"", path);
+            const auto  ibs   = fmt::format("ibs={}", block_size);
+            const auto  obs   = fmt::format("obs={}", block_size);
 
             // `bs` is skipped, relies on `count_bytes`: https://stackoverflow.com/a/40792605/16506263
             auto res = co_await cmd::exec(
-                { "adb", "shell", "dd", "iflag=skip_bytes,count_bytes", skip, count, ifile }
+                { "adb", "shell", "dd", ibs, obs, "iflag=skip_bytes,count_bytes", skip, count, ifile }
             );
 
             co_return res.transform([&](Str str) {
@@ -445,12 +453,14 @@ namespace
             const auto& path  = entry->second;
             const auto  seek  = fmt::format("seek={}", req.offset);
             const auto  ofile = fmt::format("of=\"{}\"", path);
+            const auto  ibs   = fmt::format("ibs={}", block_size);
+            const auto  obs   = fmt::format("obs={}", block_size);
 
             auto in_str = Str{ reinterpret_cast<const char*>(req.in.data()), req.in.size() };
 
             // `notrunc` flag is necessary to prevent truncating file: https://unix.stackexchange.com/a/146923
             auto res = co_await cmd::exec(
-                { "adb", "shell", "dd", "oflag=seek_bytes", "conv=notrunc", seek, ofile }, in_str
+                { "adb", "shell", "dd", ibs, obs, "oflag=seek_bytes", "conv=notrunc", seek, ofile }, in_str
             );
 
             // assume all the data is written to device on success
