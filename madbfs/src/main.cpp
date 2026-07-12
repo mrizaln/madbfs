@@ -2,6 +2,7 @@
 #include "madbfs/operations.hpp"
 
 #include <madbfs-common/log.hpp>
+#include <madbfs-gen/version.hpp>
 
 #include <exception>
 
@@ -35,6 +36,7 @@ try {
         return 1;
     }
 
+    fmt::println("[madbfs] version is {}", madbfs::version::get_version_full());
     if (opt.caching) {
         fmt::println(
             "[madbfs] mount '{}@{}' [cache={} MiB, page={} KiB]",
@@ -48,6 +50,7 @@ try {
     }
 
     if (opt.log_file != "-") {
+        madbfs::log_i(__func__, "[madbfs] version is {}", madbfs::version::get_version_full());
         if (opt.caching) {
             madbfs::log_i(
                 __func__,
