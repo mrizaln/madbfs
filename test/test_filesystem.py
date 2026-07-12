@@ -171,7 +171,7 @@ def environ(request) -> tuple[Environ, Case]:
         f"--cache-size={CACHE_SIZE}",
     ]
     if not request.param.use_server:
-        mount_cmd.append("--no-server")
+        mount_cmd.append("--adb-only")
 
     if not request.param.use_cache:
         mount_cmd.append("--no-cache")
@@ -199,6 +199,12 @@ def environ(request) -> tuple[Environ, Case]:
 def print_madbfs_version():
     cmd = run([BINARY_PATH, "--version"], stdout=PIPE, stderr=PIPE, text=True)
     logger.info(f"madbfs --version: {cmd.stdout.split('\n')[0].split()[-1]}")
+
+
+def print_toybox_version():
+    cmd = ["adb", "shell", "toybox", "--version"]
+    cmd = run(cmd, stdout=PIPE, stderr=STDOUT, text=True)
+    logger.info(f"toybox --version: {cmd.stdout.split('\n')[0].split()[-1]}")
 
 
 def ipc_connect(serial: str) -> socket:
@@ -822,6 +828,7 @@ def test_filesystem(environ):
     )
 
     print_madbfs_version()
+    print_toybox_version()
 
     cmd = cmd_base + [f"--serial={serial}", str(mount_point)]
     proc = Popen(cmd, stdout=PIPE, universal_newlines=True)
