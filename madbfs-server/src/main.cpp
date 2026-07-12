@@ -32,6 +32,7 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
             fmt::println("  --port PORT       Port number the server listen on (default: 23237");
             fmt::println("  --debug           Enable debug logging.");
             fmt::println("  --verbose         Enable verbose logging.");
+            fmt::println("  --version         Print madbfs-server version.");
             return Exit{ 0 };
         } else if (arg == "--debug") {
             args.log_level = Level::debug;
@@ -53,6 +54,9 @@ std::variant<Exit, Args> parse_args(int argc, char** argv)
                 fmt::println(stderr, "failed to parse port number '{}': invalid trailing characters", arg);
                 return Exit{ 1 };
             }
+        } else if (arg == "--version") {
+            fmt::println("{}", madbfs::version::get_version_full());
+            return Exit{ 0 };
         } else {
             fmt::println(stderr, "unknown argument: {}", arg);
             return Exit{ 1 };
