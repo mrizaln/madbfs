@@ -972,9 +972,9 @@ namespace madbfs::cache
 
             if (page_id) {
                 entry.pages.emplace(key.index, *page_id);
-                page_ptr->set_synced(true);
             }
 
+            page_ptr->set_synced(true);
             co_return page_ptr;
         }
 
