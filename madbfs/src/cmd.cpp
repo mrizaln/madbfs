@@ -184,13 +184,11 @@ namespace madbfs::cmd
 
         auto args = cmd | sv::drop(1) | sv::transform(to_boost_str);
         auto proc = bp::process{ exec, exe, args, bp::process_stdio{ pipe_in, pipe_out, pipe_err } };
-        auto ec   = net::error_code{};
 
-        // NOTE: synchronous write to prevent interleaving
-        if (auto n = net::write(pipe_in, net::buffer(in), ec); ec) {
-            log_e(__func__, "failed to write to stdin: {}", ec.message());
-            co_return Unexpect{ async::to_generic_err(ec) };
-        } else if (n < in.size()) {
+        if (auto n = co_await async::write_exact<char>(pipe_in, in); not n) {
+            log_e(__func__, "failed to write to stdin: {}", n.error().message());
+            co_return Unexpect{ async::to_generic_err(n.error()) };
+        } else if (*n < in.size()) {
             co_return Unexpect{ Errc::broken_pipe };
         }
         pipe_in.close();
