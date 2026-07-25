@@ -1033,7 +1033,13 @@ namespace madbfs::cache
             }
 
             auto in_span = Span{ in.data() + in_off, local_size };
-            co_return page.write(in_span, local_offset);
+            auto written = page.write(in_span, local_offset);
+
+            if (page.is_fully_dirty()) {
+                page.set_synced(true);
+            }
+
+            co_return written;
         }
 
         /**
