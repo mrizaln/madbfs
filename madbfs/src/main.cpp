@@ -36,7 +36,7 @@ Await<int> push(const args::PushOpt& opt)
 
     auto abi = co_await adb::get_abi(opt.serial);
     if (not abi) {
-        fmt::println(stderr, "[madbfs] failed to get abi: {}", err_msg(abi.error()));
+        fmt::println(stderr, "error: failed to get abi: {}", err_msg(abi.error()));
         co_return 1;
     }
 
@@ -45,12 +45,12 @@ Await<int> push(const args::PushOpt& opt)
     auto ofile        = fmt::format("of={}", destination);
 
     if (auto res = co_await cmd::exec({ "adb", "shell", "dd", ofile }, server_str); not res) {
-        fmt::println(stderr, "[madbfs] failed to push server: {}", err_msg(res.error()));
+        fmt::println(stderr, "error: failed to push server: {}", err_msg(res.error()));
         co_return 1;
     }
 
     if (auto res = co_await cmd::exec({ "adb", "shell", "chmod", "+x", destination }); not res) {
-        fmt::println(stderr, "[madbfs] failed to update server permission: {}", err_msg(res.error()));
+        fmt::println(stderr, "error: failed to update server permission: {}", err_msg(res.error()));
         co_return 1;
     }
 

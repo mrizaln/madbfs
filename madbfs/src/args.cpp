@@ -114,22 +114,24 @@ namespace
             co_return devices[0].serial;
         }
 
-        fmt::println("[madbfs] multiple devices detected,");
+        fmt::println("[madbfs] multiple devices detected:");
         for (auto i : sv::iota(0u, devices.size())) {
-            fmt::println("         - {}: {}", i + 1, devices[i].serial);
+            fmt::println("\t- {}: {}", i + 1, devices[i].serial);
         }
 
         auto choice = 1uz;
+        fmt::print("[madbfs] please specify which one you would like to use: ");
+
         while (true) {
-            auto input = linr::read<usize>("[madbfs] please specify which one you would like to use: ");
+            auto input = linr::read<usize>();
             if (input and input.value() > 0 and input.value() <= devices.size()) {
                 choice = *input;
                 break;
             } else if (not input and linr::is_stream_error(input.error())) {
-                fmt::println("\n[madbfs] stdin closed, aborting.");
+                fmt::println(stderr, "\nerror: stdin closed, aborting.");
                 std::exit(1);    // I don't think there is an easy way out of this but exit
             } else {
-                fmt::println("[madbfs] invalid choice, enter a number between 1 - {}: ", devices.size());
+                fmt::print(stderr, "error: invalid choice, enter number between 1 - {}: ", devices.size());
                 continue;
             }
         }
@@ -220,7 +222,7 @@ namespace
         if (madbfs_opt.root) {
             auto path = String{ madbfs_opt.root };
             if (path.empty() or path.front() != '/') {
-                fmt::println(stderr, "[madbfs] root path is not valid");
+                fmt::println(stderr, "error: root path '{}' is not valid", path);
                 co_return 1;
             }
 
@@ -228,18 +230,18 @@ namespace
 
             auto dir = co_await cmd::exec({ "adb", "-s", serial, "shell", "test", "-d", quoted });
             if (not dir) {
-                fmt::println(stderr, "[madbfs] root path is not a directory or not exists");
+                fmt::println(stderr, "error: root path '{}' is not a directory or not exists", path);
                 co_return 1;
             }
 
             auto real = co_await cmd::exec({ "adb", "-s", serial, "shell", "realpath", quoted });
             if (not real) {
-                fmt::println(stderr, "[madbfs] failed to resolve path: {}", err_msg(real.error()));
+                fmt::println(stderr, "error: failed to resolve '{}' path: {}", path, err_msg(real.error()));
                 co_return 1;
             }
 
             root = path::create_buf(String{ util::strip(*real) }).value();
-            fmt::println("[madbfs] root resolved: {:?} -> {:?}", path, root);
+            fmt::println("[madbfs] root resolved: '{}' -> '{}'", path, root);
         }
 
         auto port       = static_cast<u16>(madbfs_opt.port);
