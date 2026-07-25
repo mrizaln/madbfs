@@ -108,14 +108,7 @@ int mount(const args::MountOpt& opt)
     }
 
     const auto args = opt.args.inner();
-    const auto ret  = fuse_main(args.argc, args.argv, &operations::operations, (void*)&opt);
-
-    // on invalid argument (1) and no mount point specified (2)
-    if (ret == 1 or ret == 2) {
-        args::show_help(args.argv[0]);
-    }
-
-    return ret;
+    return fuse_main(args.argc, args.argv, &operations::operations, (void*)&opt);
 }
 
 int main(int argc, char** argv)
@@ -127,13 +120,11 @@ try {
 
     context.restart();
 
-    auto ret = parsed.visit(Overload{
+    return parsed.visit(Overload{
         [&](const args::MountOpt& opt) { return mount(opt); },
         [&](const args::PushOpt& opt) { return async::once(context, push(opt)); },
         [](int ret) { return ret; },
     });
-
-    return ret;
 } catch (const std::exception& e) {
     fmt::println(stderr, "error: exception occurred: {}", e.what());
     return 1;

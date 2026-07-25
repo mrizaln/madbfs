@@ -382,8 +382,7 @@ namespace madbfs::args
         {
             // early parse
             if (::fuse_parse_cmdline(&args.inner(), &opts) != 0) {
-                fmt::println(stderr, "error: failed to parse options\n");
-                show_help(argv[0]);
+                fmt::println(stderr, "error: failed to parse options");
                 co_return ParseResult{ 1 };
             }
             auto free = util::defer([&] { ::free(opts.mountpoint); });
@@ -409,7 +408,6 @@ namespace madbfs::args
 
         if (::fuse_opt_parse(&args.inner(), &madbfs_opt, madbfs_opt_spec.data(), NULL) != 0) {
             fmt::println(stderr, "error: failed to parse options");
-            show_help(argv[0]);
             co_return 1;
         }
 
@@ -419,7 +417,7 @@ namespace madbfs::args
 
         if (not mountpoint) {
             fmt::println(stderr, "error: no mountpoint specified");
-            show_help(argv[0]);
+            fmt::println(stderr, "try --help");
             co_return 2;
         }
 
