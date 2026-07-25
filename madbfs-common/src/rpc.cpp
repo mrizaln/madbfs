@@ -213,7 +213,7 @@ namespace
 
         Opt<Status> read_status()
         {
-            return read_int<i32>().transform([](u8 v) { return Status{ v }; });
+            return read_int<i32>().transform([](i32 v) { return Status{ v }; });
         }
 
         Opt<Id> read_id()
