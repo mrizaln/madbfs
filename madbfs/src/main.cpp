@@ -29,6 +29,11 @@ Await<int> push(const args::PushOpt& opt)
 {
     constexpr auto destination = "/data/local/tmp/madbfs-server";
 
+    if (::setenv("ANDROID_SERIAL", opt.serial.c_str(), 1) < 0) {
+        fmt::println(stderr, "error: failed to set env variable 'ANDROID_SERIAL' ({})", strerror(errno));
+        co_return 1;
+    }
+
     auto abi = co_await adb::get_abi(opt.serial);
     if (not abi) {
         fmt::println(stderr, "[madbfs] failed to get abi: {}", err_msg(abi.error()));
@@ -39,9 +44,13 @@ Await<int> push(const args::PushOpt& opt)
     auto server_str   = Str{ reinterpret_cast<const char*>(server_bytes.data()), server_bytes.size() };
     auto ofile        = fmt::format("of={}", destination);
 
-    auto res = co_await cmd::exec({ "adb", "-s", opt.serial, "shell", "dd", ofile }, server_str);
-    if (not res) {
+    if (auto res = co_await cmd::exec({ "adb", "shell", "dd", ofile }, server_str); not res) {
         fmt::println(stderr, "[madbfs] failed to push server: {}", err_msg(res.error()));
+        co_return 1;
+    }
+
+    if (auto res = co_await cmd::exec({ "adb", "shell", "chmod", "+x", destination }); not res) {
+        fmt::println(stderr, "[madbfs] failed to update server permission: {}", err_msg(res.error()));
         co_return 1;
     }
 
