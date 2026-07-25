@@ -5,6 +5,7 @@
 
 #include <madbfs-gen/version.hpp>
 
+#include <madbfs-common/util/defer.hpp>
 #include <madbfs-common/util/split.hpp>
 
 #include <fmt/base.h>
@@ -14,10 +15,63 @@
 #include <limits>
 
 using namespace madbfs;
+using namespace madbfs::args;
 
 // helper functions/classes
 namespace
 {
+    /**
+     * @class MadbfsOpt
+     *
+     * @brief Madbfs options.
+     *
+     * Don't set default value here for string, set them in the `parse()` function. This structure is used
+     * with `fuse_opt`, parsed opt with correct values is stored in `ParsedOpt` instead.
+     */
+    struct MadbfsOpt
+    {
+        const char* serial     = nullptr;
+        const char* root       = nullptr;
+        const char* log_level  = nullptr;
+        const char* log_file   = nullptr;
+        int         cache_size = 256;    // in MiB
+        int         page_size  = 128;    // in KiB
+        int         ttl        = 60;     // in seconds
+        int         timeout    = 2;      // in seconds
+        int         port       = 23237;
+        int         no_server  = false;
+        int         adb_only   = false;
+        int         no_cache   = false;
+        int         push       = false;
+
+        ~MadbfsOpt()
+        {
+            ::free((void*)serial);
+            ::free((void*)root);
+            ::free((void*)log_level);
+            ::free((void*)log_file);
+        }
+    };
+
+    static constexpr auto madbfs_opt_spec = std::to_array<fuse_opt>({
+        // clang-format off
+        { "--serial=%s",     offsetof(MadbfsOpt, serial),     true },
+        { "--root=%s",       offsetof(MadbfsOpt, root),       true },
+        { "--log-level=%s",  offsetof(MadbfsOpt, log_level),  true },
+        { "--log-file=%s",   offsetof(MadbfsOpt, log_file),   true },
+        { "--cache-size=%d", offsetof(MadbfsOpt, cache_size), true },
+        { "--page-size=%d",  offsetof(MadbfsOpt, page_size),  true },
+        { "--ttl=%d",        offsetof(MadbfsOpt, ttl),        true },
+        { "--timeout=%d",    offsetof(MadbfsOpt, timeout),    true },
+        { "--port=%d",       offsetof(MadbfsOpt, port),       true },
+        { "--no-server",     offsetof(MadbfsOpt, no_server),  true },
+        { "--adb-only",      offsetof(MadbfsOpt, adb_only),   true },
+        { "--no-cache",      offsetof(MadbfsOpt, no_cache),   true },
+        { "--push-server",   offsetof(MadbfsOpt, push),       true },
+        // clang-format on
+        FUSE_OPT_END,
+    });
+
     /**
      * @brief Check device status specified by its serial is exists.
      *
@@ -25,7 +79,7 @@ namespace
      *
      * @return Device status.
      */
-    inline Await<adb::DeviceStatus> check_serial(Str serial)
+    Await<adb::DeviceStatus> check_serial(Str serial)
     {
         if (auto maybe_devices = co_await adb::list_devices(); maybe_devices.has_value()) {
             auto found = sr::find(*maybe_devices, serial, &adb::Device::serial);
@@ -43,7 +97,7 @@ namespace
      *
      * This function may prompt the user (stdin) if there are multiple device connected to the computer.
      */
-    inline Await<String> get_serial()
+    Await<String> get_serial()
     {
         auto maybe_devices = co_await adb::list_devices();
         if (not maybe_devices.has_value()) {
@@ -84,6 +138,178 @@ namespace
         co_return devices[choice - 1].serial;
     }
 
+    /**
+     * @brief Create RAII string from C-style string (may be null).
+     *
+     * @param string Char array
+     *
+     * This function is necessary because apparently, it is illegal to pass nullptr to std::string's
+     * constructor. I am baffled as well.
+     */
+    String to_string(const char* string)
+    {
+        return string ? string : "";
+    }
+
+    /**
+     * @brief Parse and validate arguments into madbfs mount options.
+     *
+     * @param madbfs_opt Parsed madbfs options (not validated yet).
+     * @param args Original fuse arguments.
+     * @param mountpoint Mountpoint of madbfs.
+     * @param foreground Whether madbfs will be launched is in foreground mode.
+     */
+    Await<ParseResult> into_mount_opt(
+        const MadbfsOpt& madbfs_opt,
+        FuseArgs         args,
+        String           mountpoint,
+        bool             foreground
+    )
+    {
+        if (madbfs_opt.cache_size <= 0) {
+            fmt::println(stderr, "error: cache size must be positive");
+            co_return 1;
+        }
+
+        if (madbfs_opt.page_size <= 0) {
+            fmt::println(stderr, "error: page size must be positive");
+            co_return 1;
+        }
+
+        if (madbfs_opt.port > std::numeric_limits<u16>::max() or madbfs_opt.port <= 0) {
+            fmt::println("[madbfs] invalid port {}", madbfs_opt.port);
+            co_return 1;
+        }
+
+        fmt::println("[madbfs] checking adb availability...");
+        if (auto status = co_await adb::start_server(); not status) {
+            fmt::println(stderr, "\nerror: failed to start adb server: {}", err_msg(status.error()));
+            fmt::println(stderr, "\nnote: make sure adb is installed and in PATH.");
+            fmt::println(stderr, "note: make sure phone debugging permission is enabled.");
+            fmt::println(stderr, "      phone with its screen locked might denies adb connection.");
+            fmt::println(stderr, "      you might need to unlock your device first to be able to use adb.");
+            co_return 1;
+        }
+
+        auto log_level = log::level_from_str(madbfs_opt.log_level);
+        if (not log_level.has_value()) {
+            fmt::println(stderr, "error: invalid log level '{}'", madbfs_opt.log_level);
+            fmt::println(stderr, "       valid log levels: {}", log::level_names);
+            co_return 1;
+        }
+
+        auto serial = to_string(madbfs_opt.serial);
+        if (serial.empty()) {
+            if (auto env = ::getenv("ANDROID_SERIAL"); env != nullptr) {
+                fmt::println("[madbfs] using serial '{}' from env variable 'ANDROID_SERIAL'", env);
+                serial = env;
+            } else if (auto res = co_await get_serial(); not res.empty()) {
+                serial = std::move(res);
+            } else {
+                fmt::println(stderr, "error: no device found, make sure your device is connected");
+                co_return 1;
+            }
+        }
+
+        if (auto dev = co_await check_serial(serial); dev != adb::DeviceStatus::Device) {
+            fmt::println(stderr, "error: serial '{}' is not valid ({})", serial, to_string(dev));
+            co_return 1;
+        }
+
+        auto root = path::PathBuf{};
+        if (madbfs_opt.root) {
+            auto path = String{ madbfs_opt.root };
+            if (path.empty() or path.front() != '/') {
+                fmt::println(stderr, "[madbfs] root path is not valid");
+                co_return 1;
+            }
+
+            auto quoted = fmt::format("\"{}\"", path);
+
+            auto dir = co_await cmd::exec({ "adb", "-s", serial, "shell", "test", "-d", quoted });
+            if (not dir) {
+                fmt::println(stderr, "[madbfs] root path is not a directory or not exists");
+                co_return 1;
+            }
+
+            auto real = co_await cmd::exec({ "adb", "-s", serial, "shell", "realpath", quoted });
+            if (not real) {
+                fmt::println(stderr, "[madbfs] failed to resolve path: {}", err_msg(real.error()));
+                co_return 1;
+            }
+
+            root = path::create_buf(String{ util::strip(*real) }).value();
+            fmt::println("[madbfs] root resolved: {:?} -> {:?}", path, root);
+        }
+
+        auto port       = static_cast<u16>(madbfs_opt.port);
+        auto connection = Connection{ AdbOnly{} };
+
+        if (madbfs_opt.adb_only) {
+            fmt::println("[madbfs] adb-only flag specified, won't launch server and won't try to connect");
+        } else if (madbfs_opt.no_server) {
+            connection = NoServer{ .port = port };
+            fmt::println("[madbfs] no-server flag specified, won't launch server but will try to connect");
+        } else if (auto abi = co_await adb::get_abi(serial); not abi) {
+            fmt::println("[madbfs] device ABI query failed: {} (fallback to adb)", err_msg(abi.error()));
+        } else {
+            connection = Server{ .abi = *abi, .port = port };
+        }
+
+        // if logfile is set to stdout but not in foreground mode, ignore it.
+        auto log_file = to_string(madbfs_opt.log_file);
+        if (log_file == "-" and not foreground) {
+            log_file = "";
+        }
+
+        auto caching = Opt<Caching>{};
+        if (not madbfs_opt.no_cache) {
+            caching = Caching{
+                .cachesize = std::max(std::bit_ceil(static_cast<usize>(madbfs_opt.cache_size)), 32uz),
+                .pagesize = std::clamp(std::bit_ceil(static_cast<usize>(madbfs_opt.page_size)), 64uz, 4096uz),
+            };
+        }
+
+        co_return MountOpt{
+            .args       = std::move(args),
+            .mount      = std::move(mountpoint),
+            .serial     = std::move(serial),
+            .root       = std::move(root),
+            .connection = connection,
+            .caching    = caching,
+            .log_level  = log_level.value(),
+            .log_file   = std::move(log_file),
+            .ttl        = madbfs_opt.ttl,
+            .timeout    = madbfs_opt.timeout,
+        };
+    }
+
+    /**
+     * @brief Parse into madbfs push options.
+     *
+     * @param serial Device serial.
+     */
+    Await<ParseResult> into_push_opt(String serial)
+    {
+        if (serial.empty()) {
+            if (auto env = ::getenv("ANDROID_SERIAL"); env != nullptr) {
+                fmt::println("[madbfs] using serial '{}' from env variable 'ANDROID_SERIAL'", env);
+                serial = env;
+            } else if (auto res = co_await get_serial(); not res.empty()) {
+                serial = std::move(res);
+            } else {
+                fmt::println(stderr, "error: no device found, make sure your device is connected");
+                co_return 1;
+            }
+        }
+
+        if (auto dev = co_await check_serial(serial); dev != adb::DeviceStatus::Device) {
+            fmt::println(stderr, "error: serial '{}' is not valid ({})", serial, to_string(dev));
+            co_return 1;
+        }
+
+        co_return args::PushOpt{ std::move(serial) };
+    }
 }
 
 // args.hpp impl
@@ -131,7 +357,8 @@ namespace madbfs::args
             "                             (fall back to adb shell calls if connection failed)\n"
             "                             (useful for debugging the server)\n"
             "    --adb-only             don't launch server and don't try to connect\n"
-            "    --no-cache             don't use data caching\n",
+            "    --no-cache             don't use data caching\n"
+            "    --push-server          push the server binary to your device\n",
             log::level_names
         );
 
@@ -142,186 +369,60 @@ namespace madbfs::args
 
     Await<ParseResult> parse(int argc, char** argv)
     {
-        fuse_args args = FUSE_ARGS_INIT(argc, argv);
-
+        auto args       = FuseArgs{ argc, argv };
         auto opts       = fuse_cmdline_opts{};
-        auto mountpoint = String{};
+        auto mountpoint = Opt<String>{};
 
-        // NOTE: early parse to check whether mount point exists or help/version flag is provided. the
-        // resultant opts will not be used and args will be parsed again in fuse_main later.
-        {
-            if (::fuse_parse_cmdline(&args, &opts) != 0) {
-                fmt::println(stderr, "error: failed to parse options\n");
-                show_help(argv[0]);
-                ::fuse_opt_free_args(&args);
-                co_return ParseResult{ 1 };
-            }
-
-            if (opts.show_help) {
-                show_help(argv[0]);
-                ::fuse_opt_free_args(&args);
-                ::free(opts.mountpoint);
-                co_return ParseResult{ 0 };
-            }
-
-            if (opts.show_version) {
-                fmt::println("madbfs version {}", version::get_version_full());
-                fmt::println("FUSE library version {}", ::fuse_pkgversion());
-                ::fuse_opt_free_args(&args);
-                ::free(opts.mountpoint);
-                co_return ParseResult{ 0 };
-            }
-
-            if (opts.mountpoint == nullptr) {
-                fmt::println(stderr, "error: no mountpoint specified");
-                show_help(argv[0]);
-                ::fuse_opt_free_args(&args);
-                co_return ParseResult{ 2 };
-            } else {
-                mountpoint = opts.mountpoint;
-                ::free(opts.mountpoint);
-            }
-
-            // recreate args
-            ::fuse_opt_free_args(&args);
-            args = FUSE_ARGS_INIT(argc, argv);
-        }
-
-        // NOTE: these strings must be malloc-ed since fuse_opt_parse will free them
+        // NOTE: these strings must be malloc-ed since fuse_opt_parse might free them
         auto madbfs_opt = MadbfsOpt{
             .log_level = ::strdup("warning"),
             .log_file  = ::strdup("-"),
         };
 
-        if (fuse_opt_parse(&args, &madbfs_opt, madbfs_opt_spec.data(), NULL) != 0) {
+        {
+            // early parse
+            if (::fuse_parse_cmdline(&args.inner(), &opts) != 0) {
+                fmt::println(stderr, "error: failed to parse options\n");
+                show_help(argv[0]);
+                co_return ParseResult{ 1 };
+            }
+            auto free = util::defer([&] { ::free(opts.mountpoint); });
+
+            if (opts.show_help) {
+                show_help(argv[0]);
+                co_return 0;
+            }
+
+            if (opts.show_version) {
+                fmt::println("madbfs version {}", version::get_version_full());
+                fmt::println("FUSE library version {}", ::fuse_pkgversion());
+                co_return 0;
+            }
+
+            if (opts.mountpoint != nullptr) {
+                mountpoint = opts.mountpoint;
+            }
+
+            // recreate args
+            args = FuseArgs(argc, argv);
+        }
+
+        if (::fuse_opt_parse(&args.inner(), &madbfs_opt, madbfs_opt_spec.data(), NULL) != 0) {
             fmt::println(stderr, "error: failed to parse options");
             show_help(argv[0]);
-            co_return ParseResult{ 1 };
+            co_return 1;
         }
 
-        if (madbfs_opt.cache_size <= 0) {
-            fmt::println(stderr, "error: cache size must be positive");
-            co_return ParseResult{ 1 };
+        if (madbfs_opt.push) {
+            co_return co_await into_push_opt(to_string(madbfs_opt.serial));
         }
 
-        if (madbfs_opt.page_size <= 0) {
-            fmt::println(stderr, "error: page size must be positive");
-            co_return ParseResult{ 1 };
+        if (not mountpoint) {
+            fmt::println(stderr, "error: no mountpoint specified");
+            show_help(argv[0]);
+            co_return 2;
         }
 
-        if (madbfs_opt.port > std::numeric_limits<u16>::max() or madbfs_opt.port <= 0) {
-            fmt::println("[madbfs] invalid port {}", madbfs_opt.port);
-            ::fuse_opt_free_args(&args);
-            co_return ParseResult{ 1 };
-        }
-
-        fmt::println("[madbfs] checking adb availability...");
-        if (auto status = co_await adb::start_server(); not status) {
-            fmt::println(stderr, "\nerror: failed to start adb server: {}", err_msg(status.error()));
-            fmt::println(stderr, "\nnote: make sure adb is installed and in PATH.");
-            fmt::println(stderr, "note: make sure phone debugging permission is enabled.");
-            fmt::println(stderr, "      phone with its screen locked might denies adb connection.");
-            fmt::println(stderr, "      you might need to unlock your device first to be able to use adb.");
-            ::fuse_opt_free_args(&args);
-            co_return ParseResult{ 1 };
-        }
-
-        auto log_level = log::level_from_str(madbfs_opt.log_level);
-        if (not log_level.has_value()) {
-            fmt::println(stderr, "error: invalid log level '{}'", madbfs_opt.log_level);
-            fmt::println(stderr, "       valid log levels: {}", log::level_names);
-            ::fuse_opt_free_args(&args);
-            co_return ParseResult{ 1 };
-        }
-
-        if (madbfs_opt.serial == nullptr) {
-            if (auto serial = ::getenv("ANDROID_SERIAL"); serial != nullptr) {
-                fmt::println("[madbfs] using serial '{}' from env variable 'ANDROID_SERIAL'", serial);
-                madbfs_opt.serial = ::strdup(serial);
-            } else if (auto serial = co_await get_serial(); not serial.empty()) {
-                madbfs_opt.serial = ::strdup(serial.c_str());
-            } else {
-                fmt::println(stderr, "error: no device found, make sure your device is connected");
-                ::fuse_opt_free_args(&args);
-                co_return ParseResult{ 1 };
-            }
-        }
-
-        if (auto dev = co_await check_serial(madbfs_opt.serial); dev != adb::DeviceStatus::Device) {
-            fmt::println(stderr, "error: serial '{} 'is not valid ({})", madbfs_opt.serial, to_string(dev));
-            ::fuse_opt_free_args(&args);
-            co_return ParseResult{ 1 };
-        }
-
-        auto root = path::PathBuf{};
-        if (madbfs_opt.root) {
-            auto path = String{ madbfs_opt.root };
-            if (path.empty() or path.front() != '/') {
-                fmt::println(stderr, "[madbfs] root path is not valid");
-                ::fuse_opt_free_args(&args);
-                co_return ParseResult{ 1 };
-            }
-
-            auto quoted = fmt::format("\"{}\"", path);
-
-            auto dir = co_await cmd::exec({ "adb", "-s", madbfs_opt.serial, "shell", "test", "-d", quoted });
-            if (not dir) {
-                fmt::println(stderr, "[madbfs] root path is not a directory or not exists");
-                ::fuse_opt_free_args(&args);
-                co_return ParseResult{ 1 };
-            }
-
-            auto real = co_await cmd::exec({ "adb", "-s", madbfs_opt.serial, "shell", "realpath", quoted });
-            if (not real) {
-                fmt::println(stderr, "[madbfs] failed to resolve path: {}", err_msg(real.error()));
-                ::fuse_opt_free_args(&args);
-                co_return ParseResult{ 1 };
-            }
-
-            root = path::create_buf(String{ util::strip(*real) }).value();
-            fmt::println("[madbfs] root resolved: {:?} -> {:?}", path, root);
-        }
-
-        auto port       = static_cast<u16>(madbfs_opt.port);
-        auto connection = Connection{ connection::AdbOnly{} };
-
-        if (madbfs_opt.adb_only) {
-            fmt::println("[madbfs] adb-only flag specified, won't launch server and won't try to connect");
-        } else if (madbfs_opt.no_server) {
-            connection = connection::NoServer{ .port = port };
-            fmt::println("[madbfs] no-server flag specified, won't launch server but will try to connect");
-        } else if (auto abi = co_await adb::get_abi(madbfs_opt.serial); not abi) {
-            fmt::println("[madbfs] device ABI query failed: {} (fallback to adb)", err_msg(abi.error()));
-        } else {
-            connection = connection::Server{ .abi = *abi, .port = port };
-        }
-
-        // if logfile is set to stdout but not in foreground mode, ignore it.
-        auto log_file = std::strcmp(madbfs_opt.log_file, "-") == 0 and not opts.foreground
-                          ? ""
-                          : madbfs_opt.log_file;
-
-        auto caching = Opt<Caching>{};
-        if (not madbfs_opt.no_cache) {
-            caching = Caching{
-                .cachesize = std::max(std::bit_ceil(static_cast<usize>(madbfs_opt.cache_size)), 32uz),
-                .pagesize = std::clamp(std::bit_ceil(static_cast<usize>(madbfs_opt.page_size)), 64uz, 4096uz),
-            };
-        }
-
-        co_return ParseResult::Opt{
-            .opt = {
-                .mount      = std::move(mountpoint),
-                .serial     = madbfs_opt.serial,
-                .root       = std::move(root),
-                .connection = connection,
-                .caching    = caching,
-                .log_level  = log_level.value(),
-                .log_file   = log_file,
-                .ttl        = madbfs_opt.ttl,
-                .timeout    = madbfs_opt.timeout,
-            },
-            .args = args,
-        };
+        co_return co_await into_mount_opt(madbfs_opt, std::move(args), *mountpoint, opts.foreground);
     }
 }

@@ -155,19 +155,19 @@ namespace madbfs::operations
             conn->want &= ~static_cast<u32>(FUSE_CAP_ATOMIC_O_TRUNC);
         }
 
-        auto* args = static_cast<args::ParsedOpt*>(::fuse_get_context()->private_data);
-        assert(args != nullptr and "data should not be empty!");
+        auto* opt = static_cast<const args::MountOpt*>(::fuse_get_context()->private_data);
+        assert(opt != nullptr and "data should not be empty!");
 
-        auto caching = args->caching.transform([](auto& c) {
+        auto caching = opt->caching.transform([](auto& c) {
             auto page_size = c.pagesize * 1024;
             return Caching{ .page_size = page_size, .max_pages = (c.cachesize * 1024 * 1024) / page_size };
         });
 
-        auto ttl     = args->ttl < 1 ? std::nullopt : Opt<Seconds>{ args->ttl };
-        auto timeout = args->timeout < 1 ? std::nullopt : Opt<Seconds>{ args->timeout };
+        auto ttl     = opt->ttl < 1 ? std::nullopt : Opt<Seconds>{ opt->ttl };
+        auto timeout = opt->timeout < 1 ? std::nullopt : Opt<Seconds>{ opt->timeout };
         auto fuse    = ::fuse_get_context()->fuse;
 
-        return new Madbfs{ fuse, args->connection, caching, args->root, args->mount, ttl, timeout };
+        return new Madbfs{ fuse, opt->connection, caching, opt->root, opt->mount, ttl, timeout };
     }
 
     void destroy(void* private_data) noexcept

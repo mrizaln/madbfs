@@ -13,45 +13,60 @@
 
 namespace madbfs::args
 {
-    /**
-     * @class MadbfsOpt
-     *
-     * @brief Madbfs options.
-     *
-     * Don't set default value here for string, set them in the `parse()` function. This structure is used
-     * with `fuse_opt`, parsed opt with correct values is stored in `ParsedOpt` instead.
-     */
-    struct MadbfsOpt
+    class FuseArgs
     {
-        const char* serial     = nullptr;
-        const char* root       = nullptr;
-        const char* log_level  = nullptr;
-        const char* log_file   = nullptr;
-        int         cache_size = 256;    // in MiB
-        int         page_size  = 128;    // in KiB
-        int         ttl        = 60;     // in seconds
-        int         timeout    = 2;      // in seconds
-        int         port       = 23237;
-        int         no_server  = false;
-        int         adb_only   = false;
-        int         no_cache   = false;
+    public:
+        FuseArgs(const FuseArgs&)            = delete;
+        FuseArgs& operator=(const FuseArgs&) = delete;
 
-        ~MadbfsOpt()
+        FuseArgs()
+            : args{}
         {
-            ::free((void*)serial);
-            ::free((void*)root);
-            ::free((void*)log_level);
-            ::free((void*)log_file);
         }
+
+        FuseArgs(int argc, char** argv)
+        {
+            args = FUSE_ARGS_INIT(argc, argv);    //
+        }
+
+        FuseArgs(FuseArgs&& other)
+            : args{ std::exchange(other.args, {}) }
+        {
+        }
+
+        FuseArgs& operator=(FuseArgs&& other)
+        {
+            if (&other != this) {
+                ::fuse_opt_free_args(&args);
+                args = { std::exchange(other.args, {}) };
+            }
+            return *this;
+        }
+
+        ~FuseArgs() { ::fuse_opt_free_args(&args); }
+
+        fuse_args&       inner() { return args; }
+        const fuse_args& inner() const { return args; }
+
+    private:
+        fuse_args args;
     };
 
-    namespace connection
+    // Connection strategy
+    // -------------------
+    struct AdbOnly
     {
-        // clang-format off
-        struct AdbOnly { };
-        struct NoServer{ u16 port; };
-        struct Server  { adb::Abi abi; u16 port; };
-        // clang-format on
+    };
+
+    struct NoServer
+    {
+        u16 port;
+    };
+
+    struct Server
+    {
+        adb::Abi abi;
+        u16      port;
     };
 
     /**
@@ -59,10 +74,11 @@ namespace madbfs::args
      *
      * @brief Connection strategy (transport) to be used by the filesystem.
      */
-    struct Connection : util::VarWrapper<connection::AdbOnly, connection::NoServer, connection::Server>
+    struct Connection : util::VarWrapper<AdbOnly, NoServer, Server>
     {
         using VarWrapper::VarWrapper;
     };
+    // -------------------
 
     /**
      * @class Caching
@@ -75,13 +91,11 @@ namespace madbfs::args
         usize pagesize;
     };
 
-    /**
-     * @class ParsedOpt
-     *
-     * @brief Parsed madbfs options.
-     */
-    struct ParsedOpt
+    // Program options
+    // ---------------
+    struct MountOpt
     {
+        FuseArgs      args;
         String        mount;
         String        serial;
         path::PathBuf root;
@@ -93,50 +107,23 @@ namespace madbfs::args
         i32           timeout;
     };
 
+    struct PushOpt
+    {
+        String serial;
+    };
+
     /**
      * @class ParseResult
      *
-     * @brief Argument parsing result.
+     * @brief Parsed madbfs arguments.
      *
-     * A variant between the parsed opt and exit code.
+     * The integer variant is for when parsing failed; it contains a return code.
      */
-    struct ParseResult
+    struct ParseResult : util::VarWrapper<MountOpt, PushOpt, int>
     {
-        // clang-format off
-        struct Opt  { ParsedOpt opt; fuse_args args; };
-        struct Exit { int status; };
-
-        ParseResult() : result{ Exit{ 0 } } {}
-        ParseResult(Opt opt)    : result{ std::move(opt) } {}
-        ParseResult(int status) : result{ Exit{ status } } {}
-
-        bool is_opt()  const { return std::holds_alternative<Opt>(result);  }
-        bool is_exit() const { return std::holds_alternative<Exit>(result); }
-
-        Opt&&  opt()  && { return std::move(std::get<Opt>(result));  }
-        Exit&& exit() && { return std::move(std::get<Exit>(result)); }
-
-        Var<Opt, Exit> result;
-        // clang-format on
+        using VarWrapper::VarWrapper;
     };
-
-    static constexpr auto madbfs_opt_spec = std::to_array<fuse_opt>({
-        // clang-format off
-        { "--serial=%s",     offsetof(MadbfsOpt, serial),     true },
-        { "--root=%s",       offsetof(MadbfsOpt, root),       true },
-        { "--log-level=%s",  offsetof(MadbfsOpt, log_level),  true },
-        { "--log-file=%s",   offsetof(MadbfsOpt, log_file),   true },
-        { "--cache-size=%d", offsetof(MadbfsOpt, cache_size), true },
-        { "--page-size=%d",  offsetof(MadbfsOpt, page_size),  true },
-        { "--ttl=%d",        offsetof(MadbfsOpt, ttl),        true },
-        { "--timeout=%d",    offsetof(MadbfsOpt, timeout),    true },
-        { "--port=%d",       offsetof(MadbfsOpt, port),       true },
-        { "--no-server",     offsetof(MadbfsOpt, no_server),  true },
-        { "--adb-only",      offsetof(MadbfsOpt, adb_only),   true },
-        { "--no-cache",      offsetof(MadbfsOpt, no_cache),   true },
-        // clang-format on
-        FUSE_OPT_END,
-    });
+    // ---------------
 
     /**
      * @brief Print help into stdout.
