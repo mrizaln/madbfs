@@ -312,11 +312,12 @@ namespace
 
         co_return args::PushOpt{ std::move(serial) };
     }
-}
 
-// args.hpp impl
-namespace madbfs::args
-{
+    /**
+     * @brief Print help into stdout.
+     *
+     * @param prog Program name.
+     */
     void show_help(const char* prog)
     {
         fmt::print(stdout, "usage: {} [options] <mountpoint>\n\n", prog);
@@ -368,7 +369,11 @@ namespace madbfs::args
         ::fuse_cmdline_help();
         ::fuse_lowlevel_help();
     };
+}
 
+// args.hpp impl
+namespace madbfs::args
+{
     Await<ParseResult> parse(int argc, char** argv)
     {
         auto args       = FuseArgs{ argc, argv };

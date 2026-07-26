@@ -13,6 +13,11 @@
 
 namespace madbfs::args
 {
+    /**
+     * @class FuseArgs
+     *
+     * @brief RAII fuse_args cause I don't want to deal with manual deallocation.
+     */
     class FuseArgs
     {
     public:
@@ -24,10 +29,7 @@ namespace madbfs::args
         {
         }
 
-        FuseArgs(int argc, char** argv)
-        {
-            args = FUSE_ARGS_INIT(argc, argv);    //
-        }
+        FuseArgs(int argc, char** argv) { args = FUSE_ARGS_INIT(argc, argv); }
 
         FuseArgs(FuseArgs&& other)
             : args{ std::exchange(other.args, {}) }
@@ -124,13 +126,6 @@ namespace madbfs::args
         using VarWrapper::VarWrapper;
     };
     // ---------------
-
-    /**
-     * @brief Print help into stdout.
-     *
-     * @param prog Program name.
-     */
-    void show_help(const char* prog);
 
     /**
      * @brief Parse the command line arguments; show help message if needed.
