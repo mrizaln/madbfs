@@ -10,8 +10,8 @@
 
 #include <fmt/base.h>
 #include <fmt/ranges.h>
-#include <linr/read.hpp>
 
+#include <iostream>
 #include <limits>
 
 using namespace madbfs;
@@ -119,20 +119,20 @@ namespace
             fmt::println("\t- {}: {}", i + 1, devices[i].serial);
         }
 
-        auto choice = 1uz;
+        auto choice = 0uz;
         fmt::print("[madbfs] please specify which one you would like to use: ");
 
         while (true) {
-            auto input = linr::read<usize>();
-            if (input and input.value() > 0 and input.value() <= devices.size()) {
-                choice = *input;
+            std::cin >> std::noskipws >> choice;
+            if (choice > 0 and choice <= devices.size()) {
                 break;
-            } else if (not input and linr::is_stream_error(input.error())) {
+            } else if (std::cin.bad() or std::cin.eof()) {
                 fmt::println(stderr, "\nerror: stdin closed, aborting.");
                 std::exit(1);    // I don't think there is an easy way out of this but exit
             } else {
                 fmt::print(stderr, "error: invalid choice, enter number between 1 - {}: ", devices.size());
-                continue;
+                std::cin.clear();
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
             }
         }
         fmt::println("[madbfs] using serial '{}'", devices[choice - 1].serial);

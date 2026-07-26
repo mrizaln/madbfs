@@ -4,8 +4,6 @@ find_package(Boost REQUIRED)
 find_package(libfuse REQUIRED)
 find_package(zstr REQUIRED)
 
-include(cmake/fetched-libs.cmake) # linr, saf
-
 add_library(madbfs-lib STATIC)
 target_sources(
   madbfs-lib
@@ -28,7 +26,7 @@ target_sources(
 )
 target_link_libraries(
   madbfs-lib
-  PUBLIC madbfs-common fetch::linr Boost::boost libfuse::libfuse zstr::zstr
+  PUBLIC madbfs-common Boost::boost libfuse::libfuse zstr::zstr
 )
 target_include_directories(madbfs-lib PUBLIC include)
 target_compile_options(madbfs-lib PRIVATE -Wall -Wextra -Wconversion)
