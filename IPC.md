@@ -1,10 +1,13 @@
 ## IPC
 
-The communication though the IPC is done using a simple length-value (LV) message protocol. The first 4 bytes of the message is the length of it (excluding itself) in network byte order, and the rest is the payload.
+The communication through the IPC is done using a simple length-value (LV) message protocol. The
+first 4 bytes of the message is the length of it (excluding itself) in network byte order, and the
+rest is the payload.
 
 ### Request
 
-The payload must be a JSON object in the form that depends on the operation requested. The general form of the JSON is in the form of:
+The payload must be a JSON object in the form that depends on the operation requested. The general
+form of the JSON is like this:
 
 ```json
 {
@@ -13,7 +16,8 @@ The payload must be a JSON object in the form that depends on the operation requ
 }
 ```
 
-Some operations only requires `"op"` field, while some requires `"value"` field. Below is the break down:
+Some operations only requires `"op"` field, while some requires `"value"` field. Below is the
+breakdown:
 
 - `help`
 
@@ -37,6 +41,12 @@ Some operations only requires `"op"` field, while some requires `"value"` field.
 
   ```json
   { "op": "invalidate_cache" }
+  ```
+
+- `expire_stat`
+
+  ```json
+  { "op": "expire_stat" }
   ```
 
 - `set_page_size`:
@@ -101,7 +111,8 @@ Some operations only requires `"op"` field, while some requires `"value"` field.
 
 ### Response
 
-The IPC, beside `logcat`, will reply immediately after an operation is completed. The reply is a JSON in the form of:
+The IPC, beside `logcat`, will reply immediately after an operation is completed. The reply is a
+JSON in the form of:
 
 ```json
 {
@@ -110,7 +121,8 @@ The IPC, beside `logcat`, will reply immediately after an operation is completed
 }
 ```
 
-The `"value"` field will be filled with the value of the response of the resulting operation. It will contain a string that explains the error if an error status happens.
+The `"value"` field will be filled with the value of the response of the resulting operation. It
+will contain a string that explains the error if an error status happens.
 
 The `<value>` then will be different depending on the operation performed:
 
@@ -280,7 +292,8 @@ The `<value>` then will be different depending on the operation performed:
 
 - `logcat`
 
-  Unlike other operations, `logcat` won't response with a JSON immediately on success, but it will response with stream of logs instead. Each entry is encoded with the same LV protocol.
+  Unlike other operations, `logcat` won't responds with a JSON immediately on success, but it will
+  responds with stream of logs instead. Each entry is encoded with the same LV protocol.
 
 ## `madbfs-msg`
 
@@ -304,9 +317,11 @@ options:
                                         considered as part of this option)
 ```
 
-The `message` argument is the desired operation you want to perform through the IPC for the selected `madbfs` instance. The general rule is to transform the operation request JSON into a command.
+The `message` argument is the desired operation you want to perform through the IPC for the selected
+`madbfs` instance. The general rule is to transform the operation request JSON into a command.
 
-For example, to do `set_cache_size` operation, normally you need to send this JSON through IPC with LV encoding:
+For example, to do `set_cache_size` operation, normally you need to send this JSON through IPC with
+LV encoding:
 
 ```json
 { "op": "set_cache_size", "value": 1024 }
