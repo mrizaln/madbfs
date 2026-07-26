@@ -96,8 +96,10 @@ namespace
      * @return Serial number.
      *
      * This function may prompt the user (stdin) if there are multiple device connected to the computer.
+     * `std::nullopt` is returned when the function failed to read from stdin. The returned string is empty
+     * when no device.
      */
-    Await<String> get_serial()
+    Await<Opt<String>> get_serial()
     {
         auto maybe_devices = co_await adb::list_devices();
         if (not maybe_devices.has_value()) {
@@ -127,8 +129,7 @@ namespace
             if (choice > 0 and choice <= devices.size()) {
                 break;
             } else if (std::cin.bad() or std::cin.eof()) {
-                fmt::println(stderr, "\nerror: stdin closed, aborting.");
-                std::exit(1);    // I don't think there is an easy way out of this but exit
+                co_return std::nullopt;
             } else {
                 fmt::print(stderr, "error: invalid choice, enter number between 1 - {}: ", devices.size());
                 std::cin.clear();
@@ -205,8 +206,11 @@ namespace
             if (auto env = ::getenv("ANDROID_SERIAL"); env != nullptr) {
                 fmt::println("[madbfs] using serial '{}' from env variable 'ANDROID_SERIAL'", env);
                 serial = env;
-            } else if (auto res = co_await get_serial(); not res.empty()) {
-                serial = std::move(res);
+            } else if (auto res = co_await get_serial(); not res) {
+                fmt::println(stderr, "\nerror: stdin closed, aborting");
+                co_return 1;
+            } else if (not res->empty()) {
+                serial = std::move(res).value();
             } else {
                 fmt::println(stderr, "error: no device found, make sure your device is connected");
                 co_return 1;
@@ -297,8 +301,8 @@ namespace
             if (auto env = ::getenv("ANDROID_SERIAL"); env != nullptr) {
                 fmt::println("[madbfs] using serial '{}' from env variable 'ANDROID_SERIAL'", env);
                 serial = env;
-            } else if (auto res = co_await get_serial(); not res.empty()) {
-                serial = std::move(res);
+            } else if (auto res = co_await get_serial(); res) {
+                serial = std::move(res).value();
             } else {
                 fmt::println(stderr, "error: no device found, make sure your device is connected");
                 co_return 1;
