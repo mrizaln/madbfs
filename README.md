@@ -1,6 +1,7 @@
 # madbfs
 
-`madbfs` (Modern `adb` Filesystem, formerly `adbfsm`) is a userspace filesystem for Android via `adb` built using `libfuse`.
+`madbfs` (modern `adb` filesystem) is a userspace filesystem for Android via `adb` built using
+`libfuse`.
 
 ## Preview
 
@@ -15,19 +16,29 @@ https://github.com/user-attachments/assets/dad81c5a-993e-480d-a329-d8fc560a69de
 
 I want to manage my Android phone storage from my computer without using MTP.
 
-This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbfs-rootless) project. While `adbfs-rootless` works most of the time under light load it has reliability issues. Under high load (such as when a thumbnailer service is running) `adbfs-rootless` tends to crash, making it unusable until it is forcefully unmounted and its cache cleaned.
+This project is inspired by the [`adbfs-rootless`](https://github.com/spion/adbfs-rootless) project.
+While `adbfs-rootless` works most of the time under light load it has reliability issues. Under high
+load (such as when a thumbnailer service is running) `adbfs-rootless` tends to crash, making it
+unusable until it is forcefully unmounted and its cache cleaned.
 
-The file I/O approach of `adbfs-rootless` is also similar to that of MTP, in which each file is first pulled from device (using `adb pull`) before any operations like reading and writing performed. If a write operation is performed, the file is then pushed back into the device (using `adb push`). This approach limits the size of the file that can be handled before the cache is filled (it uses `/tmp`).
+The file I/O approach of `adbfs-rootless` is also similar to that of MTP, in which each file is
+first pulled from device (using `adb pull`) before any operations like reading and writing
+performed. If a write operation is performed, the file is then pushed back into the device (using
+`adb push`). This approach limits the size of the file that can be handled before the cache is
+filled (it uses `/tmp`).
 
-These limitations lead me to decide to rebuild the project from ground up in order to create a more stable, modern, and possibly faster solution.
+These limitations lead me to decide to rebuild the project from ground up in order to create a more
+stable, modern, and possibly faster solution.
 
 ## Features
 
-> TLDR: full file and directory traversal with concurrent file streaming approach, partial read/write, and active caching.
+> TLDR: full file and directory traversal with concurrent file streaming approach, partial
+> read/write, and active caching.
 
 - No root access required
 
-  Non-rooted device will have standard file and directory access as regular user. Rooted device will have less constraints on file and directory access.
+  Non-rooted device will have standard file and directory access as regular user. Rooted device will
+  have less constraints on file and directory access.
 
 - Full file and directory traversal
 
@@ -39,7 +50,8 @@ These limitations lead me to decide to rebuild the project from ground up in ord
 
 - Create and delete files and directories
 
-  Support creating new files and directories as well as deleting them (subject to permission constraints).
+  Support creating new files and directories as well as deleting them (subject to permission
+  constraints).
 
 - Rename and move
 
@@ -51,19 +63,24 @@ These limitations lead me to decide to rebuild the project from ground up in ord
 
 - Automatic in-memory caching
 
-  Recently accessed files are cached in memory using an LRU paging mechanism, allowing faster repeated access.
+  Recently accessed files are cached in memory using an LRU paging mechanism, allowing faster
+  repeated access.
 
 - Streamed file access (partial read/write)
 
-  Read files on-demand without pulling the entire file first. Unlike MTP’s "pull-whole-file" approach, this filesystem streams data over `adb`, enabling efficient access to large files or specific file segments.
+  Read files on-demand without pulling the entire file first. Unlike MTP’s "pull-whole-file"
+  approach, this filesystem streams data over `adb`, enabling efficient access to large files or
+  specific file segments.
 
 - Efficient resource use
 
-  Loads only what you access, conserving memory usage and bandwidth. You can also control how much the cache stores file data.
+  Loads only what you access, conserving memory usage and bandwidth. You can also control how much
+  the cache stores file data.
 
 - Concurrent file access
 
-  Allows for concurrent access to files and directories without blocking. This ability comes out-of-the-box by virtue of using FUSE and `adb`.
+  Allows for concurrent access to files and directories without blocking. This ability comes
+  out-of-the-box by virtue of using FUSE and `adb`.
 
 - Flexible connection method
 
@@ -71,21 +88,27 @@ These limitations lead me to decide to rebuild the project from ground up in ord
 
   - `adb` transport
 
-    The simplest transport. It executes all FUSE operations by running `adb shell` commands like `dd`, `stat`, and `touch`. No additional component is required.
+    The simplest transport. It executes all FUSE operations by running `adb shell` commands like
+    `dd`, `stat`, and `touch`. No additional component is required.
 
   - Proxy transport
 
-    Communicates with a lightweight TCP server running natively on the Android device via a custom RPC protocol. It requires a server binary compiled for the phone architecture but has better I/O throughput than the `adb` transport.
+    Communicates with a lightweight TCP server running natively on the Android device via a custom
+    RPC protocol. It requires a server binary compiled for the phone architecture but has better I/O
+    throughput than the `adb` transport.
 
-  Both of the transport can work wired via USB or wireless in your local network. `madbfs` will automatically fall back to `adb` transport if the proxy transport is not available.
+  Both of the transport can work wired via USB or wireless in your local network. `madbfs` will
+  automatically fall back to `adb` transport if the proxy transport is not available.
 
 - Resilient to disconnections
 
-  Stays mounted even when the device disconnects. Cached files and directories remain accessible, and full functionality resumes automatically when the connection is restored.
+  Stays mounted even when the device disconnects. Cached files and directories remain accessible,
+  and full functionality resumes automatically when the connection is restored.
 
 - Built with modern C++
 
-  Developed in C++23 using coroutine-style asynchronous programming for clean, lightweight, high-performance I/O.
+  Developed in C++23 using coroutine-style asynchronous programming for clean, lightweight,
+  high-performance I/O.
 
 ## Dependencies
 
@@ -127,14 +150,19 @@ These limitations lead me to decide to rebuild the project from ground up in ord
 
 > if you just want a prebuilt binaries, jump to [installation](#installation)
 
-Since this project dependencies are managed by Conan, you need to make sure it's installed and configured correctly on your system (consult the [documentation](https://docs.conan.io/2/installation.html) on how to do it).
+Since this project dependencies are managed by Conan, you need to make sure it's installed and
+configured correctly on your system (consult the
+[documentation](https://docs.conan.io/2/installation.html) on how to do it).
 
 There are two CMake project that produces executables:
 
 - `madbfs`: produces `madbfs` and `madbfs-msg`
 - `madbfs-server`: produces multiple `madbfs-server` for each architecture Android supports
 
-`madbfs` project is compiled once for the host machine, while `madbfs-server` is compiled multiple times for different architectures using Android NDK. `madbfs` embeds the produced `madbfs-server` in order to simplify the software usage. This requirement makes it so that the compilation step of the project is quite strict. Because of that, I have written a handy script to automate this process.
+`madbfs` project is compiled once for the host machine, while `madbfs-server` is compiled multiple
+times for different architectures using Android NDK. `madbfs` embeds the produced `madbfs-server` in
+order to simplify the software usage. This requirement makes it so that the compilation step of the
+project is quite strict. Because of that, I have written a handy script to automate this process.
 
 ### Using script
 
@@ -142,17 +170,20 @@ There are two CMake project that produces executables:
 ./build.sh    # try adding --help to this script
 ```
 
-In order to use this script, you are required have `ANDROID_NDK_HOME` variable defined and point to valid Android NDK.
+In order to use this script, you are required have `ANDROID_NDK_HOME` variable defined and point to
+valid Android NDK.
 
 The script above will produce build directories at this specified stage:
 
 - `madbfs`: `build/<Build_type>/`
-- `madbfs-server`: `madbfs-server/build/android-<arch>-<build_type>/` and `madbfs-server/build/android-all-<build_type>/`
+- `madbfs-server`: `madbfs-server/build/android-<arch>-<build_type>/` and
+  `madbfs-server/build/android-all-<build_type>/`
 
 > - `madbfs` executable can be obtained at `build/<Build_type>/madbfs/madbfs`
 > - `madbfs-msg` executable can be obtained at `build/<Build_type>/madbfs-msg/madbfs-msg`
 
-When the script is invoked with `--package` option, it will produce a `tar.gz` file containing `madbfs` and `madbfs-msg` and its hash at:
+When the script is invoked with `--package` option, it will produce a `tar.gz` file containing
+`madbfs` and `madbfs-msg` and its hash at:
 
 - `build/package-<madbfs_Build_type>-<madbfs-server_Build_type>`
 
@@ -160,13 +191,20 @@ When the script is invoked with `--package` option, it will produce a `tar.gz` f
 
 - **`madbfs-server`**
 
-  While Conan is a package manager, it can also be used as toolchain for cross-compiling via profile. A profile for build environment and host environment is required. I used profiles at `./.github/workflows/` both for development and CI. If you read `profile-server.ini` you might notice that `settings.arch` and `conf.tools.android:ndk_path` values are not set concretely, instead it uses environment variable. This is because the profile needs to be reused for multiple architecture and not hardcode Android NDK path on the profile respectively.
+  While Conan is a package manager, it can also be used as toolchain for cross-compiling via
+  profile. A profile for build environment and host environment is required. I used profiles at
+  `./.github/workflows/` both for development and CI. If you read `profile-server.ini` you might
+  notice that `settings.arch` and `conf.tools.android:ndk_path` values are not set concretely,
+  instead it uses environment variable. This is because the profile needs to be reused for multiple
+  architecture and not hardcode Android NDK path on the profile respectively.
 
   > Conan uses build-host naming convention instead of host-target for cross-compilation
 
   For this instruction, I will use the profiles above.
 
-  The first step is moving to `madbfs-server` directory from the root. Then you need to get build dependencies using Conan. At this point `ANDROID_NDK_HOME` and `MADBFS_SERVER_ARCH` (for `conf.tools.android:ndk_path` and `settings.arch` respectively) need to be define already.
+  The first step is moving to `madbfs-server` directory from the root. Then you need to get the
+  build dependencies using Conan. At this point `ANDROID_NDK_HOME` and `MADBFS_SERVER_ARCH` (for
+  `conf.tools.android:ndk_path` and `settings.arch` respectively) needs to be defined already.
 
   Assume the `${variables}` point to valid arch, profiles, and build type (capitalized)
 
@@ -177,7 +215,8 @@ When the script is invoked with `--package` option, it will produce a `tar.gz` f
   conan install . --build missing -pr:b "${profile_client}" -pr:h "${profile_server}" -s build_type=${build_type}
   ```
 
-  > you can also use `-c:h tools.android:ndk_path=path/to/android/ndk` and `-s:h arch=${arch}` Conan options to specify the NDK path and arch respectively instead of environment variable
+  > you can also use `-c:h tools.android:ndk_path=path/to/android/ndk` and `-s:h arch=${arch}`
+  > options on Conan to specify the NDK path and arch respectively instead of environment variables
 
   Then you can generate and compile them:
 
@@ -188,13 +227,15 @@ When the script is invoked with `--package` option, it will produce a `tar.gz` f
 
   > `,,` is bash parameter expansion for lowering string case
 
-  This will produce `madbfs-server` executable at `./build/android-<arch>-<build_type>/madbfs-server`
+  This will produce `madbfs-server` executable at
+  `./build/android-<arch>-<build_type>/madbfs-server`
 
   Do this repeatedly for all supported arch.
 
 - **`madbfs` (and `madbfs-msg`)**
 
-  > This instruction will only focus on `madbfs` since `madbfs-msg` compilation is simple and doesn't need additional configuration.
+  > This instruction will only focus on `madbfs` since `madbfs-msg` compilation is simple and
+  > doesn't need additional configuration.
 
   First, move to the root of the project, then install the dependencies.
 
@@ -205,7 +246,10 @@ When the script is invoked with `--package` option, it will produce a `tar.gz` f
   conan install . --build missing -pr:b "${profile_client}" -pr:h "${profile_client}" "&:build_type=${build_type}" -s build_type=Release
   ```
 
-  Then you need to prepare a directory that contains the `madbfs-server` for all architecture. The executables should be renamed to have each of their ABI (not arch): `madbfs-server-abi`. This step is required because `madbfs` expects `madbfs-server` files to have specified type but on which directory.
+  Then you need to prepare a directory that contains the `madbfs-server` for all architecture. The
+  executables should be renamed to have each of their ABI (not arch): `madbfs-server-abi`. This step
+  is required because `madbfs` expects `madbfs-server` files to have specified name and on the same
+  directory.
 
   ```sh
   mkdkir -p ${servers_path}
@@ -214,7 +258,8 @@ When the script is invoked with `--package` option, it will produce a `tar.gz` f
   cp ./build/android-${arch}-${build_type,,} ${servers_path}/madbfs-server-${abi}   # for each arch
   ```
 
-  To tell where `madbfs` can find the server files, you need to pass `MADBF_SERVER_BINARY_DIR` to CMake, which is done at generation time
+  To tell where `madbfs` can find the server files, you need to pass `MADBF_SERVER_BINARY_DIR` to
+  CMake, which is done at configure time
 
   ```sh
   cmake --preset conan-${build_type,,} -D MADBFS_SERVER_BINARY_DIR="${servers_path}"
@@ -226,17 +271,21 @@ When the script is invoked with `--package` option, it will produce a `tar.gz` f
   cmake --build --preset conan-${build_type,,}
   ```
 
-  The executable can be found at `./build/<Build_type>/madbfs/madbfs` (and `./build/<Build_type>/madbfs-msg/madbfs-msg`)
+  The executable can be found at `./build/<Build_type>/madbfs/madbfs` (and
+  `./build/<Build_type>/madbfs-msg/madbfs-msg`)
 
 ## Installation
 
-You can download `madbfs` from the [GitHub releases page](https://github.com/mrizaln/madbfs/releases).
+You can download `madbfs` from the
+[GitHub releases page](https://github.com/mrizaln/madbfs/releases).
 
-There is no installation step required, as the application is built statically. You can place the binaries wherever you prefer.
+There is no installation step required, as the application is built statically. You can place the
+binaries wherever you prefer.
 
 #### Installing from the AUR
 
-`madbfs` can be installed using your prefered AUR helper, as with every other AUR package. Using `yay`, you'd run the following command as superuser:
+`madbfs` can be installed using your prefered AUR helper, as with every other AUR package. Using
+`yay`, you'd run the following command as superuser:
 
 ```
 yay -S madbfs-bin
@@ -247,7 +296,7 @@ yay -S madbfs-bin
 The help message can help you start using this program
 
 ```
-usage: madbfs [options] <mountpoint>
+usage: ./build/Debug/madbfs/madbfs [options] <mountpoint>
 
 Options for madbfs:
     --serial=<str>         serial number of the device to mount
@@ -264,7 +313,7 @@ Options for madbfs:
                              (default: "-" for stdout)
     --cache-size=<int>     maximum size of the cache in MiB
                              (default: 256)
-                             (minimum: 128)
+                             (minimum: 32)
                              (value will be rounded up to the next power of 2)
                              (ignored if 'no-cache' is provided)
     --page-size=<int>      page size for cache & transfer in KiB
@@ -287,6 +336,7 @@ Options for madbfs:
                              (useful for debugging the server)
     --adb-only             don't launch server and don't try to connect
     --no-cache             don't use data caching
+    --push-server          push the server binary to your device
 
 Options for libfuse:
     -h   --help            print help
@@ -303,6 +353,8 @@ Options for libfuse:
     -o allow_other         allow access by all users
     -o allow_root          allow access by root
     -o auto_unmount        auto unmount on process termination
+    -o io_uring            enable io-uring
+    -o io_uring_q_depth=<n> io-uring queue depth
 ```
 
 ### Unmounting
@@ -313,11 +365,15 @@ To unmount the filesystem, you run this command like for any other FUSE filesyst
 fusermount -u <mountpoint>
 ```
 
-You can also use the [IPC](./IPC.md) operation `unmount` for unmounting. This will unmount the filesystem on the next operation immediately.
+You can also use the [IPC](./IPC.md) operation `unmount` for unmounting. This will unmount the
+filesystem on the next operation immediately.
 
 ### Selecting device
 
-You don't need to specify the device if there is only one device connected via `adb` on your computer. If there are more than one device then you can specify the serial using `--serial` option. If you omit the `--serial` option when there are multiple device connected to the computer, you will be prompted to specify the device you want to mount.
+You don't need to specify the device if there is only one device connected via `adb` on your
+computer. If there are more than one device then you can specify the serial using `--serial` option.
+If you omit the `--serial` option when there are multiple device connected to the computer, you will
+be prompted to specify the device you want to mount.
 
 ```sh
 $ madbfs <mountpoint>
@@ -328,7 +384,8 @@ $ madbfs <mountpoint>
 [madbfs] please specify which one you would like to use: _
 ```
 
-`madbfs` respects the env variable `ANDROID_SERIAL` (mimicking `adb` behavior) so you can alternately use it to specify the device.
+`madbfs` respects the env variable `ANDROID_SERIAL` (mimicking `adb` behavior) so you can
+alternately use it to specify the device.
 
 ```sh
 $ ANDROID_SERIAL=068832516O101622 ./madbfs
@@ -344,33 +401,52 @@ $ ANDROID_SERIAL=068832516O101622 ./madbfs
 $ madbfs --root=<root> <mountpoint>
 ```
 
-The `<root>` is the subdirectory on your device you want to treat as the root of the filesystem (effectively mounting a subdirectory). The option only accepts absolute path and if the directory is a symlink, it will resolve it first (`/sdcard` -> `/storage/emulated/0`).
+The `<root>` is the subdirectory on your device you want to treat as the root of the filesystem
+(effectively mounting a subdirectory). The option only accepts absolute path and if the directory is
+a symlink, it will resolve it first (`/sdcard` -> `/storage/emulated/0`).
 
-Do note that mounting subdirectory might break symbolic links since it is possible that a link may contain components that are unreachable from the specified root. For example if you mount `/sdcard/` and have a link in `/sdcard/link` that points to `/storage/` the filesystem can't reach it, because `/storage/` is outside of `/sdcard/`.
+Do note that mounting subdirectory might break symbolic links since it is possible that a link may
+contain components that are unreachable from the specified root. For example if you mount `/sdcard/`
+and have a link in `/sdcard/link` that points to `/storage/` the filesystem can't reach it, because
+`/storage/` is outside of `/sdcard/`.
 
 ### Specifying server and port number
 
-If you want the filesystem to use only use `adb` transport, use `--adb-only` flag. This flag prevents `madbfs` from pushing the server into your phone and running it. If you rather want to manually run the server yourself (for debugging purpose for example), use `--no-server` flag instead.
-
-The proxy communicates with `madbfs` over TCP enabled by port forwarding and by default it will listen on port `23237` (`adbfs` on dial pad). If you find this port to be not suitable for your use you can always specify it with `--port` option.
+If you want the filesystem to use only use `adb` transport, use `--adb-only` flag. This flag
+prevents `madbfs` from pushing the server into your phone and running it. If you rather want to
+manually run the server yourself (for debugging purpose for example), use `--no-server` flag
+instead. To obtain the server binary, you can use `--push-server` option:
 
 ```sh
-$ madbfs --server=<path/to/server-with-abi> --port=23237 <mountpoint>
+$ madbfs --push-server        # will push server binary to /data/local/tmp/ of the device
+```
+
+The proxy communicates with `madbfs` over TCP enabled by port forwarding and by default it will
+listen on port `23237` (`adbfs` on dial pad). If you find this port to be not suitable for your use
+you can always specify it with `--port` option.
+
+```sh
+$ madbfs --port=23237 <mountpoint>
 ```
 
 ### To cache or not to cache
 
-By default `madbfs` caches file stat and file content (data) of files operated by the filesystem. While file stat caching is always active, file content caching can be disabled using `--no-cache` program option. This option will ignore other cache related options.
+By default `madbfs` caches file stat and file content (data) of files operated by the filesystem.
+While file stat caching is always active, file content caching can be disabled using `--no-cache`
+program option. This option will ignore other cache related options.
 
 ```sh
 $ madbfs --no-cache <mountpoint>
 ```
 
-The no-cache mode is basically a direct I/O, file content will always be read/written to device immediately via the connection method (proxy or adb transport).
+The no-cache mode is basically a direct I/O, file content will always be read/written to device
+immediately via the connection method (proxy or adb transport).
 
 ### Cache size
 
-`madbfs` caches all the read/write operations on the files on the device. This cache is stored in memory. You can control the size of this cache using `--cache-size` option (in MiB). The default value is `256` (256 MiB).
+`madbfs` caches all the read/write operations on the files on the device. This cache is stored in
+memory. You can control the size of this cache using `--cache-size` option (in MiB). The default
+value is `256` (256 MiB).
 
 ```sh
 $ madbfs --cache-size=256 <mountpoint>    # 256 MiB of memory will be used as file cache
@@ -378,7 +454,9 @@ $ madbfs --cache-size=256 <mountpoint>    # 256 MiB of memory will be used as fi
 
 ### Page size
 
-In the cache, each file is divided into pages. The `--page-size` option dictates the size of this page (in KiB). Page size also dictates the size of the buffer used to read/write into the file on the device. You can adjust this value according to your use.
+In the cache, each file is divided into pages. The `--page-size` option dictates the size of this
+page (in KiB). Page size also dictates the size of the buffer used to read/write into the file on
+the device. You can adjust this value according to your use.
 
 ```sh
 $ madbfs --page-size=128 <mountpoint>    # read/write operations are communicated in 128 KiB chunks
@@ -387,22 +465,27 @@ $ madbfs --page-size=128 <mountpoint>    # read/write operations are communicate
 
 ### Logging
 
-The default log file is stdout (specified by "-"; which goes to nowhere when not run in foreground mode). You can manually set the log file using `--log-file` option and set the log level using `--log-level`.
+The default log file is `stdout` (specified by "-"; which goes to nowhere when not run in foreground
+mode). You can manually set the log file using `--log-file` option and set the log level using
+`--log-level`.
 
 ```sh
 $ madbfs --log-file=madbfs.log --log-level=debug <mountpoint>
 ```
 
-You can always watch the logs of the filesystem at runtime even if you don't specify a log-file beforehand by using IPC `logcat` operation (see [below](<#ipc-(and-madbfs-msg)>)).
+You can always watch the logs of the filesystem at runtime even if you don't specify a log-file
+beforehand by using IPC `logcat` operation (see [below](<#ipc-(and-madbfs-msg)>)).
 
 ### IPC (and `madbfs-msg`)
 
-Filesystem parameters can be reconfigured and queried during runtime though IPC using unix socket. The supported operations are:
+Filesystem parameters can be reconfigured and queried during runtime though IPC using unix socket.
+The supported operations are:
 
 - help,
 - version,
 - info,
 - invalidate cache,
+- expire stat
 - set page size,
 - set cache size,
 - set ttl,
@@ -411,7 +494,11 @@ Filesystem parameters can be reconfigured and queried during runtime though IPC 
 - unmount (on next FUSE operation)
 - logcat (read `madbfs` log in real-time, similar to `adb logcat`).
 
-The address of the socket in which you can connect to as client is composed of the name of the filesystem and the serial of the device. The socket itself is created in directory defined by `XDG_RUNTIME_DIR` environment variable (it's usually set to `/run/user/<uid>`). If the `XDG_RUNTIME_DIR` is not defined, as fallback, the directory is set to `/tmp`. The socket will be created when the filesystem initializes.
+The address of the socket in which you can connect to as client is composed of the name of the
+filesystem and the serial of the device. The socket itself is created in directory defined by
+`XDG_RUNTIME_DIR` environment variable (it's usually set to `/run/user/<uid>`). If the
+`XDG_RUNTIME_DIR` is not defined, as fallback, the directory is set to `/tmp`. The socket will be
+created when the filesystem initializes.
 
 For example, the socket path for a device with serial `192.168.240.112:5555`:
 
@@ -419,66 +506,24 @@ For example, the socket path for a device with serial `192.168.240.112:5555`:
 /run/user/1000/madbfs@192.168.240.112:5555.sock
 ```
 
-If at initialization this socket file exists, the IPC won't start. This may happen if the filesystem is terminated unexpectedly (crash or kill signal). You need to remove this file manually if that happens.
+If at initialization this socket file exists, the IPC won't start. This may happen if the filesystem
+was terminated unexpectedly before (crash or kill signal). You need to remove this file manually if
+that happens.
 
-For the specification of the message protocol used on the IPC and how to use it read [IPC.md](./IPC.md) file. To make it easier for user to use the IPC without having to write their own socket code, I have created another executable: `madbfs-msg`. The possible operations are explained in [IPC.md](./IPC.md) file as well.
+For the specification of the message protocol used on the IPC and how to use it read
+[IPC.md](./IPC.md) file. To make it easier for user to use the IPC without having to write their own
+socket code, I have created another executable: `madbfs-msg`. The possible operations are explained
+in [IPC.md](./IPC.md) file as well.
 
 ### Debug mode
 
-As part of debugging functionality `libfuse` has provided debug mode through `-d` flag. You can use this to monitor `madbfs` operations (if you don't want to use log file or want to see the log in real-time). If the debugging information is too verbose, you can use `-f` instead to make madbfs run in foreground mode without printing `fuse` debug information.
+As part of debugging functionality `libfuse` has provided debug mode through `-d` flag. You can use
+this to monitor `madbfs` operations (if you don't want to use log file or want to see the log in
+real-time). If the debugging information is too verbose, you can use `-f` instead to make `madbfs`
+run in foreground mode without printing `fuse` debug information.
 
 ```sh
 $ madbfs --log-file=- --log-level=debug -f <mountpoint>                     # runs in foreground (not daemonized)
 $ madbfs --log-file=- --log-level=debug -d <mountpoint>                     # this will print the libfuse debug messages and madbfs log messages
 $ madbfs --log-file=- --log-level=debug -d <mountpoint> 2> /dev/null        # this will print only madbfs log messages since libfuse debug messages are printed to stderr
 ```
-
-## Benchmark
-
-Benchmark is done by writing a 64 MiB file using `dd` and then reading it back. The statistics printed by `dd` is used for the speed value so is for `adb push` and `adb pull`. The test is done on an Android 11 phone (armv8) using USB cable with proxy transport. As baseline, the speed on which an `adb push` (write) and an `adb pull` (read) operation is done on a file with the same size is measured. `madbfs` is launched using its default parameters (cache size = 256 MiB, page size = 128 KiB).
-
-The write command is as follows:
-
-```sh
-  dd if=/dev/random of=random bs=128K count=1024
-```
-
-The read command is as follows:
-
-```sh
-  dd if=random of=/dev/null bs=128K count=1024
-```
-
-### Proxy transport
-
-- Write
-
-  | operation | speed (MB/s) | relative speed |
-  | :-------- | -----------: | -------------: |
-  | adb push  |         15.3 |           1.00 |
-  | write     |         13.1 |           0.86 |
-
-- Read
-
-  | operation       | speed (MB/s) | relative speed |
-  | :-------------- | -----------: | -------------: |
-  | adb pull        |         11.7 |           1.00 |
-  | read (no cache) |         10.8 |           0.93 |
-  | read (cache)    |       2100.0 |         179.49 |
-
-### `adb` transport
-
-- Write
-
-  | operation | speed (MB/s) | relative speed |
-  | :-------- | -----------: | -------------: |
-  | adb push  |         15.3 |           1.00 |
-  | write     |         12.4 |           0.81 |
-
-- Read
-
-  | operation       | speed (MB/s) | relative speed |
-  | :-------------- | -----------: | -------------: |
-  | adb pull        |         11.7 |           1.00 |
-  | read (no cache) |          3.6 |           0.24 |
-  | read (cache)    |       2100.0 |         179.49 |
