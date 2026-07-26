@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-26
+
+### Added
+
+- `--push-server` option to `madbfs` for pushing embedded server binary to device
+- `--version` option to `madbfs-server`
+- Doxygen generator and docs CMake target
+- Filesystem test on CI (via android emulation)
+
+### Changed
+
+- Embed (compressed) server binaries inside the `madbfs` executable
+- Lower the minimum cache size to 32 MiB
+- `madbfs` now allocates memory upfront with specified size for the file content cache
+- `--version` now won't show the low-level fuse version anymore (alongside with `fusermount` version)
+- `madbfs` now won't show help on failure
+
+### Fixed
+
+- `madbfs` crashes when copying file larger than cache size (https://github.com/mrizaln/madbfs/issues/22)
+- `madbfs` returns 1 when launched with `--version` option
+- `madbfs` doesn't handle the situation when `adb` executable is not found
+- File content is not flushed before truncate operation
+
+### Remove
+
+- `madbfs` program option `--server`
+
 ## [0.11.0] - 2026-06-11
 
 ### Added
@@ -276,7 +304,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-file LRU page caching for file read/write.
 - `Path` and `PathBuf` class to separate `madbfs`'s virtual paths from real paths (`std::filesystem`).
 
-[unreleased]: https://github.com/mrizaln/madbfs/compare/v0.11.0...HEAD
+[unreleased]: https://github.com/mrizaln/madbfs/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/mrizaln/madbfs/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/mrizaln/madbfs/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/mrizaln/madbfs/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/mrizaln/madbfs/compare/v0.9.0...v0.10.0
