@@ -187,16 +187,11 @@ namespace madbfs
 {
     Connection Madbfs::prepare_connection(async::Context& ctx, args::Connection connection)
     {
+        namespace conn = connection_strategy;
         return connection.visit(Overload{
-            [&](args::connection::AdbOnly) {
-                return Connection{ ctx, connection_strategy::Adb{} };    //
-            },
-            [&](args::connection::NoServer c) {
-                return Connection{ ctx, connection_strategy::Proxy{ std::nullopt, c.port } };
-            },
-            [&](args::connection::Server c) {
-                return Connection{ ctx, connection_strategy::Proxy{ c.abi, c.port } };
-            },
+            [&](args::AdbOnly) { return Connection{ ctx, conn::Adb{} }; },
+            [&](args::NoServer c) { return Connection{ ctx, conn::Proxy{ std::nullopt, c.port } }; },
+            [&](args::Server c) { return Connection{ ctx, conn::Proxy{ c.abi, c.port } }; },
         });
     }
 
