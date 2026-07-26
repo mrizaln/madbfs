@@ -884,14 +884,15 @@ namespace madbfs
         return dir.insert(std::move(node), false).transform(sink_void);
     }
 
-    AExpect<void> Filesystem::initialize()
+    AExpect<void> Filesystem::initialize(path::Path path)
     {
-        if (not std::exchange(m_root_initialized, true)) {
-            if (auto stat = co_await m_connection.stat(path::Path{}); stat.has_value()) {
-                m_root.set_stat(*stat);
-            } else {
-                co_return Unexpect{ stat.error() };
+        if (auto stat = co_await m_connection.stat(path::Path{}); stat.has_value()) {
+            m_root.set_stat(*stat);
+            if (not path.is_root()) {
+                std::ignore = co_await traverse_or_build(path);
             }
+        } else {
+            co_return Unexpect{ stat.error() };
         }
 
         if (m_cache) {

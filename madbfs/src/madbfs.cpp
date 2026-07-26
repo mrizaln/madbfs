@@ -281,7 +281,7 @@ namespace madbfs
             }
         });
 
-        if (auto result = async::block(m_async_ctx, m_fs.initialize()); not result) {
+        if (auto result = async::block(m_async_ctx, m_fs.initialize(m_root)); not result) {
             log_c(__func__, "Failed to initialize filesystem");
         }
     }
@@ -373,7 +373,7 @@ namespace madbfs
             }
 
             log_d(__func__, "checking connection");
-            auto ok = co_await m_connection.ping(m_timeout.value_or(Seconds::max()));
+            auto ok = co_await m_connection.ping(m_timeout);
 
             if (not ok) {
                 log_i(__func__, "connection is timed out");

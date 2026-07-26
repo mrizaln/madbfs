@@ -110,7 +110,7 @@ namespace madbfs
          *
          * This initializes the cache and fetch root directory stat.
          */
-        AExpect<void> initialize();
+        AExpect<void> initialize(path::Path path);
 
         /**
          * @brief Shut down the filesystem and stop every async operation.
@@ -218,6 +218,5 @@ namespace madbfs
         FileHandleStore      m_handles;
 
         Opt<Seconds> m_ttl              = std::nullopt;
-        bool         m_root_initialized = false;
     };
 }
