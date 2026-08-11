@@ -14,6 +14,7 @@ project(
 option(MADBFS_ENABLE_TESTS "Enable tests" ON)
 option(MADBFS_AUTORUN_TESTS "Automatically ran tests" OFF)
 option(MADBFS_BUILD_DOCS "Build docs" OFF)
+option(MADBFS_BUILD_TARGET_BASELINE "Build target x86_64-baseline" ON)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,6 +24,15 @@ set(CMAKE_SKIP_RPATH TRUE)  # stop injecting RPATH for conan deps
 set(MADBFS_USE_NON_BOOST_ASIO OFF CACHE BOOL "use non-boost asio")
 set(MADBFS_ENABLE_RAPIDHASH_BLANKET_IMPL ON CACHE BOOL "enable rapidhash")
 set(MADBFS_BUILD_IPC ON CACHE BOOL "build ipc")
+
+if(MADBFS_BUILD_TARGET_BASELINE AND CMAKE_SYSTEM_PROCESSOR MATCHES "(x86_64|amd64|AMD64)")
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-march=x86-64)
+    message(STATUS "madbfs: Build targeting x86_64-baseline")
+  else()
+    message(FATAL_ERROR "Currently only supporting GNU/Clang for this target")
+  endif()
+endif()
 
 add_subdirectory(madbfs-common)
 add_subdirectory(madbfs)
