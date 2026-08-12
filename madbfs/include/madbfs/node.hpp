@@ -5,6 +5,8 @@
 
 #include <madbfs-common/util/copy_const.hpp>
 
+#include <sys/stat.h>
+
 #include <atomic>
 #include <functional>
 #include <unordered_set>
@@ -277,6 +279,16 @@ namespace madbfs
          * assume that the build process won't overwrite any node.
          */
         Expect<Ref<Node>> build(Str name, Stat stat, File file);
+
+        /**
+         * @brief Fill stbuf with stat from Node.
+         *
+         * @param stbuf The stat buf to be filled in.
+         * @param page_size Page size of the file.
+         *
+         * @return The same pointer to the stbuf.
+         */
+        struct stat* fill_stbuf(struct stat* stbuf, blksize_t page_size);
 
         /**
          * @brief Get the regular file variant with various checks for other variants.

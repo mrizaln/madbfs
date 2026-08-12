@@ -190,33 +190,11 @@ namespace madbfs::operations
     {
         log_i(__func__, "{:?}", path);
 
-        auto named_stat = get_data().create_path(path).and_then([](path::Path p) {
-            return invoke_fs(&Filesystem::getattr, p);
-        });
-        if (not named_stat.has_value()) {
-            return fuse_err(__func__, path)(named_stat.error());
-        }
-
-        std::memset(stbuf, 0, sizeof(struct stat));
-
-        const auto& [id, stat]       = *named_stat;
-        const auto default_page_size = 64 * 1024;    // use minimum page size
-
-        auto page_size = get_data().fs().cache().transform(&cache::LruCache::page_size);
-
-        stbuf->st_ino     = static_cast<ino_t>(id.inner());
-        stbuf->st_mode    = stat.mode;
-        stbuf->st_nlink   = stat.links;
-        stbuf->st_uid     = stat.uid;
-        stbuf->st_gid     = stat.gid;
-        stbuf->st_size    = stat.size;
-        stbuf->st_blksize = static_cast<blksize_t>(page_size.value_or(default_page_size));
-        stbuf->st_blocks  = (stbuf->st_size + 511) / 512;    // strictly in 512 B units [read stat(3)]
-        stbuf->st_atim    = stat.atime;
-        stbuf->st_mtim    = stat.mtime;
-        stbuf->st_ctim    = stat.ctime;
-
-        return 0;
+        return get_data()
+            .create_path(path)
+            .and_then([&](path::Path p) { return invoke_fs(&Filesystem::getattr, p, stbuf); })
+            .transform_error(fuse_err(__func__, path))
+            .error_or(0);
     }
 
     i32 readlink(const char* path, char* buf, size_t size) noexcept
@@ -353,7 +331,9 @@ namespace madbfs::operations
     {
         log_i(__func__, "{:?}", path);
 
-        const auto fill = [&](const char* name) { filler(buf, name, nullptr, 0, FUSE_FILL_DIR_PLUS); };
+        const auto fill = [&](const char* name, const struct stat* stbuf) {
+            filler(buf, name, stbuf, 0, FUSE_FILL_DIR_PLUS);
+        };
 
         return get_data()
             .create_path(path)

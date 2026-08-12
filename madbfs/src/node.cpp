@@ -164,4 +164,23 @@ namespace madbfs
             ))
             .transform([](auto&& pair) { return pair.first; });
     }
+
+    struct stat* Node::fill_stbuf(struct stat* stbuf, blksize_t page_size)
+    {
+        std::memset(stbuf, 0, sizeof(struct stat));
+
+        stbuf->st_ino     = static_cast<ino_t>(m_id.inner());
+        stbuf->st_mode    = m_stat.mode;
+        stbuf->st_nlink   = m_stat.links;
+        stbuf->st_uid     = m_stat.uid;
+        stbuf->st_gid     = m_stat.gid;
+        stbuf->st_size    = m_stat.size;
+        stbuf->st_blksize = page_size;
+        stbuf->st_blocks  = (stbuf->st_size + 511) / 512;    // strictly in 512 B units [read stat(3)]
+        stbuf->st_atim    = m_stat.atime;
+        stbuf->st_mtim    = m_stat.mtime;
+        stbuf->st_ctim    = m_stat.ctime;
+
+        return stbuf;
+    }
 }

@@ -34,6 +34,14 @@ namespace
             return async::block(ctx, cache::LruCache::create(connection, c.page_size, c.max_pages));
         });
     }
+
+    blksize_t page_size_or_default(Opt<cache::LruCache>& cache)
+    {
+        constexpr auto default_page_size = 64 * 1024;    // use minimum page size
+
+        auto page_size = cache.transform(&cache::LruCache::page_size).value_or(default_page_size);
+        return static_cast<blksize_t>(page_size);
+    }
 }
 
 // filesystem.hpp impl
@@ -369,22 +377,26 @@ namespace madbfs
             current->set_synced(true);
         }
 
+        struct stat stat;
+
         for (const auto& node : std::as_const(list)) {
             if (not node->is_error()) {
-                filler(node->name().data());
+                node->fill_stbuf(&stat, page_size_or_default(m_cache));
+                filler(node->name().data(), &stat);
             }
         }
 
         co_return Expect<void>{};
     }
 
-    AExpect<NamedStat> Filesystem::getattr(path::Path path)
+    AExpect<void> Filesystem::getattr(path::Path path, struct stat* stbuf)
     {
-        co_return (co_await traverse_or_build(path)).and_then([](Node& node) -> Expect<NamedStat> {
+        co_return (co_await traverse_or_build(path)).and_then([&](Node& node) -> Expect<void> {
             if (auto err = node.as_error(); err) {
                 return Unexpect{ err->error };
             }
-            return NamedStat{ .id = node.id(), .stat = node.stat() };
+            node.fill_stbuf(stbuf, page_size_or_default(m_cache));
+            return Expect<void>{};
         });
     }
 
