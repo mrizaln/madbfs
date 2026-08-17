@@ -329,15 +329,15 @@ namespace madbfs::operations
         [[maybe_unused]] fuse_readdir_flags flags
     ) noexcept
     {
-        log_i(__func__, "{:?}", path);
+        log_i(__func__, "{:?} offset={}", path, offset);
 
-        const auto fill = [&](const char* name, const struct stat* stbuf) {
-            filler(buf, name, stbuf, 0, FUSE_FILL_DIR_PLUS);
+        const auto fill = [&](const char* name, const struct stat* stbuf, off_t offset) {
+            return filler(buf, name, stbuf, offset, FUSE_FILL_DIR_PLUS);
         };
 
         return get_data()
             .create_path(path)
-            .and_then([&](path::Path p) { return invoke_fs(&Filesystem::readdir, p, fill); })
+            .and_then([&](path::Path p) { return invoke_fs(&Filesystem::readdir, p, fill, offset); })
             .transform_error(fuse_err(__func__, path))
             .error_or(0);
     }

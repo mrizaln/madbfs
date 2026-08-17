@@ -38,7 +38,7 @@ namespace madbfs
     class Filesystem
     {
     public:
-        using Filler = std::move_only_function<void(const char* name, const struct stat* stbuf)>;
+        using Filler = std::move_only_function<bool(const char* name, const struct stat* stbuf, off_t offset)>;
 
         /**
          * @brief Create a new filesystem.
@@ -73,7 +73,7 @@ namespace madbfs
 
         // fuse operations
         // ---------------
-        AExpect<void> readdir(path::Path path, Filler filler);
+        AExpect<void> readdir(path::Path path, Filler filler, off_t offset);
         AExpect<void> getattr(path::Path path, struct stat* stbuf);
 
         AExpect<Str>       readlink(path::Path path);

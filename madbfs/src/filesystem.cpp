@@ -273,7 +273,7 @@ namespace madbfs
         }
     }
 
-    AExpect<void> Filesystem::readdir(path::Path path, Filler filler)
+    AExpect<void> Filesystem::readdir(path::Path path, Filler filler, off_t offset)
     {
         auto current = &m_root;
 
@@ -379,10 +379,13 @@ namespace madbfs
 
         struct stat stat;
 
-        for (const auto& node : std::as_const(list)) {
+        for (auto&& [i, node] : std::as_const(list) | sv::enumerate | sv::drop(offset)) {
             if (not node->is_error()) {
                 node->fill_stbuf(&stat, page_size_or_default(m_cache));
-                filler(node->name().data(), &stat);
+                auto full = filler(node->name().data(), &stat, i + 1);
+                if (full) {
+                    break;
+                }
             }
         }
 
