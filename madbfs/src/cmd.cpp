@@ -8,6 +8,8 @@
 
 using namespace madbfs;
 
+namespace bp = boost::process::v2;
+
 // helper functions/classes
 namespace
 {
@@ -45,7 +47,7 @@ namespace
      *
      * The string will be empty if `ANDROID_SERIAL` is defined.
      */
-    inline Str get_no_dev_serial()
+    Str get_no_dev_serial()
     {
         if (auto* serial = std::getenv("ANDROID_SERIAL"); serial != nullptr) {
             static auto no_dev_serial = fmt::format("adb: device '{}' not found", serial);
@@ -59,7 +61,7 @@ namespace
      *
      * @param err adb error.
      */
-    inline Errc to_errc(AdbError err)
+    Errc to_errc(AdbError err)
     {
         using Err = AdbError;
         // clang-format off
@@ -86,7 +88,7 @@ namespace
      *
      * Will return `AdbError::Unknown` if the stderr output does not match any enumeration.
      */
-    inline AdbError parse_stderr(Str str)
+    AdbError parse_stderr(Str str)
     {
         using Err = AdbError;
 
@@ -156,6 +158,31 @@ namespace
 
         co_return net::error_code{};
     }
+
+    Opt<Str> find_exe(Str exe)
+    {
+        struct Hash
+        {
+            using is_transparent = void;
+            usize operator()(Str str) const { return std::hash<Str>{}(str); }
+            usize operator()(const String& str) const { return std::hash<Str>{}(str); }
+        };
+        using Cache = std::unordered_map<String, String, Hash, std::equal_to<>>;
+
+        thread_local static auto cache = Cache{};
+
+        if (auto iter = cache.find(exe); iter != cache.end()) {
+            return iter->second;
+        }
+
+        auto path = bp::environment::find_executable(exe);
+        if (path.empty()) {
+            return std::nullopt;
+        }
+
+        auto [it, _] = cache.emplace(exe, path.string());
+        return it->second;
+    }
 }
 
 // cmd.hpp impl
@@ -164,8 +191,6 @@ namespace madbfs::cmd
     AExpect<String> exec(Span<const Str> cmd, Str in, bool check, bool merge_err)
     {
         assert(not cmd.empty());
-
-        namespace bp = boost::process::v2;
 
         log_d(__func__, "run {}", cmd);
 
@@ -177,13 +202,13 @@ namespace madbfs::cmd
 
         auto to_boost_str = [](auto s) { return boost::string_view{ s.data(), s.size() }; };
 
-        auto exe = bp::environment::find_executable(cmd[0]);
-        if (exe.empty()) {
+        auto exe = find_exe(cmd[0]);
+        if (not exe) {
             co_return Unexpect{ Errc::no_such_file_or_directory };
         }
 
         auto args = cmd | sv::drop(1) | sv::transform(to_boost_str);
-        auto proc = bp::process{ exec, exe, args, bp::process_stdio{ pipe_in, pipe_out, pipe_err } };
+        auto proc = bp::process{ exec, *exe, args, bp::process_stdio{ pipe_in, pipe_out, pipe_err } };
 
         if (auto n = co_await async::write_exact<char>(pipe_in, in); not n) {
             log_e(__func__, "failed to write to stdin: {}", n.error().message());
