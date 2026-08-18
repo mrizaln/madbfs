@@ -137,7 +137,7 @@ namespace madbfs::server
 namespace madbfs::server
 {
     Server::Server(async::Context& context, u16 port) noexcept(false)
-        : m_acceptor{ context, async::tcp::Endpoint{ async::tcp::Proto::v4(), port } }
+        : m_acceptor{ context, net::ip::tcp::endpoint{ net::ip::address_v4::loopback(), port } }
     {
         m_acceptor.set_option(async::tcp::Acceptor::reuse_address(true));
         m_acceptor.listen(1);

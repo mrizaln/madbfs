@@ -30,9 +30,7 @@ namespace
         auto exec   = co_await async::current_executor();
         auto socket = async::tcp::Socket{ exec };
 
-        auto address  = net::ip::address_v4{ { 127, 0, 0, 1 } };    // localhost
-        auto endpoint = net::ip::tcp::endpoint{ address, port };
-
+        auto endpoint = net::ip::tcp::endpoint{ net::ip::address_v4::loopback(), port };
         if (auto res = co_await socket.async_connect(endpoint); not res) {
             log_e(__func__, "failed to connect to server at port {}", port);
             auto errc = async::to_generic_err(res.error(), Errc::not_connected);
