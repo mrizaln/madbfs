@@ -239,19 +239,19 @@ namespace madbfs
         if (auto dir = std::get_if<node::Directory>(&old)) {
             auto nodes = std::vector<Node*>{};
             for (const auto& node : dir->children()) {
-                walk(*node, [&](Node& n) { m_handles.erase(&n), nodes.push_back(&n); });
+                walk(*node, [&](Node& n) { m_handles.erase(n), nodes.push_back(&n); });
             }
             if (m_cache) {
                 for (auto node : nodes) {
                     co_await m_cache->invalidate_one(node->id(), false);    // flush? child maybe unchanged
                 }
             }
-            m_handles.erase(&node);
+            m_handles.erase(node);
         } else if (std::get_if<node::Regular>(&old)) {
             if (m_cache) {
                 co_await m_cache->invalidate_one(node.id(), false);    // no flush since the file changed
             }
-            m_handles.erase(&node);
+            m_handles.erase(node);
         }
     }
 
@@ -522,7 +522,7 @@ namespace madbfs
             co_return Unexpect{ res.error() };
         }
 
-        m_handles.erase(erased->get());
+        m_handles.erase(**erased);
         if (m_cache) {
             co_await m_cache->invalidate_one((*erased)->id(), false);
         }
@@ -628,7 +628,7 @@ namespace madbfs
             if (m_cache) {
                 co_await m_cache->invalidate_one(overwritten.second->id(), false);
             }
-            m_handles.erase(overwritten.second.get());
+            m_handles.erase(*overwritten.second);
         }
 
         co_return Expect<void>{};
@@ -697,11 +697,11 @@ namespace madbfs
         // send hint to cache to prepare a real fd that can be used for further operations
         if (m_cache) {
             co_return (co_await m_cache->hint_open(node.id(), path, mode)).transform([&] {
-                return m_handles.store(&node, mode, 0);
+                return m_handles.store(node, mode, 0);
             });
         } else {
             co_return (co_await m_connection.open(path, mode)).transform([&](u64 real_fd) {
-                return m_handles.store(&node, mode, real_fd);
+                return m_handles.store(node, mode, real_fd);
             });
         }
     }
@@ -714,12 +714,12 @@ namespace madbfs
         }
 
         auto after = [&](usize ret) {
-            handle->node->refresh_stat(timespec_now, timespec_omit);
+            handle->node.refresh_stat(timespec_now, timespec_omit);
             return ret;
         };
 
         if (m_cache) {
-            co_return (co_await m_cache->read(handle->node->id(), out, offset)).transform(after);
+            co_return (co_await m_cache->read(handle->node.id(), out, offset)).transform(after);
         } else {
             assert(handle->real_fd != 0 && "on no-cache, the file descriptor is exposed directly, not 0");
             co_return (co_await m_connection.read(handle->real_fd, out, offset)).transform(after);
@@ -733,7 +733,7 @@ namespace madbfs
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        auto may_file = handle->node->as_regular();
+        auto may_file = handle->node.as_regular();
         if (not may_file) [[unlikely]] {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
@@ -743,10 +743,10 @@ namespace madbfs
         auto after = [&](usize ret) {
             // the file size is defined as offset + size from last write if it's higher than previous size
             auto new_size = offset + static_cast<off_t>(ret);
-            auto size     = std::max(handle->node->stat().size, new_size);
+            auto size     = std::max(handle->node.stat().size, new_size);
 
-            handle->node->set_size(size);
-            handle->node->refresh_stat(timespec_omit, timespec_now);
+            handle->node.set_size(size);
+            handle->node.refresh_stat(timespec_omit, timespec_now);
 
             file.dirty = true;
 
@@ -754,7 +754,7 @@ namespace madbfs
         };
 
         if (m_cache) {
-            co_return (co_await m_cache->write(handle->node->id(), in, offset)).transform(after);
+            co_return (co_await m_cache->write(handle->node.id(), in, offset)).transform(after);
         } else {
             co_return (co_await m_connection.write(handle->real_fd, in, offset)).transform(after);
         }
@@ -767,7 +767,7 @@ namespace madbfs
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        auto may_file = handle->node->as_regular();
+        auto may_file = handle->node.as_regular();
         if (not may_file) [[unlikely]] {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
@@ -778,8 +778,8 @@ namespace madbfs
         }
 
         if (m_cache) {
-            co_return (co_await m_cache->flush(handle->node->id())).transform([&] {
-                handle->node->refresh_stat(timespec_omit, timespec_now);
+            co_return (co_await m_cache->flush(handle->node.id())).transform([&] {
+                handle->node.refresh_stat(timespec_omit, timespec_now);
                 file.dirty = false;
             });
         } else {
@@ -796,24 +796,24 @@ namespace madbfs
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        auto may_file = handle->node->as_regular();
+        auto may_file = handle->node.as_regular();
         if (not may_file) [[unlikely]] {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
         auto& file = may_file->get();
         if (file.dirty and m_cache) {
-            if (auto res = co_await m_cache->flush(handle->node->id()); not res) {
+            if (auto res = co_await m_cache->flush(handle->node.id()); not res) {
                 co_return Unexpect{ res.error() };
             }
 
-            handle->node->refresh_stat(timespec_omit, timespec_now);
+            handle->node.refresh_stat(timespec_omit, timespec_now);
             file.dirty = false;
         }
 
         // send hint to cache to close its associated fd for this node if exist
         if (m_cache) {
-            co_return co_await m_cache->hint_close(handle->node->id(), handle->mode);
+            co_return co_await m_cache->hint_close(handle->node.id(), handle->mode);
         } else {
             co_return co_await m_connection.close(handle->real_fd);
         }

@@ -12,7 +12,7 @@ namespace madbfs
 {
     struct FileHandle
     {
-        Node*    node;
+        Node&    node;
         OpenMode mode;
         u64      real_fd;    // only useful for direct IO; Cache is not enabled
     };
@@ -63,7 +63,7 @@ namespace madbfs
          *
          * The time complexity of the opration is linear (depends on number of handles before finding a hole).
          */
-        u64 store(Node* node, OpenMode mode, u64 real_fd);
+        u64 store(Node& node, OpenMode mode, u64 real_fd);
 
         /**
          * @brief Release the associated node of file descriptor from the file handle store.
@@ -85,7 +85,7 @@ namespace madbfs
          *
          * Iterate the store and erase any handles that has this node pointed by them.
          */
-        usize erase(Node* node);
+        usize erase(Node& node);
 
         usize capacity() const { return m_handles.capacity(); }
         usize size() const { return m_handles.size(); }

@@ -22,9 +22,8 @@ namespace madbfs
         return *handle;
     }
 
-    u64 FileHandleStore::store(Node* node, OpenMode mode, u64 real_fd)
+    u64 FileHandleStore::store(Node& node, OpenMode mode, u64 real_fd)
     {
-        assert(node != nullptr);
         auto key = m_handles.emplace(node, mode, real_fd);
         return to_u64(key);
     }
@@ -35,9 +34,8 @@ namespace madbfs
         return m_handles.erase(key);
     }
 
-    usize FileHandleStore::erase(Node* node)
+    usize FileHandleStore::erase(Node& node)
     {
-        assert(node != nullptr);
-        return m_handles.erase_if([&](Key, FileHandle& h) { return h.node == node; });
+        return m_handles.erase_if([&](Key, FileHandle& h) { return &h.node == &node; });
     }
 }
