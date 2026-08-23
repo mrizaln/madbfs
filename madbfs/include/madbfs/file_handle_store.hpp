@@ -1,5 +1,6 @@
 #pragma once
 
+#include "madbfs/slotmap.hpp"
 #include "madbfs/stat.hpp"
 
 namespace madbfs
@@ -86,14 +87,16 @@ namespace madbfs
          */
         usize erase(Node* node);
 
-        Span<FileHandle>       iter() { return m_handles; }
-        Span<const FileHandle> iter() const { return m_handles; }
-
-        usize capacity() const { return m_handles.size(); }
-        usize count_open() const;
-        usize count_empty() const;
+        usize capacity() const { return m_handles.capacity(); }
+        usize size() const { return m_handles.size(); }
 
     private:
-        Vec<FileHandle> m_handles;
+        struct Key
+        {
+            u32 index;
+            u32 version;
+        };
+
+        SlotMap<Key, FileHandle> m_handles;
     };
 }

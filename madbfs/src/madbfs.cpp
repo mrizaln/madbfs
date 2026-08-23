@@ -414,10 +414,10 @@ namespace madbfs
 
             const auto& handles = m_fs.handles();
 
-            auto cap   = handles.capacity();
-            auto empty = handles.count_empty();
+            auto cap  = handles.capacity();
+            auto open = handles.size();
 
-            log_i(__func__, "file handles [cap={:>04d}|open={:>04d}|empty={:>04d}]", cap, cap - empty, empty);
+            log_i(__func__, "file handles [cap={:>04d}|open={:>04d}|empty={:>04d}]", cap, open, cap - open);
         }
     }
 }
