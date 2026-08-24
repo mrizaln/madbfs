@@ -27,7 +27,7 @@ jobs:
       uses: mozilla-actions/sccache-action@v0.0.10
 
     - name: Configure C++ development tools
-      run: sudo apt-get install cmake ninja-build
+      run: sudo apt-get install cmake ninja-build clang-22
 
     - name: Setup Android NDK
       uses: nttld/setup-ndk@v1
@@ -40,6 +40,8 @@ jobs:
       env:
         ANDROID_NDK_HOME: "${{ steps.setup-ndk.outputs.ndk-path }}"
         SCCACHE_GHA_ENABLED: true
+        CC: "/usr/bin/clang-22"
+        CXX: "/usr/bin/clang++-22"
         CMAKE_C_COMPILER_LAUNCHER: "sccache"
         CMAKE_CXX_COMPILER_LAUNCHER: "sccache"
 
