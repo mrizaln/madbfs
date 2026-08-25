@@ -5,14 +5,10 @@
 
 namespace madbfs
 {
-    class Node;
-}
-
-namespace madbfs
-{
+    // TODO: store id instead
     struct FileHandle
     {
-        Node&    node;
+        Id       id;
         OpenMode mode;
         u64      real_fd;    // only useful for direct IO; Cache is not enabled
     };
@@ -30,7 +26,7 @@ namespace madbfs
     {
     public:
         /**
-         * @brief Get file handle from file handle store for file descriptor.
+         * @brief Get associated `FileHandle` for file descriptor with any open mode.
          *
          * @param fd File descriptor.
          *
@@ -41,51 +37,45 @@ namespace madbfs
         Opt<FileHandle> find(u64 fd);
 
         /**
-         * @brief Get associated `Node` from file handle store for file descriptor with specified open mode.
+         * @brief Get associated `FileHandle` for file descriptor with specified open mode.
          *
          * @param fd File descriptor.
          * @param mode Open file mode.
          *
          * @return The node if found and fulfill the mode else `std::nullopt`.
-         *
-         * The time complexity of the operation is constant.
          */
         Opt<FileHandle> find(u64 fd, OpenMode mode);
 
         /**
-         * @brief Store `Node` pointer into file handle store.
+         * @brief Create a new `FileHandle` associated by a file descriptor number.
          *
-         * @param node The node to be inserted.
+         * @param id The id of the node of the file to be referenced by the handle.
          * @param mode Open file mode for the node.
          * @param real_fd Real file descriptor (only useful for direct IO).
          *
-         * @return File descriptor (position of the node in the store).
-         *
-         * The time complexity of the opration is linear (depends on number of handles before finding a hole).
+         * @return File descriptor.
          */
-        u64 store(Node& node, OpenMode mode, u64 real_fd);
+        u64 store(Id id, OpenMode mode, u64 real_fd);
 
         /**
-         * @brief Release the associated node of file descriptor from the file handle store.
+         * @brief Release the associated file handle using the file descriptor number.
          *
          * @param fd File descriptor.
          *
          * @return The released node if exists, else `std::nullopt`.
-         *
-         * The time complexity of the operation is constant.
          */
         Opt<FileHandle> release(u64 fd);
 
         /**
-         * @brief Erase any pointer to node.
+         * @brief Erase any pointer to node id.
          *
-         * @param node The pointer to the node.
+         * @param id Unique identifier for file node.
          *
          * @return Number of file handle erased.
          *
          * Iterate the store and erase any handles that has this node pointed by them.
          */
-        usize erase(Node& node);
+        usize erase(Id id);
 
         usize capacity() const { return m_handles.capacity(); }
         usize size() const { return m_handles.size(); }
