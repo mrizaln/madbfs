@@ -15,9 +15,9 @@ target_sources(
     src/file_handle_store.cpp
     src/filesystem.cpp
     src/madbfs.cpp
-    src/node.cpp
     src/operations.cpp
     src/path.cpp
+    src/tree/node.cpp
     src/transport/adb_transport.cpp
     src/transport/proxy_transport.cpp
     src/cache/dirty_map.cpp

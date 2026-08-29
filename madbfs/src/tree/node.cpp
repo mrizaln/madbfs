@@ -1,73 +1,43 @@
-#include "madbfs/node.hpp"
-
-#include "madbfs/connection.hpp"
+#include "madbfs/tree/node.hpp"
 
 // node.hpp impl: Directory
-namespace madbfs::node
+namespace madbfs::tree::node
 {
-    u64 Directory::NodeHash::operator()(const Uniq<Node>& node) const
-    {
-        return (*this)(node->name());
-    }
-
-    bool Directory::NodeEq::operator()(Str lhs, const Uniq<Node>& rhs) const
-    {
-        return lhs == rhs->name();
-    }
-
-    bool Directory::NodeEq::operator()(const Uniq<Node>& lhs, Str rhs) const
-    {
-        return lhs->name() == rhs;
-    }
-
-    bool Directory::NodeEq::operator()(const Uniq<Node>& lhs, const Uniq<Node>& rhs) const
-    {
-        return lhs->name() == rhs->name();
-    }
-
-    Expect<Ref<Node>> Directory::find(Str name) const
+    Expect<Id> Directory::find(Str name) const
     {
         if (auto found = m_children.find(name); found != m_children.end()) {
-            return *found->get();
+            return found->second;
         }
         return Unexpect{ Errc::no_such_file_or_directory };
     }
 
-    Opt<Uniq<Node>> Directory::erase(Str name)
+    Expect<Id> Directory::erase(Str name)
     {
-        if (auto found = m_children.find(name); found != m_children.end()) {
-            return std::move(m_children.extract(found).value());
+        if (auto value = m_children.extract(name); not value.empty()) {
+            return std::move(value).mapped();
         }
-        return std::nullopt;
+        return Unexpect{ Errc::no_such_file_or_directory };
     }
 
-    Expect<Pair<Ref<Node>, Uniq<Node>>> Directory::insert(Uniq<Node> node, bool overwrite)
+    Expect<Opt<Id>> Directory::insert(Str name, Id node, bool overwrite)
     {
-        auto found = m_children.find(node->name());
+        auto found = m_children.find(name);
         if (found != m_children.end() and not overwrite) {
             return Unexpect{ Errc::file_exists };
         }
 
-        auto released = Uniq<Node>{};
+        auto extract = Opt<Id>{};
         if (found != m_children.end()) {
-            released = std::move(m_children.extract(found).value());
+            extract = std::move(m_children.extract(found).mapped());
         }
 
-        auto [back, _] = m_children.emplace(std::move(node));
-        return Pair{ std::ref(*back->get()), std::move(released) };
-    }
-
-    Expect<Uniq<Node>> Directory::extract(Str name)
-    {
-        if (auto found = m_children.find(name); found != m_children.end()) {
-            return std::move(m_children.extract(found).value());
-        }
-        return Unexpect{ Errc::no_such_file_or_directory };
+        m_children.emplace(name, node);
+        return extract;
     }
 }
 
 // node.hpp impl: Node
-namespace madbfs
+namespace madbfs::tree
 {
     void Node::expires_after(Seconds duration)
     {
@@ -97,25 +67,6 @@ namespace madbfs
     const node::Error* Node::as_error() const
     {
         return std::get_if<node::Error>(&m_value);
-    }
-
-    path::PathBuf Node::build_path() const
-    {
-        auto path = m_name | sv::reverse | sr::to<String>();
-        auto iter = std::back_inserter(path);
-
-        for (auto current = m_parent; current != nullptr; current = current->m_parent) {
-            *iter = '/';
-            sr::copy(current->m_name | sv::reverse, iter);
-        }
-
-        // if the last path is root, we need to remove the last /
-        if (path.size() > 2 and path[path.size() - 1] == '/' and path[path.size() - 2] == '/') {
-            path.pop_back();
-        }
-        sr::reverse(path);
-
-        return path::create_buf(std::move(path)).value();
     }
 
     void Node::refresh_stat(timespec atime, timespec mtime)
@@ -149,27 +100,23 @@ namespace madbfs
         std::ignore = as_directory().transform(proj(&node::Directory::set_readdir, synced));
     }
 
-    Expect<Ref<Node>> Node::traverse(Str name) const
+    Expect<Id> Node::traverse(Str name) const
     {
         return as_directory().and_then(proj(&node::Directory::find, name));
     }
 
-    Expect<Ref<Node>> Node::build(Str name, Stat stat, File file)
+    Expect<void> Node::add(Str name, Id node)
     {
         return as_directory()
-            .and_then(proj(
-                &node::Directory::insert,
-                std::make_unique<Node>(name, this, std::move(stat), std::move(file)),
-                false
-            ))
-            .transform([](auto&& pair) { return pair.first; });
+            .and_then(proj(&node::Directory::insert, name, node, false))
+            .transform(sink_void);
     }
 
-    struct stat* Node::fill_stbuf(struct stat* stbuf, blksize_t page_size)
+    struct stat* Node::fill_stbuf(struct stat* stbuf, Id id, blksize_t page_size)
     {
         std::memset(stbuf, 0, sizeof(struct stat));
 
-        stbuf->st_ino     = static_cast<ino_t>(m_id.inner());
+        stbuf->st_ino     = id.to_u64();
         stbuf->st_mode    = m_stat.mode;
         stbuf->st_nlink   = m_stat.links;
         stbuf->st_uid     = m_stat.uid;
