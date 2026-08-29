@@ -13,8 +13,8 @@ namespace madbfs::tree::node
 
     Expect<Id> Directory::erase(Str name)
     {
-        if (auto value = m_children.extract(name); not value.empty()) {
-            return std::move(value).mapped();
+        if (auto found = m_children.find(name); found != m_children.end()) {
+            return std::move(m_children.extract(found).mapped());
         }
         return Unexpect{ Errc::no_such_file_or_directory };
     }
