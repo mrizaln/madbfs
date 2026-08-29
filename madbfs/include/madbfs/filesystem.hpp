@@ -2,8 +2,9 @@
 
 #include "madbfs/cache/lru_cache.hpp"
 #include "madbfs/file_handle_store.hpp"
-#include "madbfs/node.hpp"
 #include "madbfs/path.hpp"
+#include "madbfs/tree/node.hpp"
+#include "madbfs/tree/tree.hpp"
 
 #include <madbfs-common/async/async.hpp>
 #include <madbfs-common/util/var_wrapper.hpp>
@@ -38,7 +39,7 @@ namespace madbfs
     class Filesystem
     {
     public:
-        using Filler = std::move_only_function<bool(const char* name, const struct stat* stbuf, off_t offset)>;
+        using Filler = std::move_only_function<bool(const char*, const struct stat*, off_t)>;
 
         /**
          * @brief Create a new filesystem.
@@ -58,32 +59,39 @@ namespace madbfs
          */
         ~Filesystem() = default;
 
-        Filesystem(Node&& root)            = delete;
-        Filesystem& operator=(Node&& root) = delete;
+        Filesystem(tree::Node&& root)            = delete;
+        Filesystem& operator=(tree::Node&& root) = delete;
 
-        Filesystem(const Node& root)            = delete;
-        Filesystem& operator=(const Node& root) = delete;
+        Filesystem(const tree::Node& root)            = delete;
+        Filesystem& operator=(const tree::Node& root) = delete;
 
         /**
          * @brief Get a node by the given path.
          *
          * @param path The path to the node.
          */
-        Expect<Ref<Node>> traverse(path::Path path);
+        Expect<Id> traverse(path::Path path);
+
+        /**
+         * @brief [TODO:description]
+         *
+         * @param path [TODO:parameter]
+         */
+        Expect<tree::Entry> traverse_entry(path::Path path);
 
         // fuse operations
         // ---------------
         AExpect<void> readdir(path::Path path, Filler filler, off_t offset);
         AExpect<void> getattr(path::Path path, struct stat* stbuf);
 
-        AExpect<Str>       readlink(path::Path path);
-        AExpect<Ref<Node>> mknod(path::Path path, mode_t mode, dev_t dev);
-        AExpect<Ref<Node>> mkdir(path::Path path, mode_t mode);
-        AExpect<void>      unlink(path::Path path);
-        AExpect<void>      rmdir(path::Path path);
-        AExpect<void>      rename(path::Path from, path::Path to, u32 flags);
-        AExpect<void>      utimens(path::Path path, timespec atime, timespec mtime);
-        AExpect<void>      truncate(path::Path path, off_t size);
+        AExpect<Str>  readlink(path::Path path);
+        AExpect<Id>   mknod(path::Path path, mode_t mode, dev_t dev);
+        AExpect<Id>   mkdir(path::Path path, mode_t mode);
+        AExpect<void> unlink(path::Path path);
+        AExpect<void> rmdir(path::Path path);
+        AExpect<void> rename(path::Path from, path::Path to, u32 flags);
+        AExpect<void> utimens(path::Path path, timespec atime, timespec mtime);
+        AExpect<void> truncate(path::Path path, off_t size);
 
         AExpect<u64>   open(path::Path path, int flags);
         AExpect<usize> read(u64 fd, Span<char> out, off_t offset);
@@ -146,7 +154,7 @@ namespace madbfs
         /**
          * @brief Get root node.
          */
-        const Node& root() const { return m_root; }
+        const tree::Tree& tree() const { return m_tree; }
 
         /**
          * @brief Get TTL.
@@ -164,56 +172,109 @@ namespace madbfs
         /**
          * @brief Fetch file stat from remote at `path` then create a child node on `parent`.
          *
-         * @param parent Parent on which the child node will be created.
+         * @param parent_id The Id of the parent node.
          * @param path Path to the file.
+         *
+         * # Precondition:
+         * - Node pointed by `parent_id` exists and is a directory.
          */
-        AExpect<Ref<Node>> build(Node& parent, path::Path path);
+        AExpect<Id> build(Id parent_id, path::Path path);
 
         /**
          * @brief Same as build but force directory only, fails with `Errc::not_a_directory` if not directory.
          *
-         * @param parent Parent on which the child node will be created.
+         * @param parent_id The Id of the parent node.
          * @param path Path to the file.
+         *
+         * # Precondition:
+         * - Node pointed by `parent_id` exists and is a directory.
          */
-        AExpect<Ref<Node>> build_directory(Node& parent, path::Path path);
+        AExpect<Id> build_directory(Id parent_id, path::Path path);
 
         /**
          * @brief Traverse the node or build a new node.
          *
          * @param path Path to the node.
          */
-        AExpect<Ref<Node>> traverse_or_build(path::Path path);
+        AExpect<Id> traverse_or_build(path::Path path);
+
+        /**
+         * @brief [TODO:description]
+         *
+         * @param path [TODO:parameter]
+         */
+        AExpect<tree::Entry> traverse_or_build_entry(path::Path path);
 
         /**
          * @brief Re-fetch file stat from remote and update the node accordingly.
          *
          * @param node The node in question.
+         * @param id The Id of the node to be updated.
          * @param path Path to the corresponding file on remote.
          */
-        AExpect<void> update(Node& node, path::Path path);
+        AExpect<void> update(tree::Node& node, Id id, path::Path path);
+
+        /**
+         * @brief [TODO:description]
+         *
+         * @param left [TODO:parameter]
+         * @param right [TODO:parameter]
+         *
+         * Preconditions:
+         * - `left` and `right` nodes are not Error nodes.
+         * - The parents of them must be verified of its existence and their types as directory as well.
+         *
+         * This function updates the stat of both `left` and `right` parents.
+         */
+        AExpect<void> exchange_nodes(tree::Entry left, tree::Entry right);
+
+        /**
+         * @brief Move `left` node to `new_parent` as `new_name`.
+         *
+         * @param left [TODO:parameter]
+         * @param new_name [TODO:parameter]
+         * @param new_parent [TODO:parameter]
+         *
+         * Preconditions:
+         * - `left` is not error node.
+         * - `new_parent` must be a directory.
+         * - The parent of `left` must be verified of its existence and their types as directory as well.
+         *
+         * This will overwrite anything on `new_parent` that has the same name as `new_name`.
+         * This function updates the stat of `new_parent` and `left`'s parent.
+         */
+        AExpect<void> move_node(tree::Entry left, Str new_name, tree::Entry new_parent);
+
+        /**
+         * @brief [TODO:description]
+         *
+         * @param dir [TODO:parameter]
+         */
+        AExpect<void> refresh_dir(Id id, path::Path path);
 
         /**
          * @brief Visit all nodes while doing operation on them.
          *
          * @param func The opeartion to be applied on each of the node.
          */
-        void walk(Node& start, std::function<void(Node&)> func);
+        void walk(Id start, std::function<void(tree::Entry)> func);
 
         /**
          * @brief Replace the node variant with the new one while invalidating the current one.
          *
          * @param node Node to be mutated.
+         * @param id The Id of the node to be mutated.
          * @param file The new variant of the node.
          *
          * Invlidate here means removing the children (recursive) references from `Cache` as well as from
          * `FileHandleStore` if the node is a directory. The funciton will remove references of the node if
          * it is a regular file.
          */
-        Await<void> mutate_and_invalidate(Node& node, File file);
+        Await<void> mutate_and_invalidate(tree::Node& node, Id id, tree::File file);
 
         Connection& m_connection;
 
-        Node                 m_root;
+        tree::Tree           m_tree;
         Opt<cache::LruCache> m_cache;
         FileHandleStore      m_handles;
 
