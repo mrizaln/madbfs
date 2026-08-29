@@ -61,12 +61,12 @@ namespace madbfs::tree
     // directory is changed, idk
     File Node::mutate(File file)
     {
-        return std::exchange(m_value, std::move(file));
+        return std::exchange(m_kind, std::move(file));
     }
 
     const node::Error* Node::as_error() const
     {
-        return std::get_if<node::Error>(&m_value);
+        return std::get_if<node::Error>(&m_kind);
     }
 
     void Node::refresh_stat(timespec atime, timespec mtime)
@@ -92,7 +92,7 @@ namespace madbfs::tree
             [](const node::Directory& dir) { return dir.has_readdir(); },
             [](const auto&) { return true; },
         };
-        return std::visit(visit, m_value);
+        return std::visit(visit, m_kind);
     }
 
     void Node::set_synced(bool synced)

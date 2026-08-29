@@ -156,11 +156,11 @@ namespace madbfs::tree
     public:
         using Timepoint = SteadyClock::time_point;
 
-        Node(Id parent, Str name, Stat stat, File value)
+        Node(Id parent, Str name, Stat stat, File kind)
             : m_parent{ parent }
             , m_name{ name }
             , m_stat{ std::move(stat) }
-            , m_value{ std::move(value) }
+            , m_kind{ std::move(kind) }
         {
         }
 
@@ -177,7 +177,7 @@ namespace madbfs::tree
 
         Str         name() const { return m_name; }
         Id          parent() const { return m_parent; }
-        const File& value() const { return m_value; }
+        const File& kind() const { return m_kind; }
         const Stat& stat() const { return m_stat; }
 
         /**
@@ -299,22 +299,22 @@ namespace madbfs::tree
         /**
          * @brief Check if node has Regular variant.
          */
-        bool is_regular() const { return std::holds_alternative<node::Regular>(m_value); }
+        bool is_regular() const { return std::holds_alternative<node::Regular>(m_kind); }
 
         /**
          * @brief Check if node has Directory variant.
          */
-        bool is_directory() const { return std::holds_alternative<node::Directory>(m_value); }
+        bool is_directory() const { return std::holds_alternative<node::Directory>(m_kind); }
 
         /**
          * @brief Check if node has Link variant.
          */
-        bool is_link() const { return std::holds_alternative<node::Link>(m_value); }
+        bool is_link() const { return std::holds_alternative<node::Link>(m_kind); }
 
         /**
          * @brief Check if node has Error variant.
          */
-        bool is_error() const { return std::holds_alternative<node::Error>(m_value); }
+        bool is_error() const { return std::holds_alternative<node::Error>(m_kind); }
 
     private:
         inline static std::atomic<u64> s_id_counter = 0;
@@ -323,7 +323,7 @@ namespace madbfs::tree
         String    m_name       = {};
         Stat      m_stat       = {};
         Timepoint m_expiration = Timepoint::max();
-        File      m_value;
+        File      m_kind;
     };
 }
 
@@ -355,7 +355,7 @@ namespace madbfs::tree
         };
         // clang-format on
 
-        return std::visit(overload, std::forward_like<Self>(self.m_value));
+        return std::visit(overload, std::forward_like<Self>(self.m_kind));
     }
 
     template <typename Self>
@@ -374,7 +374,7 @@ namespace madbfs::tree
         };
         // clang-format on
 
-        return std::visit(overload, std::forward_like<Self>(self.m_value));
+        return std::visit(overload, std::forward_like<Self>(self.m_kind));
     }
 
     template <typename Self>
@@ -393,6 +393,6 @@ namespace madbfs::tree
         };
         // clang-format on
 
-        return std::visit(overload, std::forward_like<Self>(self.m_value));
+        return std::visit(overload, std::forward_like<Self>(self.m_kind));
     }
 }
