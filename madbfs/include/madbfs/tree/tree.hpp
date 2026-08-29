@@ -1,8 +1,16 @@
 #pragma once
 
+#include <madbfs-common/util/slice.hpp>
+
 #include "madbfs/slotmap.hpp"
 #include "madbfs/stat.hpp"
 #include "madbfs/tree/node.hpp"
+
+namespace madbfs::path
+{
+    class Path;
+    class PathBuf;
+}
 
 namespace madbfs::tree
 {
@@ -67,6 +75,15 @@ namespace madbfs::tree
         Expect<Ref<Node>> get(Id id);
 
         /**
+         * @brief Get a const reference to the `Node` pointed by `id`.
+         *
+         * @param id Unique identifier to an instance of `Node` in the tree.
+         *
+         * Same rule apply as the non-const reference overload of this function.
+         */
+        Expect<Ref<const Node>> get(Id id) const;
+
+        /**
          * @brief Get the `Entry` to a node contained within `parent_id`.
          *
          * @param parent_id Unique identifier to an instance of `Node` that may contain node with `name`.
@@ -95,6 +112,20 @@ namespace madbfs::tree
          * content of the removed `Node`.
          */
         Opt<Node> remove(Id id);
+
+        /**
+         * @brief Build path from node pointed by `id`
+         *
+         * @param id Unique identifier to active `Node` in tree.
+         */
+        Expect<path::PathBuf> build_path(Id id) const;
+
+        /**
+         * @brief Build path from node pointed by `id`
+         *
+         * @param id Unique identifier to active `Node` in tree.
+         */
+        Expect<path::Path> build_path(Id id, Vec<util::Slice>& comps_buf, String& buf) const;
 
         Node&       root_node() { return *m_nodes.at(m_root); }
         const Node& root_node() const { return *m_nodes.at(m_root); }
