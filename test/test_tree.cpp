@@ -1,7 +1,7 @@
-#include "madbfs/filesystem.hpp"
 #include <madbfs-common/util/split.hpp>
+
 #include <madbfs/connection.hpp>
-#include <madbfs/node.hpp>
+#include <madbfs/filesystem.hpp>
 #include <madbfs/path.hpp>
 
 #include <boost/ut.hpp>
@@ -71,43 +71,46 @@ constexpr auto expected_rm = R"(
 
 // NOTE: since there is no ordering guarantee from the VFS, this formatter just order them alphabetically
 template <>
-struct fmt::formatter<madbfs::Node> : fmt::formatter<Str>
+struct fmt::formatter<madbfs::tree::Tree> : fmt::formatter<Str>
 {
-    auto format(const madbfs::Node& node, auto&& ctx) const
+    auto format(const madbfs::tree::Tree& tree, auto&& ctx) const
     {
         using namespace madbfs;
+        using namespace madbfs::tree;
 
-        auto print_impl = [&](this auto&& self, const Node* node, usize depth) -> void {
-            if (node == nullptr) {
+        auto print_impl = [&](this auto&& self, Id id, usize depth) -> void {
+            auto node_expect = tree.get(id);
+            if (not node_expect) {
                 return;
             }
+
+            auto& node = node_expect->get();
 
             for (auto _ : sv::iota(0u, depth)) {
                 fmt::format_to(ctx.out(), "    ");
             }
 
-            auto visitor = madbfs::Overload{
+            auto extra = node.kind().visit(madbfs::Overload{
                 [&](const node::Link& l) { return fmt::format("  ->  {}", l.target.value_or("[none]")); },
                 [&](const node::Directory&) { return String{ "/" }; },
                 [&](const auto&) { return String{ "" }; },
-            };
-            auto additional = std::visit(visitor, node->value());
+            });
 
-            // if root, don't print the name since additional will print dir mark (/)
-            auto name = node->name() == "/" ? "" : node->name();
-            fmt::format_to(ctx.out(), "- {}{}\n", name, additional);
+            auto name = node.name() == "/" ? "" : node.name();
+            fmt::format_to(ctx.out(), "- {}{}\n", name, extra);
 
-            if (auto* dir = std::get_if<node::Directory>(&node->value())) {
-                auto to_ref = [](const Uniq<Node>& f) { return std::ref(*f); };
-                auto ptrs   = dir->children() | sv::transform(to_ref) | sr::to<std::vector>();
-                sr::sort(ptrs, std::less<>{}, &Node::name);
-                for (const Node& child : ptrs) {
-                    self(&child, depth + 1);
+            auto list = node.as_directory().transform([&](const node::Directory& d) { return d.children(); });
+            if (list) {
+                auto nodes = *list | sr::to<Vec<Pair<String, Id>>>();
+                sr::sort(nodes, std::less<>{}, [&](auto&& p) { return std::get<0>(p); });
+
+                for (auto [_, id] : nodes) {
+                    self(id, depth + 1);
                 }
             };
         };
 
-        print_impl(&node, 0u);
+        print_impl(tree.root(), 0u);
 
         return ctx.out();
     }
@@ -222,69 +225,71 @@ int main()
         auto guard      = madbfs::net::make_work_guard(context);
         auto thread     = std::jthread{ [&] { context.run(); } };
         auto connection = madbfs::Connection{ context, mock::dummy_strategy };
-        auto tree       = Filesystem{ context, connection, std::nullopt, std::nullopt };
+        auto fs         = Filesystem{ context, connection, std::nullopt, std::nullopt };
 
         using madbfs::path::operator""_path;
 
 #define unwrap(T) transform_error([](auto e) { return raise_expect_error<T>(e); }).value()
 
         auto coro = [&] -> madbfs::Await<void> {
-            (co_await tree.mkdir("/hello"_path, 0)).unwrap(Node*);
-            (co_await tree.mknod("/hello/world.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/hello/foo.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/hello/movie.mp4"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mkdir("/hello/bar"_path, 0)).unwrap(Node*);
-            (co_await tree.mknod("/hello/bar/baz.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/hello/bar/qux.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/hello/bar/quux.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mkdir("/bye"_path, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/world.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/movie.mp4"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/music.mp3"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mkdir("/bye/family"_path, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/family/dad.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/family/mom.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mkdir("/bye/friends"_path, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/friends/bob.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mkdir("/bye/friends/school"_path, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/friends/school/kal'tsit.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/friends/school/closure.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mkdir("/bye/friends/work"_path, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/friends/work/loughshinny <3.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/friends/work/eblana?.mp4"_path, 0, 0)).unwrap(Node*);
+            (co_await fs.mkdir("/hello"_path, 0)).unwrap(Id);
+            (co_await fs.mknod("/hello/world.txt"_path, 0, 0)).unwrap(Id);
+            (co_await fs.mknod("/hello/foo.txt"_path, 0, 0)).unwrap(Id);
+            (co_await fs.mknod("/hello/movie.mp4"_path, 0, 0)).unwrap(Id);
+            (co_await fs.mkdir("/hello/bar"_path, 0)).unwrap(Id);
+            (co_await fs.mknod("/hello/bar/baz.txt"_path, 0, 0)).unwrap(Id);
+            (co_await fs.mknod("/hello/bar/qux.txt"_path, 0, 0)).unwrap(Id);
+            (co_await fs.mknod("/hello/bar/quux.txt"_path, 0, 0)).unwrap(Id);
+            (co_await fs.mkdir("/bye"_path, 0)).unwrap(Id);
+            (co_await fs.mknod("/bye/world.txt"_path, 0, 0)).unwrap(Id);
+            (co_await fs.mknod("/bye/movie.mp4"_path, 0, 0)).unwrap(Id);
+            (co_await fs.mknod("/bye/music.mp3"_path, 0, 0)).unwrap(Id);
+            (co_await fs.mkdir("/bye/family"_path, 0)).unwrap(Id);
+            (co_await fs.mknod("/bye/family/dad.txt"_path, 0, 0)).unwrap(Id);
+            (co_await fs.mknod("/bye/family/mom.txt"_path, 0, 0)).unwrap(Id);
+            (co_await fs.mkdir("/bye/friends"_path, 0)).unwrap(Id);
+            (co_await fs.mknod("/bye/friends/bob.txt"_path, 0, 0)).unwrap(Id);
+            (co_await fs.mkdir("/bye/friends/school"_path, 0)).unwrap(Id);
+            (co_await fs.mknod("/bye/friends/school/kal'tsit.txt"_path, 0, 0)).unwrap(Id);
+            (co_await fs.mknod("/bye/friends/school/closure.txt"_path, 0, 0)).unwrap(Id);
+            (co_await fs.mkdir("/bye/friends/work"_path, 0)).unwrap(Id);
+            (co_await fs.mknod("/bye/friends/work/loughshinny <3.txt"_path, 0, 0)).unwrap(Id);
+            (co_await fs.mknod("/bye/friends/work/eblana?.mp4"_path, 0, 0)).unwrap(Id);
 
-            tree.symlink("/bye/friends/school/hehe"_path, "/bye/friends/work").unwrap(void);
-            tree.symlink("/hello/wife"_path, "/bye/friends/work/loughshinny <3.txt").unwrap(void);
+            fs.symlink("/bye/friends/school/hehe"_path, "/bye/friends/work").unwrap(void);
+            fs.symlink("/hello/wife"_path, "/bye/friends/work/loughshinny <3.txt").unwrap(void);
 
-            (co_await tree.mknod("/bye/theresa.txt"_path, 0, 0)).unwrap(Node*);
+            (co_await fs.mknod("/bye/theresa.txt"_path, 0, 0)).unwrap(Id);
 
-            auto tree_str = fmt::format("\n{}", tree.root());
+            auto tree_str = fmt::format("\n{}", fs.tree());
             expect(expected == tree_str) << diff_str(expected, tree_str);
 
-            (co_await tree.unlink("/hello/world.txt"_path)).unwrap(void);
-            (co_await tree.unlink("/bye/music.mp3"_path)).unwrap(void);
-            (co_await tree.unlink("/bye/friends/bob.txt"_path)).unwrap(void);
-            (co_await tree.unlink("/bye/friends/school/hehe"_path)).unwrap(void);
+            (co_await fs.unlink("/hello/world.txt"_path)).unwrap(void);
+            (co_await fs.unlink("/bye/music.mp3"_path)).unwrap(void);
+            (co_await fs.unlink("/bye/friends/bob.txt"_path)).unwrap(void);
+            (co_await fs.unlink("/bye/friends/school/hehe"_path)).unwrap(void);
 
             // there is no recursive delete
-            Node& bar   = tree.traverse("/hello/bar"_path).unwrap(Node*);
-            auto  paths = Vec<madbfs::path::PathBuf>{};
+            auto  bar_id = fs.traverse("/hello/bar"_path).unwrap(Id);
+            auto& bar    = fs.tree().get(bar_id)->get();
 
-            auto dummy = bar.build_path();
+            auto paths = Vec<madbfs::path::PathBuf>{};
+            auto dummy = fs.tree().build_path(bar_id).value();
             dummy.extend("dummy");
 
-            auto entries = bar.as_directory()->get().children()
-                         | sv::transform([](auto& node) { return node->name(); })    //
+            auto entries = bar.as_directory()->get().children()    //
+                         | sv::values                              //
+                         | sv::transform([&](Id id) { return fs.tree().get(id)->get().name(); })
                          | sr::to<Vec<String>>();
 
             for (const auto& name : entries) {
                 dummy.rename(name);
-                (co_await tree.unlink(dummy)).unwrap(void);
+                (co_await fs.unlink(dummy)).unwrap(void);
             }
 
-            (co_await tree.rmdir("/hello/bar"_path)).unwrap(void);
+            (co_await fs.rmdir("/hello/bar"_path)).unwrap(void);
 
-            tree_str = fmt::format("\n{}", tree.root());
+            tree_str = fmt::format("\n{}", fs.tree());
             expect(expected_rm == tree_str) << diff_str(expected_rm, tree_str);
         };
 
