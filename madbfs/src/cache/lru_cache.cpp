@@ -272,7 +272,7 @@ namespace madbfs::cache
         AExpect<usize> handle_hint_open(Id id, path::Path path, OpenMode mode)
         {
             // only adding new entry, actual open will be performed on read/write
-            log_d(__func__, "[id={}|mode={}] {:?}", id.inner(), std::to_underlying(mode), path);
+            log_d(__func__, "[id={}|mode={}] {:?}", id.to_u64(), std::to_underlying(mode), path);
 
             auto& entry = new_lookup_file(id, path);
             if (entry.path.str() != path.str()) {
@@ -289,11 +289,11 @@ namespace madbfs::cache
             // see note on clean_stale_fds() function body regarding m_stale_fds
 
             if (prev_reader == 0 and entry.reader > 0) {
-                log_t(__func__, "cancel stale [id={}|mode={}]", id.inner(), std::to_underlying(mode));
+                log_t(__func__, "cancel stale [id={}|mode={}]", id.to_u64(), std::to_underlying(mode));
                 std::erase_if(m_stale_fds, [&](const auto& v) { return v == Tup{ id, FdKind::Read }; });
             }
             if (prev_writer == 0 and entry.writer > 0) {
-                log_t(__func__, "cancel stale [id={}|mode={}]", id.inner(), std::to_underlying(mode));
+                log_t(__func__, "cancel stale [id={}|mode={}]", id.to_u64(), std::to_underlying(mode));
                 std::erase_if(m_stale_fds, [&](const auto& v) { return v == Tup{ id, FdKind::Write }; });
             }
 
@@ -312,11 +312,11 @@ namespace madbfs::cache
         AExpect<usize> handle_hint_close(Id id, OpenMode mode)
         {
             // only mark id's fd as stale on empty reader/writer, actual close performed on clean_stale_fds()
-            log_d(__func__, "[id={}|mode={}]", id.inner(), std::to_underlying(mode));
+            log_d(__func__, "[id={}|mode={}]", id.to_u64(), std::to_underlying(mode));
 
             auto entry = lookup_file(id);
             if (not entry) {
-                log_e(__func__, "hint_close [{}] is requested but no entry (forgot to open?)", id.inner());
+                log_e(__func__, "hint_close [{}] is requested but no entry (forgot to open?)", id.to_u64());
                 co_return Unexpect{ Errc::bad_file_descriptor };
             }
 
@@ -324,7 +324,7 @@ namespace madbfs::cache
             auto writer_decr = mode == OpenMode::Write or mode == OpenMode::ReadWrite;
 
             if ((reader_decr and entry->reader == 0) or (writer_decr and entry->writer == 0)) {
-                log_e(__func__, "[{}] closed too many times", id.inner());
+                log_e(__func__, "[{}] closed too many times", id.to_u64());
                 co_return Unexpect{ Errc::bad_file_descriptor };
             }
 
@@ -334,11 +334,11 @@ namespace madbfs::cache
             // see note on clean_stale_fds() function body regarding m_stale_fds
 
             if (entry->reader == 0 and entry->read_fd) {
-                log_t(__func__, "mark stale [id={}|mode={}]", id.inner(), std::to_underlying(mode));
+                log_t(__func__, "mark stale [id={}|mode={}]", id.to_u64(), std::to_underlying(mode));
                 m_stale_fds.emplace_back(id, FdKind::Read);
             }
             if (entry->writer == 0 and entry->write_fd) {
-                log_t(__func__, "mark stale [id={}|mode={}]", id.inner(), std::to_underlying(mode));
+                log_t(__func__, "mark stale [id={}|mode={}]", id.to_u64(), std::to_underlying(mode));
                 m_stale_fds.emplace_back(id, FdKind::Write);
             }
 
@@ -359,13 +359,13 @@ namespace madbfs::cache
             auto first = static_cast<usize>(offset) / m_pages.page_size();
             auto last  = (static_cast<usize>(offset) + out.size() - 1) / m_pages.page_size();
 
-            log_t(__func__, "start [id={}|idx={} - {}]", id.inner(), first, last);
+            log_t(__func__, "start [id={}|idx={} - {}]", id.to_u64(), first, last);
 
             auto indices = sv::iota(first, last + 1);
             auto entry   = lookup_file(id);
 
             if (not entry) {
-                log_e(__func__, "read [{}] is requested but no entry (forgot to open?)", id.inner());
+                log_e(__func__, "read [{}] is requested but no entry (forgot to open?)", id.to_u64());
                 co_return Unexpect{ Errc::bad_file_descriptor };
             }
 
@@ -382,7 +382,7 @@ namespace madbfs::cache
             // auto read = 0uz;
             // for (auto&& res : res) {
             //     if (not res) {
-            //         log_e(__func__, "failed to read [{}]: {}", id.inner(), err_msg(res.error()));
+            //         log_e(__func__, "failed to read [{}]: {}", id.to_u64(), err_msg(res.error()));
             //         co_return Unexpect{ res.error() };
             //     }
             //     read += res.value();
@@ -392,7 +392,7 @@ namespace madbfs::cache
             for (auto index : indices) {
                 auto res = co_await read_at(*entry, out, id, index, first, last, offset);
                 if (not res) {
-                    log_e(__func__, "failed to read [{}]: {}", id.inner(), err_msg(res.error()));
+                    log_e(__func__, "failed to read [{}]: {}", id.to_u64(), err_msg(res.error()));
                     co_return Unexpect{ res.error() };
                 } else {
                     read += res.value();
@@ -415,13 +415,13 @@ namespace madbfs::cache
             auto first = static_cast<usize>(offset) / m_pages.page_size();
             auto last  = (static_cast<usize>(offset) + in.size() - 1) / m_pages.page_size();
 
-            log_t(__func__, "start [id={}|idx={} - {}]", id.inner(), first, last);
+            log_t(__func__, "start [id={}|idx={} - {}]", id.to_u64(), first, last);
 
             auto indices = sv::iota(first, last + 1);
             auto entry   = lookup_file(id);
 
             if (not entry) {
-                log_e(__func__, "read [{}] is requested but no entry (forgot to open?)", id.inner());
+                log_e(__func__, "read [{}] is requested but no entry (forgot to open?)", id.to_u64());
                 co_return Unexpect{ Errc::bad_file_descriptor };
             }
             entry->dirty = true;
@@ -434,7 +434,7 @@ namespace madbfs::cache
             // auto written = 0uz;
             // for (auto&& res : res) {
             //     if (not res) {
-            //         log_e(__func__, "failed to write [{}]: {}", id.inner(), err_msg(res.error()));
+            //         log_e(__func__, "failed to write [{}]: {}", id.to_u64(), err_msg(res.error()));
             //         co_return Unexpect{ res.error() };
             //     }
             //     written += res.value();
@@ -444,7 +444,7 @@ namespace madbfs::cache
             for (auto index : indices) {
                 auto res = co_await write_at(*entry, in, id, index, first, last, offset);
                 if (not res) {
-                    log_e(__func__, "failed to write [{}]: {}", id.inner(), err_msg(res.error()));
+                    log_e(__func__, "failed to write [{}]: {}", id.to_u64(), err_msg(res.error()));
                     co_return Unexpect{ res.error() };
                 } else {
                     written += res.value();
@@ -472,7 +472,7 @@ namespace madbfs::cache
             const auto& pages = entry->pages;
             auto        wlock = scoped_increment(entry->write_inflight);
 
-            log_t(__func__, "flush: start [id={}|idx={}]", id.inner(), pages | sv::keys);
+            log_t(__func__, "flush: start [id={}|idx={}]", id.to_u64(), pages | sv::keys);
 
             auto fd = co_await entry->get_write_fd_or_open(m_connection);
             if (not fd) {
@@ -482,7 +482,7 @@ namespace madbfs::cache
             for (auto page_id : pages | sv::values) {
                 if (auto [page, key] = m_pages.get(page_id, false); page.is_dirty()) {
                     if (auto res = co_await flush_at(*fd, page, key); not res) {
-                        log_e(__func__, "failed to flush [{}]: {}", id.inner(), err_msg(res.error()));
+                        log_e(__func__, "failed to flush [{}]: {}", id.to_u64(), err_msg(res.error()));
                         co_return Unexpect{ res.error() };
                     }
                 }
@@ -517,7 +517,7 @@ namespace madbfs::cache
             log_t(
                 __func__,
                 "start [id={}|idx={} - {}|old_pages={}|new_pages={}]",
-                id.inner(),
+                id.to_u64(),
                 off_pages,
                 num_pages - 1,
                 old_num_pages,
@@ -533,7 +533,7 @@ namespace madbfs::cache
                     continue;
                 }
 
-                log_t(__func__, "[id={}|idx={}]", id.inner(), index);
+                log_t(__func__, "[id={}|idx={}]", id.to_u64(), index);
 
                 if (index < old_num_pages - 1) {    // shrink
                     m_pages.release(page_id);
@@ -586,11 +586,11 @@ namespace madbfs::cache
          */
         AExpect<usize> handle_invalidate_one(Id id, bool should_flush)
         {
-            log_i(__func__, "invalidate one: {}", id.inner());
+            log_i(__func__, "invalidate one: {}", id.to_u64());
 
             if (should_flush) {
                 if (auto res = co_await handle_flush(id); not res) {
-                    log_e(__func__, "failed to flush {}: {}", id.inner(), err_msg(res.error()));
+                    log_e(__func__, "failed to flush {}: {}", id.to_u64(), err_msg(res.error()));
                 }
             }
 
@@ -619,7 +619,7 @@ namespace madbfs::cache
         {
             for (auto& [id, entry] : m_table) {
                 if (auto res = co_await handle_flush(id); not res) {
-                    log_e(__func__, "failed to flush {}: {}", id.inner(), err_msg(res.error()));
+                    log_e(__func__, "failed to flush {}: {}", id.to_u64(), err_msg(res.error()));
                 }
                 entry.pages.clear();
             }
@@ -747,7 +747,7 @@ namespace madbfs::cache
 
             for (auto it = m_table.begin(); it != m_table.end();) {
                 if (const auto& [id, entry] = *it; entry.is_free()) {
-                    log_d(__func__, "remove free entry for [{}] {:?}", id.inner(), entry.path);
+                    log_d(__func__, "remove free entry for [{}] {:?}", id.to_u64(), entry.path);
                     sr::for_each(entry.pages | sv::values, [&](PageId id) { m_pages.release(id); });
                     it = m_table.erase(it);
                 } else {
@@ -852,7 +852,7 @@ namespace madbfs::cache
             off_t      offset
         )
         {
-            log_t(__func__, "read: [id={}|idx={}]", id.inner(), index);
+            log_t(__func__, "read: [id={}|idx={}]", id.to_u64(), index);
 
             auto rlock = scoped_increment(entry.read_inflight);
             auto ptr   = co_await lookup_page_for_read(entry, { id, index });
@@ -933,7 +933,7 @@ namespace madbfs::cache
 
                 // a page that hasn't been synced can be said as cache miss
 
-                log_t(__func__, "page is not synced [id={}|idx={}]", key.id.inner(), key.index);
+                log_t(__func__, "page is not synced [id={}|idx={}]", key.id.to_u64(), key.index);
 
                 // TODO: maybe create another map that tracks whether each bytes are synced to the file on the
                 // device, then only pull those that are not synced? this requires additional 1/8 th of memory
@@ -1002,7 +1002,7 @@ namespace madbfs::cache
             off_t            offset
         )
         {
-            log_t(__func__, "write: [id={}|idx={}]", id.inner(), index);
+            log_t(__func__, "write: [id={}|idx={}]", id.to_u64(), index);
 
             auto ptr = co_await lookup_page_for_write(entry, { id, index });
             if (not ptr) {
@@ -1083,7 +1083,7 @@ namespace madbfs::cache
                 auto off = key.index * m_pages.page_size();
                 auto res = co_await on_flush(fd, page.buf(), static_cast<off_t>(off));
 
-                log_t(__func__, "flush: [id={}|idx={}] fully", key.id.inner(), key.index);
+                log_t(__func__, "flush: [id={}|idx={}] fully", key.id.to_u64(), key.index);
 
                 page.clear_dirty();
                 co_return res.transform(sink_void);
@@ -1091,13 +1091,15 @@ namespace madbfs::cache
 
             auto buf = page.buf();
 
-            log_t(__func__, "flush: [id={}|idx={}] partially", key.id.inner(), key.index);
+            log_t(__func__, "flush: [id={}|idx={}] partially", key.id.to_u64(), key.index);
 
             for (auto [start, end] : page.iter_dirty()) {
                 auto off  = key.index * m_pages.page_size() + start;
                 auto span = buf.subspan(start, end - start);
 
-                log_t(__func__, "flush: [id={}|idx={}] span=[{}, {})", key.id.inner(), key.index, start, end);
+                log_t(
+                    __func__, "flush: [id={}|idx={}] span=[{}, {})", key.id.to_u64(), key.index, start, end
+                );
 
                 if (auto res = co_await on_flush(fd, span, static_cast<off_t>(off)); not res) {
                     co_return Unexpect{ res.error() };
@@ -1120,20 +1122,20 @@ namespace madbfs::cache
         {
             auto entry = lookup_file(key.id);
             if (not entry) {
-                log_c(__func__, "evict [id={}|idx={}] requested but no entry", key.id.inner(), key.index);
+                log_c(__func__, "evict [id={}|idx={}] requested but no entry", key.id.to_u64(), key.index);
                 co_return;
             }
 
             if (page.is_dirty()) {
-                log_i(__func__, "force push page [id={}|idx={}]", key.id.inner(), key.index);
+                log_i(__func__, "force push page [id={}|idx={}]", key.id.to_u64(), key.index);
 
                 auto wlock = scoped_increment(entry->write_inflight);
                 auto fd    = co_await entry->get_write_fd_or_open(m_connection);
 
                 if (not fd) {
-                    log_c(__func__, "evict [id={}|idx={}] can't open file", key.id.inner(), key.index);
+                    log_c(__func__, "evict [id={}|idx={}] can't open file", key.id.to_u64(), key.index);
                 } else if (auto res = co_await flush_at(*fd, page, key); not res) {
-                    log_c(__func__, "failed to push page [id={}|idx={}]", key.id.inner(), key.index);
+                    log_c(__func__, "failed to push page [id={}|idx={}]", key.id.to_u64(), key.index);
                 }
             }
 
