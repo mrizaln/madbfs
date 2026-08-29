@@ -272,18 +272,3 @@ namespace madbfs
         usize m_live_count = 0;
     };
 }
-
-template <madbfs::SlotKey Key>
-struct std::hash<Key>
-{
-    madbfs::usize operator()(const Key& key) const { return std::hash<madbfs::u64>{}(madbfs::to_u64(key)); }
-};
-
-template <madbfs::SlotKey Key>
-struct std::formatter<Key> : std::formatter<std::string_view>
-{
-    auto format(const Key& key, auto& ctx) const
-    {
-        return std::format_to(ctx.out(), "Key({}v{})", key.index, key.version);
-    }
-};
