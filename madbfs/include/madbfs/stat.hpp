@@ -4,13 +4,6 @@
 
 #include <sys/types.h>
 
-#include <atomic>
-
-namespace madbfs
-{
-    class Node;
-}
-
 namespace madbfs
 {
     /**
@@ -18,27 +11,25 @@ namespace madbfs
      *
      * @brief Strong type for identifying a node entry in `Filesystem`.
      */
-    class Id
+    struct Id
     {
-    public:
-        friend Node;
+        u32 index;
+        u32 version;
 
-        Id() = default;
-        u64 inner() const { return m_inner; }
-
-        auto operator<=>(const Id&) const = default;
-
-    private:
-        inline static std::atomic<u64> s_id_counter = 0;
-
-        static Id incr() { return { s_id_counter.fetch_add(1, std::memory_order::relaxed) + 1 }; }
-
-        Id(u64 inner)
-            : m_inner{ inner }
+        constexpr static Id from_u64(u64 v)
         {
+            return {
+                .index   = static_cast<u32>(v),
+                .version = static_cast<u32>(v >> 32),
+            };
         }
 
-        u64 m_inner = 0;
+        constexpr u64 to_u64() const
+        {
+            return static_cast<u64>(version) << 32 | index;    //
+        }
+
+        constexpr bool operator<=>(const Id&) const = default;
     };
 
     /**
@@ -58,17 +49,6 @@ namespace madbfs
         mode_t   mode  = 0;    // -rwxrwxrwx
         uid_t    uid   = 0;
         gid_t    gid   = 0;
-    };
-
-    /**
-     * @class NamedStat
-     *
-     * @brief File status information and its unique identifier.
-     */
-    struct NamedStat
-    {
-        Id   id;
-        Stat stat;
     };
 
     /**
@@ -100,5 +80,12 @@ namespace madbfs
         Read      = 0,
         Write     = 1,
         ReadWrite = 2,
+    };
+
+    enum class RenameMode : u8
+    {
+        Normal    = 0,
+        Noreplace = 1 << 0,
+        Exchange  = 1 << 1,
     };
 }

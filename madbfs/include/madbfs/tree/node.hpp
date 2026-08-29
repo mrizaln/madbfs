@@ -1,23 +1,22 @@
 #pragma once
 
-#include "madbfs/path.hpp"
 #include "madbfs/stat.hpp"
 
 #include <madbfs-common/util/copy_const.hpp>
+#include <madbfs-common/util/var_wrapper.hpp>
 
 #include <sys/stat.h>
 
 #include <atomic>
 #include <functional>
-#include <unordered_set>
+#include <unordered_map>
 
 namespace madbfs
 {
     class Connection;
-    class Node;
 }
 
-namespace madbfs::node
+namespace madbfs::tree::node
 {
     struct Regular;
     class Directory;
@@ -48,21 +47,10 @@ namespace madbfs::node
             using is_transparent = void;
 
             usize operator()(Str str) const { return std::hash<Str>{}(str); }
-            usize operator()(const Uniq<Node>& node) const;
+            usize operator()(const std::string& str) const { return std::hash<Str>{}(str); }
         };
 
-        struct NodeEq
-        {
-            using is_transparent = void;
-
-            bool operator()(Str lhs, Str rhs) const { return lhs == rhs; }
-            bool operator()(Str lhs, const Uniq<Node>& rhs) const;
-            bool operator()(const Uniq<Node>& lhs, Str rhs) const;
-            bool operator()(const Uniq<Node>& lhs, const Uniq<Node>& rhs) const;
-        };
-
-        // NOTE: use with caution, Node::m_name field must not be modified unless the node is extracted
-        using List = std::unordered_set<Uniq<Node>, NodeHash, NodeEq>;
+        using List = std::unordered_map<String, Id, NodeHash, std::equal_to<>>;
 
         Directory() = default;
 
@@ -72,20 +60,20 @@ namespace madbfs::node
         /**
          * @brief Check if a node with the given name exists.
          *
+         * @return The id of the node.
+         *
          * @param name The name of the node to check.
          */
-        Expect<Ref<Node>> find(Str name) const;
+        Expect<Id> find(Str name) const;
 
         /**
          * @brief Erase a file by its name.
          *
          * @param name The file name.
          *
-         * @return The erased node, else `std::nullopt` if not exists
-         *
-         * This function is semantically the same with `extract()`.
+         * @return The erased node id, else error if not exists
          */
-        Opt<Uniq<Node>> erase(Str name);
+        Expect<Id> erase(Str name);
 
         /**
          * @brief Add a new node.
@@ -95,22 +83,11 @@ namespace madbfs::node
          *
          * @return A pair containing the added node and overwriten node if overwrite happens.
          *
-         * - If insertion happen without overwrite, right will be null.
-         * - If insertion happen with overwrite flag set, right will be non-null.
-         * - If overwrite happen when overwrite flag not set, error will be returned.
+         * - If insertion happen without overwrite, value will be null.
+         * - If insertion happen with overwrite flag set, value will be non-null.
+         * - If overwrite happen when overwrite flag not set, error will be returned instead.
          */
-        Expect<Pair<Ref<Node>, Uniq<Node>>> insert(Uniq<Node> node, bool overwrite);
-
-        /**
-         * @brief Extract a node.
-         *
-         * @param name The name of the node.
-         *
-         * @return The node or `Errc::no_such_file_or_directory`
-         *
-         * This function is semantically the same with `erase()`.
-         */
-        Expect<Uniq<Node>> extract(Str name);
+        Expect<Opt<Id>> insert(Str name, Id node, bool overwrite);
 
         List&       children() { return m_children; }
         const List& children() const { return m_children; }
@@ -159,12 +136,15 @@ namespace madbfs::node
     };
 }
 
-namespace madbfs
+namespace madbfs::tree
 {
     /**
      * @brief Represent a variant of file in the filesystem.
      */
-    using File = Var<node::Regular, node::Directory, node::Link, node::Other, node::Error>;
+    struct File : util::VarWrapper<node::Regular, node::Directory, node::Link, node::Other, node::Error>
+    {
+        using VarWrapper::VarWrapper;
+    };
 
     /**
      * @class Node
@@ -176,31 +156,28 @@ namespace madbfs
     public:
         using Timepoint = SteadyClock::time_point;
 
-        Node(Str name, Node* parent, Stat stat, File value)
+        Node(Id parent, Str name, Stat stat, File kind)
             : m_parent{ parent }
             , m_name{ name }
-            , m_id{ Id::incr() }
             , m_stat{ std::move(stat) }
-            , m_value{ std::move(value) }
+            , m_kind{ std::move(kind) }
         {
         }
 
-        Node(Node&&)                  = delete;
-        Node& operator=(Node&& other) = delete;
+        Node(Node&&) noexcept                  = default;
+        Node& operator=(Node&& other) noexcept = default;
 
         Node(const Node&)            = delete;
         Node& operator=(const Node&) = delete;
 
-        Id id() const { return m_id; };
-
         void set_name(Str name) { m_name = name; }
-        void set_parent(Node* parent) { m_parent = parent; }
+        void set_parent(Id parent) { m_parent = parent; }
         void set_stat(Stat stat) { m_stat = stat; }
         void set_size(off_t size) { m_stat.size = size; }
 
         Str         name() const { return m_name; }
-        Node*       parent() const { return m_parent; }
-        const File& value() const { return m_value; }
+        Id          parent() const { return m_parent; }
+        const File& kind() const { return m_kind; }
         const Stat& stat() const { return m_stat; }
 
         /**
@@ -222,11 +199,6 @@ namespace madbfs
          * @return Old file variant.
          */
         File mutate(File file);
-
-        /**
-         * @brief Build path from node.
-         */
-        path::PathBuf build_path() const;
 
         /**
          * @brief Update time metadata.
@@ -263,32 +235,29 @@ namespace madbfs
          *
          * @return The child node.
          */
-        Expect<Ref<Node>> traverse(Str name) const;
+        Expect<Id> traverse(Str name) const;
 
         /**
-         * @brief Create a new node without any call to connection or cache with this node as its parent.
+         * @brief Add a node as children of this node.
          *
          * @param name The name of the new node.
-         * @param stat Stat of the new node.
-         * @param file The kind of the node.
+         * @param node The node id to be added.
          *
-         * @return The new node.
-         *
-         * This function is used to build a new node from existing filetree on the device. Instead of
-         * operating on the file on the device itself, this function just modify the nodes. This function
-         * assume that the build process won't overwrite any node.
+         * This function will fail if the node is not a directory. This function assume that the build process
+         * won't overwrite any node.
          */
-        Expect<Ref<Node>> build(Str name, Stat stat, File file);
+        Expect<void> add(Str name, Id node);
 
         /**
          * @brief Fill stbuf with stat from Node.
          *
          * @param stbuf The stat buf to be filled in.
+         * @param id The node id.
          * @param page_size Page size of the file.
          *
          * @return The same pointer to the stbuf.
          */
-        struct stat* fill_stbuf(struct stat* stbuf, blksize_t page_size);
+        struct stat* fill_stbuf(struct stat* stbuf, Id id, blksize_t page_size);
 
         /**
          * @brief Get the regular file variant with various checks for other variants.
@@ -330,32 +299,31 @@ namespace madbfs
         /**
          * @brief Check if node has Regular variant.
          */
-        bool is_regular() const { return std::holds_alternative<node::Regular>(m_value); }
+        bool is_regular() const { return std::holds_alternative<node::Regular>(m_kind); }
 
         /**
          * @brief Check if node has Directory variant.
          */
-        bool is_directory() const { return std::holds_alternative<node::Directory>(m_value); }
+        bool is_directory() const { return std::holds_alternative<node::Directory>(m_kind); }
 
         /**
          * @brief Check if node has Link variant.
          */
-        bool is_link() const { return std::holds_alternative<node::Link>(m_value); }
+        bool is_link() const { return std::holds_alternative<node::Link>(m_kind); }
 
         /**
          * @brief Check if node has Error variant.
          */
-        bool is_error() const { return std::holds_alternative<node::Error>(m_value); }
+        bool is_error() const { return std::holds_alternative<node::Error>(m_kind); }
 
     private:
         inline static std::atomic<u64> s_id_counter = 0;
 
-        Node*     m_parent     = nullptr;
+        Id        m_parent     = {};
         String    m_name       = {};
-        Id        m_id         = {};
         Stat      m_stat       = {};
         Timepoint m_expiration = Timepoint::max();
-        File      m_value;
+        File      m_kind;
     };
 }
 
@@ -363,7 +331,7 @@ namespace madbfs
 // template implementation
 // -----------------------
 
-namespace madbfs
+namespace madbfs::tree
 {
     template <typename Self>
     Expect<Ref<util::CopyConst<node::Regular, Self>>> Node::as_regular(this Self&& self)
@@ -387,7 +355,7 @@ namespace madbfs
         };
         // clang-format on
 
-        return std::visit(overload, std::forward_like<Self>(self.m_value));
+        return std::visit(overload, std::forward_like<Self>(self.m_kind));
     }
 
     template <typename Self>
@@ -406,7 +374,7 @@ namespace madbfs
         };
         // clang-format on
 
-        return std::visit(overload, std::forward_like<Self>(self.m_value));
+        return std::visit(overload, std::forward_like<Self>(self.m_kind));
     }
 
     template <typename Self>
@@ -425,6 +393,6 @@ namespace madbfs
         };
         // clang-format on
 
-        return std::visit(overload, std::forward_like<Self>(self.m_value));
+        return std::visit(overload, std::forward_like<Self>(self.m_kind));
     }
 }
