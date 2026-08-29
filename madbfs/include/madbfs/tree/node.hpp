@@ -3,6 +3,7 @@
 #include "madbfs/stat.hpp"
 
 #include <madbfs-common/util/copy_const.hpp>
+#include <madbfs-common/util/var_wrapper.hpp>
 
 #include <sys/stat.h>
 
@@ -140,7 +141,10 @@ namespace madbfs::tree
     /**
      * @brief Represent a variant of file in the filesystem.
      */
-    using File = Var<node::Regular, node::Directory, node::Link, node::Other, node::Error>;
+    struct File : util::VarWrapper<node::Regular, node::Directory, node::Link, node::Other, node::Error>
+    {
+        using VarWrapper::VarWrapper;
+    };
 
     /**
      * @class Node
