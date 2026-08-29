@@ -18,6 +18,7 @@ target_sources(
     src/operations.cpp
     src/path.cpp
     src/tree/node.cpp
+    src/tree/tree.cpp
     src/transport/adb_transport.cpp
     src/transport/proxy_transport.cpp
     src/cache/dirty_map.cpp
