@@ -43,6 +43,7 @@ namespace
         int         adb_only   = false;
         int         no_cache   = false;
         int         push       = false;
+        int         writeback  = false;
 
         ~MadbfsOpt()
         {
@@ -68,6 +69,7 @@ namespace
         { "--adb-only",      offsetof(MadbfsOpt, adb_only),   true },
         { "--no-cache",      offsetof(MadbfsOpt, no_cache),   true },
         { "--push-server",   offsetof(MadbfsOpt, push),       true },
+        { "--writeback",     offsetof(MadbfsOpt, writeback),  true },
         // clang-format on
         FUSE_OPT_END,
     });
@@ -277,16 +279,17 @@ namespace
         }
 
         co_return MountOpt{
-            .args       = std::move(args),
-            .mount      = std::move(mountpoint),
-            .serial     = std::move(serial),
-            .root       = std::move(root),
-            .connection = connection,
-            .caching    = caching,
-            .log_level  = log_level.value(),
-            .log_file   = std::move(log_file),
-            .ttl        = madbfs_opt.ttl,
-            .timeout    = madbfs_opt.timeout,
+            .args            = std::move(args),
+            .mount           = std::move(mountpoint),
+            .serial          = std::move(serial),
+            .root            = std::move(root),
+            .connection      = connection,
+            .caching         = caching,
+            .log_level       = log_level.value(),
+            .log_file        = std::move(log_file),
+            .ttl             = madbfs_opt.ttl,
+            .timeout         = madbfs_opt.timeout,
+            .writeback_cache = madbfs_opt.writeback != 0,
         };
     }
 
@@ -365,7 +368,10 @@ namespace
             "                             (useful for debugging the server)\n"
             "    --adb-only             don't launch server and don't try to connect\n"
             "    --no-cache             don't use data caching\n"
-            "    --push-server          push the server binary to your device\n",
+            "    --push-server          push the server binary to your device\n"
+            "    --writeback            enable FUSE's writeback cache (may improve performance)\n"
+            "                             (writeback cache is unrelated to madbfs's caching system)\n"
+            "                             (it works by accumulating multiple writes into one)\n",
             log::level_names
         );
 

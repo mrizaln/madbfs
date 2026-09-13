@@ -61,12 +61,14 @@ namespace madbfs
         async::Context& ctx,
         Connection&     connection,
         Opt<Caching>    caching,
-        Opt<Seconds>    ttl
+        Opt<Seconds>    ttl,
+        bool            writeback
     )
         : m_connection{ connection }
         , m_tree{ "/", Stat{} }    // dummy
         , m_cache{ construct_cache(ctx, connection, caching) }
         , m_ttl{ ttl }
+        , m_writeback{ writeback }
     {
     }
 
@@ -849,6 +851,9 @@ namespace madbfs
         auto [id, node] = *entry;
 
         auto mode = static_cast<OpenMode>(O_ACCMODE & flags);
+        if (m_writeback and mode == OpenMode::Write) {
+            mode = OpenMode::ReadWrite;    // with writeback cache, kernel may request read even when WRONLY
+        }
 
         // send hint to cache to prepare a real fd that can be used for further operations
         if (m_cache) {

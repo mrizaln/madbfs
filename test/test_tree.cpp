@@ -225,7 +225,7 @@ int main()
         auto guard      = madbfs::net::make_work_guard(context);
         auto thread     = std::jthread{ [&] { context.run(); } };
         auto connection = madbfs::Connection{ context, mock::dummy_strategy };
-        auto fs         = Filesystem{ context, connection, std::nullopt, std::nullopt };
+        auto fs         = Filesystem{ context, connection, std::nullopt, std::nullopt, false };
 
         using madbfs::path::operator""_path;
 

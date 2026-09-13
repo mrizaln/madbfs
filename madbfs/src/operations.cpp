@@ -7,6 +7,16 @@
 
 using namespace madbfs;
 
+static constexpr auto required_capabilities = std::to_array<u32>({
+    FUSE_CAP_READDIRPLUS,
+    FUSE_CAP_CACHE_SYMLINKS,
+    FUSE_CAP_NO_OPENDIR_SUPPORT,
+});
+
+static constexpr auto unsupported_capabilities = std::to_array<u32>({
+    FUSE_CAP_ATOMIC_O_TRUNC,
+});
+
 // helper functions/classes
 namespace
 {
@@ -147,16 +157,26 @@ namespace madbfs::operations
 {
     void* init(fuse_conn_info* conn, fuse_config*) noexcept
     {
-        if (conn->want & FUSE_CAP_ATOMIC_O_TRUNC) {
-            log_w(
-                __func__,
-                "fuse sets atomic O_TRUNC capability, but filesystem doesn't support it, disabling..."
-            );
-            conn->want &= ~static_cast<u32>(FUSE_CAP_ATOMIC_O_TRUNC);
-        }
-
         auto* opt = static_cast<const args::MountOpt*>(::fuse_get_context()->private_data);
         assert(opt != nullptr and "data should not be empty!");
+
+        for (auto cap : required_capabilities) {
+            if (auto success = fuse_set_feature_flag(conn, cap); not success) {
+                log_w(__func__, "failed to set capabilty: {}", cap);
+            }
+        }
+
+        auto writeback = opt->writeback_cache;
+        if (writeback) {
+            if (auto success = fuse_set_feature_flag(conn, FUSE_CAP_WRITEBACK_CACHE); not success) {
+                writeback = false;
+                log_w(__func__, "writeback cache is not supported");
+            }
+        }
+
+        for (auto cap : unsupported_capabilities) {
+            fuse_unset_feature_flag(conn, cap);
+        }
 
         auto caching = opt->caching.transform([](auto& c) {
             auto page_size = c.pagesize * 1024;
@@ -167,7 +187,7 @@ namespace madbfs::operations
         auto timeout = opt->timeout < 1 ? std::nullopt : Opt<Seconds>{ opt->timeout };
         auto fuse    = ::fuse_get_context()->fuse;
 
-        return new Madbfs{ fuse, opt->connection, caching, opt->root, opt->mount, ttl, timeout };
+        return new Madbfs{ fuse, opt->connection, caching, opt->root, opt->mount, ttl, timeout, writeback };
     }
 
     void destroy(void* private_data) noexcept

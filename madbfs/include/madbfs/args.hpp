@@ -107,6 +107,7 @@ namespace madbfs::args
         String        log_file;
         i32           ttl;
         i32           timeout;
+        bool          writeback_cache;
     };
 
     struct PushOpt

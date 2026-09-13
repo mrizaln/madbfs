@@ -242,14 +242,15 @@ namespace madbfs
         path::Path       custom_root,
         Str              mountpoint,
         Opt<Seconds>     ttl,
-        Opt<Seconds>     timeout
+        Opt<Seconds>     timeout,
+        bool             writeback
     )
         : m_fuse{ fuse }
         , m_async_ctx{}
         , m_work_guard{ m_async_ctx.get_executor() }
         , m_work_thread{ [this] { work_thread_function(m_async_ctx); } }
         , m_connection{ prepare_connection(m_async_ctx, connection) }
-        , m_fs{ m_async_ctx, m_connection, caching, ttl }
+        , m_fs{ m_async_ctx, m_connection, caching, ttl, writeback }
         , m_ipc{ create_ipc(m_async_ctx) }
         , m_watchdog_timer{ m_async_ctx }
         , m_reaper_timer{ m_async_ctx }
@@ -283,6 +284,7 @@ namespace madbfs
 
         if (auto result = async::block(m_async_ctx, m_fs.initialize(m_root)); not result) {
             log_c(__func__, "Failed to initialize filesystem");
+            std::terminate();
         }
     }
 

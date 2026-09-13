@@ -31,7 +31,8 @@ namespace madbfs
             path::Path       custom_root,
             Str              mount_point,
             Opt<Seconds>     ttl,
-            Opt<Seconds>     timeout
+            Opt<Seconds>     timeout,
+            bool             writeback
         );
 
         ~Madbfs();

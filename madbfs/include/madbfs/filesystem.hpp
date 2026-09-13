@@ -48,8 +48,15 @@ namespace madbfs
          * @param connection Reference to active conneciton to device.
          * @param caching Cache parameters or empty for no caching.
          * @param ttl Filesystem node's stat expiration time before re-fetching.
+         * @param writeback A flag that tells the filesystem that fuse's writeback cache is enabled.
          */
-        Filesystem(async::Context& ctx, Connection& connection, Opt<Caching> caching, Opt<Seconds> ttl);
+        Filesystem(
+            async::Context& ctx,
+            Connection&     connection,
+            Opt<Caching>    caching,
+            Opt<Seconds>    ttl,
+            bool            writeback
+        );
 
         /**
          * @brief Destroy filesystem.
@@ -278,6 +285,7 @@ namespace madbfs
         Opt<cache::LruCache> m_cache;
         FileHandleStore      m_handles;
 
-        Opt<Seconds> m_ttl = std::nullopt;
+        Opt<Seconds> m_ttl       = std::nullopt;
+        bool         m_writeback = false;
     };
 }
