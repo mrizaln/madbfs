@@ -2,6 +2,7 @@
 
 #include "madbfs/cache/lru_cache.hpp"
 #include "madbfs/file_handle_store.hpp"
+#include "madbfs/orphan_store.hpp"
 #include "madbfs/path.hpp"
 #include "madbfs/tree/node.hpp"
 #include "madbfs/tree/tree.hpp"
@@ -47,15 +48,13 @@ namespace madbfs
          * @param ctx Async context.
          * @param connection Reference to active conneciton to device.
          * @param caching Cache parameters or empty for no caching.
-         * @param ttl Filesystem node's stat expiration time before re-fetching.
-         * @param writeback A flag that tells the filesystem that fuse's writeback cache is enabled.
+         * @param root_path Path to the subdirectory on device that will be considered as the root of the
+         * filesystem.
          */
-        Filesystem(
-            async::Context& ctx,
-            Connection&     connection,
-            Opt<Caching>    caching,
-            Opt<Seconds>    ttl,
-            bool            writeback
+        static AExpect<Filesystem> create(
+            Connection&      connection,
+            cache::LruCache* cache,
+            path::Path       root_path
         );
 
         /**
@@ -66,109 +65,68 @@ namespace madbfs
          */
         ~Filesystem() = default;
 
-        Filesystem(tree::Node&& root)            = delete;
-        Filesystem& operator=(tree::Node&& root) = delete;
+        Filesystem(Filesystem&& root)                     = default;
+        Filesystem& operator=(Filesystem&& root) noexcept = delete;
 
         Filesystem(const tree::Node& root)            = delete;
         Filesystem& operator=(const tree::Node& root) = delete;
 
-        /**
-         * @brief Get a node by the given path.
-         *
-         * @param path The path to the node.
-         */
-        Expect<Id> traverse(path::Path path);
-
-        /**
-         * @brief [TODO:description]
-         *
-         * @param path [TODO:parameter]
-         */
-        Expect<tree::Entry> traverse_entry(path::Path path);
-
-        // fuse operations
-        // ---------------
-        AExpect<void> readdir(path::Path path, Filler filler, off_t offset);
-        AExpect<void> getattr(path::Path path, struct stat* stbuf);
-
-        AExpect<Str>  readlink(path::Path path);
-        AExpect<Id>   mknod(path::Path path, mode_t mode, dev_t dev);
-        AExpect<Id>   mkdir(path::Path path, mode_t mode);
-        AExpect<void> unlink(path::Path path);
-        AExpect<void> rmdir(path::Path path);
-        AExpect<void> rename(path::Path from, path::Path to, u32 flags);
-        AExpect<void> utimens(path::Path path, timespec atime, timespec mtime);
-        AExpect<void> truncate(path::Path path, off_t size);
-
-        AExpect<u64>   open(path::Path path, int flags);
-        AExpect<usize> read(u64 fd, Span<char> out, off_t offset);
-        AExpect<usize> write(u64 fd, Str in, off_t offset);
-        AExpect<void>  flush(u64 fd);
-        AExpect<void>  release(u64 fd);
-
-        AExpect<usize> copy_file_range(
-            path::Path in_path,
-            u64        in_fd,
-            off_t      in_off,
-            path::Path path_out,
-            u64        out_fd,
-            off_t      offset_out,
-            size_t     size
+        // fuse low-level operations
+        // -------------------------
+        AExpect<void> ll_lookup(Id parent, Str name, struct stat* stbuf);
+        AExpect<void> ll_forget(Id id, u64 nlookup);
+        AExpect<void> ll_getattr(Id id, struct stat* stbuf);
+        AExpect<void> ll_setattr(
+            Id            id,
+            Opt<u64>      size,
+            Opt<timespec> atime,
+            Opt<timespec> mtime,
+            struct stat*  stbuf
         );
-        // ---------------
-
-        // This function only used to link already existing files, user can't and shouldn't use it
-        Expect<void> symlink(path::Path path, Str target);
-
-        /**
-         * @brief Initialize the filesystem.
-         *
-         * This initializes the cache and fetch root directory stat.
-         */
-        AExpect<void> initialize(path::Path path);
-
-        /**
-         * @brief Shut down the filesystem and stop every async operation.
-         *
-         * Call this before destructor. This is needed to do proper flushing for the `Cache`.
-         */
-        Await<void> shutdown();
-
-        /**
-         * @brief Set a new TTL for file system nodes.
-         *
-         * @param ttl New TTl value (set to `std::nullopt` to disable)
-         *
-         * @return Old TTL value.
-         */
-        Opt<Seconds> set_ttl(Opt<Seconds> ttl);
+        AExpect<Str>   ll_readlink(Id id);
+        AExpect<void>  ll_mknod(Id parent, Str name, mode_t mode, dev_t dev, struct stat* stbuf);
+        AExpect<void>  ll_mkdir(Id parent, Str name, mode_t mode, struct stat* stbuf);
+        AExpect<void>  ll_unlink(Id parent, Str name);
+        AExpect<void>  ll_rmdir(Id parent, Str name);
+        AExpect<void>  ll_rename(Id parent, Str name, Id new_parent, Str new_name, u32 flags);
+        AExpect<u64>   ll_open(Id id, i32 flags);
+        AExpect<usize> ll_read(u64 fd, Span<char> out, off_t offset);
+        AExpect<usize> ll_write(u64 fd, Span<const char> in, off_t offset);
+        AExpect<void>  ll_release(u64 fd);
+        AExpect<void>  ll_fsync(u64 fd, bool data_only);
+        AExpect<void>  ll_readdir(Id id, off_t offset, Filler filler);
+        AExpect<usize> ll_copy_file_range(
+            Id     in_id,
+            u64    in_fd,
+            off_t  in_off,
+            Id     out_id,
+            u64    out_fd,
+            off_t  out_off,
+            size_t size
+        );
+        // -------------------------
 
         /**
-         * @brief Mark all nodes as expired.
+         * @brief Visit all nodes while doing operation on them.
+         *
+         * @param func The opeartion to be applied on each of the node.
          */
-        usize expires_all();
+        usize walk(Id start, std::function<void(tree::Entry)> func);
 
         /**
          * @brief Get cache structure.
          */
-        const Opt<cache::LruCache>& cache() const { return m_cache; }
+        const cache::LruCache* cache() const { return m_cache; }
 
         /**
          * @brief Get cache structure.
          */
-        Opt<cache::LruCache>& cache() { return m_cache; }
+        cache::LruCache* cache() { return m_cache; }
 
         /**
-         * @brief Get root node.
+         * @brief Get filesystem tree.
          */
         const tree::Tree& tree() const { return m_tree; }
-
-        /**
-         * @brief Get TTL.
-         *
-         * If expiration is not enabled it will return `std::nullopt`.
-         */
-        Opt<Seconds> ttl() const { return m_ttl; }
 
         /**
          * @brief Get open file handle store.
@@ -176,50 +134,9 @@ namespace madbfs
         const FileHandleStore& handles() { return m_handles; }
 
     private:
-        /**
-         * @brief Fetch file stat from remote at `path` then create a child node on `parent`.
-         *
-         * @param parent_id The Id of the parent node.
-         * @param path Path to the file.
-         *
-         * # Precondition:
-         * - Node pointed by `parent_id` exists and is a directory.
-         */
-        AExpect<Id> build(Id parent_id, path::Path path);
+        Filesystem(Connection& connection, cache::LruCache* cache, path::Path root_path, Stat root_stat);
 
-        /**
-         * @brief Same as build but force directory only, fails with `Errc::not_a_directory` if not directory.
-         *
-         * @param parent_id The Id of the parent node.
-         * @param path Path to the file.
-         *
-         * # Precondition:
-         * - Node pointed by `parent_id` exists and is a directory.
-         */
-        AExpect<Id> build_directory(Id parent_id, path::Path path);
-
-        /**
-         * @brief Traverse the node or build a new node.
-         *
-         * @param path Path to the node.
-         */
-        AExpect<Id> traverse_or_build(path::Path path);
-
-        /**
-         * @brief [TODO:description]
-         *
-         * @param path [TODO:parameter]
-         */
-        AExpect<tree::Entry> traverse_or_build_entry(path::Path path);
-
-        /**
-         * @brief Re-fetch file stat from remote and update the node accordingly.
-         *
-         * @param node The node in question.
-         * @param id The Id of the node to be updated.
-         * @param path Path to the corresponding file on remote.
-         */
-        AExpect<void> update(tree::Node& node, Id id, path::Path path);
+        void fill_stbuf(const tree::Node& node, Id id, struct stat* stbuf);
 
         /**
          * @brief [TODO:description]
@@ -260,13 +177,6 @@ namespace madbfs
         AExpect<void> refresh_dir(Id id, path::Path path);
 
         /**
-         * @brief Visit all nodes while doing operation on them.
-         *
-         * @param func The opeartion to be applied on each of the node.
-         */
-        void walk(Id start, std::function<void(tree::Entry)> func);
-
-        /**
          * @brief Replace the node variant with the new one while invalidating the current one.
          *
          * @param node Node to be mutated.
@@ -281,11 +191,9 @@ namespace madbfs
 
         Connection& m_connection;
 
-        tree::Tree           m_tree;
-        Opt<cache::LruCache> m_cache;
-        FileHandleStore      m_handles;
-
-        Opt<Seconds> m_ttl       = std::nullopt;
-        bool         m_writeback = false;
+        tree::Tree       m_tree;
+        cache::LruCache* m_cache;    // may be null, Opt<T&> doesn't exist, curses to the C++ committeeee!
+        FileHandleStore  m_handles;
+        OrphanStore      m_orphans;
     };
 }

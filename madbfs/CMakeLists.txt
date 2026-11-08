@@ -16,6 +16,7 @@ target_sources(
     src/filesystem.cpp
     src/madbfs.cpp
     src/operations.cpp
+    src/orphan_store.cpp
     src/path.cpp
     src/tree/node.cpp
     src/tree/tree.cpp
