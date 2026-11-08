@@ -7,7 +7,7 @@
 #include <madbfs-common/log.hpp>
 #include <madbfs-common/util/var_wrapper.hpp>
 
-#define FUSE_USE_VERSION 31
+#define FUSE_USE_VERSION FUSE_MAKE_VERSION(3, 12)
 #include <fuse_lowlevel.h>
 #include <fuse_opt.h>
 
@@ -29,7 +29,10 @@ namespace madbfs::args
         {
         }
 
-        FuseArgs(int argc, char** argv) { args = FUSE_ARGS_INIT(argc, argv); }
+        FuseArgs(int argc, char** argv)
+        {
+            args = FUSE_ARGS_INIT(argc, argv);    //
+        }
 
         FuseArgs(FuseArgs&& other)
             : args{ std::exchange(other.args, {}) }
@@ -38,14 +41,19 @@ namespace madbfs::args
 
         FuseArgs& operator=(FuseArgs&& other)
         {
-            if (&other != this) {
+            if (&other != this and args.argv) {
                 ::fuse_opt_free_args(&args);
                 args = { std::exchange(other.args, {}) };
             }
             return *this;
         }
 
-        ~FuseArgs() { ::fuse_opt_free_args(&args); }
+        ~FuseArgs()
+        {
+            if (args.argv) {
+                ::fuse_opt_free_args(&args);
+            }
+        }
 
         fuse_args&       inner() { return args; }
         const fuse_args& inner() const { return args; }
@@ -97,16 +105,30 @@ namespace madbfs::args
     // ---------------
     struct MountOpt
     {
-        FuseArgs      args;
-        String        mount;
-        String        serial;
-        path::PathBuf root;
-        Connection    connection;
-        Opt<Caching>  caching;
-        log::Level    log_level;
-        String        log_file;
-        i32           ttl;
-        i32           timeout;
+        struct Fuse
+        {
+            FuseArgs args;
+            String   mount;
+            bool     singlethread;
+            bool     foreground;
+            bool     debug;
+            bool     nodefault_subtype;
+            bool     clone_fd;
+            u32      n_threads;
+        } fuse;
+
+        struct App
+        {
+            String        serial;
+            path::PathBuf root;
+            Connection    connection;
+            Opt<Caching>  caching;
+            log::Level    log_level;
+            String        log_file;
+            i32           ttl;
+            i32           timeout;
+            bool          writeback_cache;
+        } app;
     };
 
     struct PushOpt

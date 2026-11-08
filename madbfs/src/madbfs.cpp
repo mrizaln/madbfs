@@ -1,11 +1,14 @@
 #include "madbfs/madbfs.hpp"
 
-#include <madbfs-common/log.hpp>
+#include "madbfs/bridge.hpp"
+#include "madbfs/operations_ll.hpp"
 
-#define FUSE_USE_VERSION 31
-#include <fuse.h>
+#include <madbfs-common/log.hpp>
+#include <madbfs-common/util/defer.hpp>
 
 #include <boost/json.hpp>
+
+using namespace madbfs;
 
 namespace json = boost::json;
 
@@ -26,7 +29,7 @@ namespace madbfs
         {
             const auto& cache = madbfs.fs().cache();
 
-            const auto ttl_sec     = madbfs.fs().ttl().transform(&Seconds::count).value_or(0);
+            const auto ttl_sec     = madbfs.m_ttl.transform(&Seconds::count).value_or(0);
             const auto timeout_sec = madbfs.m_timeout.transform(&Seconds::count).value_or(0);
 
             if (cache) {
@@ -36,7 +39,7 @@ namespace madbfs
 
                 co_return json::value{
                     { "serial", std::getenv("ANDROID_SERIAL") },
-                    { "transport", madbfs.m_connection.name() },
+                    { "transport", madbfs.m_conn.name() },
                     { "root", madbfs.m_root.str() },
                     { "log_level", log::level_to_str(log::get_level()) },
                     { "ttl", ttl_sec },
@@ -50,7 +53,7 @@ namespace madbfs
             } else {
                 co_return json::value{
                     { "serial", std::getenv("ANDROID_SERIAL") },
-                    { "transport", madbfs.m_connection.name() },
+                    { "transport", madbfs.m_conn.name() },
                     { "root", madbfs.m_root.str() },
                     { "log_level", log::level_to_str(log::get_level()) },
                     { "ttl", ttl_sec },
@@ -62,7 +65,7 @@ namespace madbfs
 
         AExpect<json::value> handle(ipc::op::InvalidateCache)
         {
-            auto& cache = madbfs.fs().cache();
+            auto cache = madbfs.fs().cache();
             if (not cache) {
                 co_return Unexpect{ Errc::operation_not_supported };
             }
@@ -77,13 +80,19 @@ namespace madbfs
 
         AExpect<json::value> handle(ipc::op::ExpireStat)
         {
-            auto count = madbfs.fs().expires_all();
+            auto& fs    = madbfs.fs();
+            auto  count = fs.walk(fs.tree().root(), [&](tree::Entry entry) {
+                auto& node   = entry.node;
+                auto  name   = node.name();
+                auto  parent = node.parent().to_u64();
+                fuse_lowlevel_notify_inval_entry(madbfs.m_fuse, parent, name.data(), name.size());
+            });
             co_return json::value{ { "count", count } };
         }
 
         AExpect<json::value> handle(ipc::op::SetPageSize size)
         {
-            auto& cache = madbfs.fs().cache();
+            auto cache = madbfs.fs().cache();
             if (not cache) {
                 co_return Unexpect{ Errc::operation_not_supported };
             }
@@ -112,7 +121,7 @@ namespace madbfs
 
         AExpect<json::value> handle(ipc::op::SetCacheSize size)
         {
-            auto& cache = madbfs.fs().cache();
+            auto cache = madbfs.fs().cache();
             if (not cache) {
                 co_return Unexpect{ Errc::operation_not_supported };
             }
@@ -139,7 +148,7 @@ namespace madbfs
         AExpect<json::value> handle(ipc::op::SetTTL ttl)
         {
             const auto new_ttl = ttl.sec < 1 ? std::nullopt : Opt<Seconds>{ ttl.sec };
-            const auto old_ttl = madbfs.fs().set_ttl(new_ttl);
+            const auto old_ttl = std::exchange(madbfs.m_ttl, new_ttl);
 
             co_return json::value{
                 { "ttl",
@@ -174,7 +183,7 @@ namespace madbfs
 
         AExpect<json::value> handle(ipc::op::Unmount)
         {
-            ::fuse_exit(madbfs.m_fuse);
+            ::fuse_session_exit(madbfs.m_fuse);
             co_return json::value{ nullptr };
         }
 
@@ -236,73 +245,78 @@ namespace madbfs
     }
 
     Madbfs::Madbfs(
-        struct fuse*     fuse,
-        args::Connection connection,
-        Opt<Caching>     caching,
-        path::Path       custom_root,
-        Str              mountpoint,
-        Opt<Seconds>     ttl,
-        Opt<Seconds>     timeout
+        fuse_session*   se,
+        async::Context& ctx,
+        Connection&     conn,
+        Filesystem&     fs,
+        path::Path      custom_root,
+        Str             mount_point,
+        Opt<Seconds>    ttl,
+        Opt<Seconds>    timeout
     )
-        : m_fuse{ fuse }
-        , m_async_ctx{}
-        , m_work_guard{ m_async_ctx.get_executor() }
-        , m_work_thread{ [this] { work_thread_function(m_async_ctx); } }
-        , m_connection{ prepare_connection(m_async_ctx, connection) }
-        , m_fs{ m_async_ctx, m_connection, caching, ttl }
-        , m_ipc{ create_ipc(m_async_ctx) }
-        , m_watchdog_timer{ m_async_ctx }
-        , m_reaper_timer{ m_async_ctx }
-        , m_signal{ m_async_ctx, SIGINT, SIGTERM }
+        : m_fuse{ se }
+        , m_conn{ conn }
+        , m_fs{ fs }
+        , m_ipc{ create_ipc(ctx) }
+        , m_watchdog_timer{ ctx }
+        , m_reaper_timer{ ctx }
+        , m_signal{ ctx, SIGINT, SIGTERM }
         , m_root{ custom_root.owned() }
-        , m_mountpoint{ mountpoint }
+        , m_mountpoint{ mount_point }
+        , m_ttl{ ttl }
         , m_timeout{ timeout }
     {
-        if (m_ipc) {
-            auto coro = m_ipc->launch([this](ipc::FsOp op) { return ipc_handler(op); });
-            async::spawn(m_async_ctx, std::move(coro), [](std::exception_ptr e) {
-                log::log_exception(e, "Madbfs");
-            });
-        }
+    }
 
-        async::spawn(m_async_ctx, watchdog(), [](std::exception_ptr e) { log::log_exception(e, "Madbfs"); });
-        async::spawn(m_async_ctx, reaper(), [](std::exception_ptr e) { log::log_exception(e, "Madbfs"); });
+    AExpect<void> Madbfs::start()
+    {
+        auto exec = co_await async::current_executor();
 
-        async::spawn(m_async_ctx, m_connection.start(), [](std::exception_ptr e) {
-            log::log_exception(e, "Madbfs");
-        });
+        // async::spawn(exec, watchdog(), [](std::exception_ptr e) { log::log_exception(e, "start"); });
+        // async::spawn(exec, reaper(), [](std::exception_ptr e) { log::log_exception(e, "start"); });
 
         m_signal.async_wait([this, pid = ::getpid()](net::error_code ec, int sig) {
             if (not ec) {
                 assert(m_fuse != nullptr);
                 log_w("Madbfs", "signal raised: SIG{} ({})", ::sigabbrev_np(sig), sig);
-                ::fuse_exit(m_fuse);
+                ::fuse_session_exit(m_fuse);
                 ::kill(pid, SIGPIPE);
             }
         });
 
-        if (auto result = async::block(m_async_ctx, m_fs.initialize(m_root)); not result) {
-            log_c(__func__, "Failed to initialize filesystem");
+        if (m_ipc) {
+            auto handler = [h = IpcHandler{ *this }](ipc::FsOp op) mutable {
+                return op.visit([&](auto&& op) { return h.handle(op); });
+            };
+            async::spawn(exec, m_ipc->launch(std::move(handler)), [](std::exception_ptr e) {
+                log::log_exception(e, "start");
+            });
         }
+
+        m_started = true;
+        co_return Expect<void>{};
     }
 
-    Madbfs::~Madbfs()
+    void Madbfs::stop()
     {
+        if (not m_started) {
+            return;
+        }
+
         m_signal.cancel();
 
         if (m_ipc) {
             m_ipc->stop();
+            m_ipc.reset();
         }
 
         m_watchdog_timer.cancel();
         m_reaper_timer.cancel();
+    }
 
-        async::block(m_async_ctx, m_fs.shutdown());
-        m_connection.cancel(Errc::operation_canceled);
-
-        m_work_guard.reset();
-        m_async_ctx.stop();
-        m_work_thread.join();
+    Madbfs::~Madbfs()
+    {
+        stop();
     }
 
     Expect<path::Path> Madbfs::create_path(const char* path)
@@ -355,12 +369,6 @@ namespace madbfs
         return result;
     }
 
-    AExpect<json::value> Madbfs::ipc_handler(ipc::FsOp op)
-    {
-        auto handler = IpcHandler{ *this };
-        co_return co_await op.visit([&](auto&& op) { return handler.handle(op); });
-    }
-
     Await<void> Madbfs::watchdog()
     {
         using namespace std::chrono_literals;
@@ -373,23 +381,23 @@ namespace madbfs
             }
 
             log_d(__func__, "checking connection");
-            auto ok = co_await m_connection.ping(m_timeout);
+            auto ok = co_await m_conn.ping(m_timeout);
 
             if (not ok) {
                 log_i(__func__, "connection is timed out");
-                if (auto res = co_await m_connection.reconnect(); res) {
-                    if (auto& cache = m_fs.cache(); cache) {
+                if (auto res = co_await m_conn.reconnect(); res) {
+                    if (auto cache = m_fs.cache(); cache) {
                         co_await cache->invalidate_fds(false);
                     }
-                    co_await m_connection.start();
+                    co_await m_conn.start();
                 }
-            } else if (not m_connection.is_optimal()) {
+            } else if (not m_conn.is_optimal()) {
                 log_i(__func__, "connection is ok but not optimized. trying to optimize...");
-                if (auto res = co_await m_connection.optimize(); res) {
-                    if (auto& cache = m_fs.cache(); cache) {
+                if (auto res = co_await m_conn.optimize(); res) {
+                    if (auto cache = m_fs.cache(); cache) {
                         co_await cache->invalidate_fds(false);
                     }
-                    co_await m_connection.start();
+                    co_await m_conn.start();
                 }
             } else {
                 log_d(__func__, "connection is ok");
@@ -408,16 +416,131 @@ namespace madbfs
                 break;
             }
 
-            if (auto& cache = m_fs.cache(); cache) {
+            if (auto cache = m_fs.cache(); cache) {
                 co_await cache->clean_stale_fds();
             }
 
             const auto& handles = m_fs.handles();
 
-            auto cap   = handles.capacity();
-            auto empty = handles.count_empty();
+            auto cap  = handles.capacity();
+            auto open = handles.size();
 
-            log_i(__func__, "file handles [cap={:>04d}|open={:>04d}|empty={:>04d}]", cap, cap - empty, empty);
+            log_i(__func__, "file handles [cap={:>04d}|open={:>04d}|empty={:>04d}]", cap, open, cap - open);
         }
+    }
+}
+
+namespace
+{
+    void async_loop(async::Context& ctx)
+    {
+        try {
+            log_i(__func__, "io_context running...");
+            auto num_handlers = ctx.run();
+            log_i(__func__, "io_context stopped with {} handlers executed", num_handlers);
+        } catch (const std::exception& e) {
+            log_w(__func__, "io_context stopped with an exception: {}", e.what());
+        } catch (...) {
+            log_w(__func__, "io_context stopped with an exception (unknown type)");
+        }
+    }
+
+    int run_fuse(fuse_session* se, args::MountOpt::Fuse& opt)
+    {
+        if (opt.singlethread) {
+            return fuse_session_loop(se);
+        }
+
+        auto config = fuse_loop_cfg_create();
+        auto defer  = util::defer([&] { fuse_loop_cfg_destroy(config); });
+
+        fuse_loop_cfg_set_clone_fd(config, opt.clone_fd);
+        fuse_loop_cfg_set_max_threads(config, opt.n_threads);
+
+        return fuse_session_loop_mt(se, config);
+    }
+}
+
+namespace madbfs::ll
+{
+    int run(args::MountOpt& opt)
+    {
+        namespace strat = connection_strategy;
+
+        auto bridge = Bridge{ opt.fuse.mount, opt.app.writeback_cache };
+
+        auto oper = &operations::operations;
+        auto se   = fuse_session_new(&opt.fuse.args.inner(), oper, sizeof(*oper), &bridge);
+        if (se == nullptr) {
+            fmt::println(stderr, "error: failed to create fuse session");
+            return 1;
+        }
+        auto fuse_se_deferrer = util::defer([&] { fuse_session_destroy(se); });
+
+        if (::fuse_set_signal_handlers(se) != 0) {
+            fmt::println(stderr, "error: failed to set fuse signal handler");
+            return 1;
+        }
+        auto fuse_sig_deferrer = util::defer([&] { fuse_remove_signal_handlers(se); });
+
+        if (::fuse_session_mount(se, opt.fuse.mount.c_str()) != 0) {
+            fmt::println(stderr, "error: failed to mount filesystem at {}", opt.fuse.mount);
+            return 1;
+        }
+        auto fuse_mnt_deferrer = util::defer([&] { fuse_session_unmount(se); });
+
+        if (::fuse_daemonize(opt.fuse.foreground) != 0) {
+            fmt::println(stderr, "error: failed to daemonize filesystem");
+            return 1;
+        }
+
+        auto ctx    = async::Context{ 1 };    // the whole async runtime is 1 thread
+        auto guard  = async::WorkGuard{ ctx.get_executor() };
+        auto thread = std::jthread{ async_loop, std::ref(ctx) };
+
+        auto conn = opt.app.connection.visit(Overload{
+            [&](args::AdbOnly) { return Connection{ ctx, strat::Adb{} }; },
+            [&](args::NoServer c) { return Connection{ ctx, strat::Proxy{ {}, c.port } }; },
+            [&](args::Server c) { return Connection{ ctx, strat::Proxy{ c.abi, c.port } }; },
+        });
+        async::block(ctx, conn.start());
+
+        auto cache = opt.app.caching.transform([&](const auto& c) {
+            auto page_size = c.pagesize * 1024;
+            auto max_pages = c.cachesize * 1024 / c.pagesize;
+            return async::block(ctx, cache::LruCache::create(conn, page_size, max_pages));
+        });
+        async::block(ctx, cache->initialize());
+
+        auto ptr = cache.transform([](auto& c) { return &c; }).value_or(nullptr);
+        auto fs  = async::block(ctx, Filesystem::create(conn, ptr, opt.app.root));
+
+        auto ttl     = opt.app.ttl < 1 ? std::nullopt : Opt<Seconds>{ opt.app.ttl };
+        auto timeout = opt.app.timeout < 1 ? std::nullopt : Opt<Seconds>{ opt.app.timeout };
+
+        auto madbfs = Madbfs{ se, ctx, conn, *fs, opt.app.root, opt.fuse.mount, ttl, timeout };
+        if (auto res = async::block(ctx, madbfs.start()); not res) {
+            fmt::println(stderr, "error: failed to start filesystem: {}", err_msg(res.error()));
+            return 1;
+        }
+
+        bridge.set_ctx(&ctx);
+        bridge.set_madbfs(&madbfs);
+
+        auto ret = run_fuse(se, opt.fuse);
+
+        madbfs.stop();
+        if (cache) {
+            async::block(ctx, cache->shutdown());
+        }
+
+        // connection is stopped last, since madbfs's internal loop and cache requires it to be running
+        conn.cancel(Errc::operation_canceled);
+
+        guard.reset();
+        ctx.stop();
+        thread.join();
+
+        return ret;
     }
 }

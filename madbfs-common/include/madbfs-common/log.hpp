@@ -16,7 +16,7 @@ namespace madbfs::log
     using Level = spdlog::level::level_enum;
 
     // I need to use const char* here because spdlog doesn't support std::string_view... :(
-    static constexpr auto logger_pattern = "[%Y-%m-%d|%H:%M:%S] [%^-%L-%$] [%-20!s|%3#] %-20!!: %v";
+    static constexpr auto logger_pattern = "[%Y-%m-%d|%H:%M:%S] [%^-%L-%$] [%-20!s|%4#] %-20!!: %v";
     static constexpr auto logger_name    = "madbfs-log";
 
     // I have to do this conversion gymnastics because somehow spdlog's string_view is not compaitble with

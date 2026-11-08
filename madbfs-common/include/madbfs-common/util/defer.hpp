@@ -22,18 +22,27 @@ namespace madbfs::util
 
         DeferGuard(Fn fn)
             : m_fn{ std::move(fn) }
+            , m_engaged{ true }
         {
         }
 
         DeferGuard(DeferGuard&& other)
             : m_fn{ std::move(other.m_fn) }
+            , m_engaged{ std::exchange(other.m_engaged, false) }
         {
         }
 
-        ~DeferGuard() { std::move(m_fn)(); }
+        ~DeferGuard()
+        {
+            if (m_engaged) {
+                std::move(m_fn)();
+                m_engaged = false;
+            }
+        }
 
     private:
-        Fn m_fn;
+        Fn   m_fn;
+        bool m_engaged;
     };
 
     template <typename>
@@ -46,6 +55,14 @@ namespace madbfs::util
     {
     };
 
+    /**
+     * @brief Deferred concept.
+     *
+     * @tparam Fn Deferred action.
+     *
+     * This concept is useful in the context where you need to specify return type but you can't name the
+     * function being deferred, like lambda.
+     */
     template <typename Fn>
     concept Deferred = DeferredTraits<Fn>::value;
 
@@ -61,8 +78,8 @@ namespace madbfs::util
      */
     template <typename Fn>
         requires std::move_constructible<Fn> and std::invocable<Fn>
-    util::Deferred auto defer(Fn fn)
+    DeferGuard<Fn> defer(Fn fn)
     {
-        return util::DeferGuard{ std::move(fn) };
+        return { std::move(fn) };
     }
 }

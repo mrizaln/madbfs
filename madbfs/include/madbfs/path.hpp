@@ -102,6 +102,13 @@ namespace madbfs::path
          */
         operator Str() const { return str(); }
 
+        /**
+         * @brief How deep a file is from root.
+         *
+         * The depth of `/` is zero.
+         */
+        usize depth() const { return m_components.size(); }
+
     private:
         Path(Str path, Span<const Slice> components)
             : m_path{ path }
@@ -226,6 +233,13 @@ namespace madbfs::path
          * Same as calling str, has same rule as `view()`.
          */
         operator Str() const& { return str(); }
+
+        /**
+         * @brief How deep a file is from root.
+         *
+         * The depth of `/` is zero.
+         */
+        usize depth() const { return m_components.size(); }
 
     private:
         PathBuf(String&& path, Vec<Slice>&& components)

@@ -1,8 +1,5 @@
-#include "madbfs/filesystem.hpp"
 #include <madbfs-common/util/split.hpp>
-#include <madbfs/connection.hpp>
-#include <madbfs/node.hpp>
-#include <madbfs/path.hpp>
+#include <madbfs/tree/tree.hpp>
 
 #include <boost/ut.hpp>
 #include <dtlx/dtlx.hpp>
@@ -71,14 +68,16 @@ constexpr auto expected_rm = R"(
 
 // NOTE: since there is no ordering guarantee from the VFS, this formatter just order them alphabetically
 template <>
-struct fmt::formatter<madbfs::Node> : fmt::formatter<Str>
+struct fmt::formatter<madbfs::tree::Tree> : fmt::formatter<Str>
 {
-    auto format(const madbfs::Node& node, auto&& ctx) const
+    auto format(const madbfs::tree::Tree& tree, auto&& ctx) const
     {
         using namespace madbfs;
+        using namespace madbfs::tree;
 
-        auto print_impl = [&](this auto&& self, const Node* node, usize depth) -> void {
-            if (node == nullptr) {
+        auto print_impl = [&](this auto&& self, Id id, usize depth) -> void {
+            auto node = tree.get(id);
+            if (not node) {
                 return;
             }
 
@@ -86,28 +85,27 @@ struct fmt::formatter<madbfs::Node> : fmt::formatter<Str>
                 fmt::format_to(ctx.out(), "    ");
             }
 
-            auto visitor = madbfs::Overload{
+            auto extra = node->kind().visit(madbfs::Overload{
                 [&](const node::Link& l) { return fmt::format("  ->  {}", l.target.value_or("[none]")); },
                 [&](const node::Directory&) { return String{ "/" }; },
                 [&](const auto&) { return String{ "" }; },
-            };
-            auto additional = std::visit(visitor, node->value());
+            });
 
-            // if root, don't print the name since additional will print dir mark (/)
             auto name = node->name() == "/" ? "" : node->name();
-            fmt::format_to(ctx.out(), "- {}{}\n", name, additional);
+            fmt::format_to(ctx.out(), "- {}{}\n", name, extra);
 
-            if (auto* dir = std::get_if<node::Directory>(&node->value())) {
-                auto to_ref = [](const Uniq<Node>& f) { return std::ref(*f); };
-                auto ptrs   = dir->children() | sv::transform(to_ref) | sr::to<std::vector>();
-                sr::sort(ptrs, std::less<>{}, &Node::name);
-                for (const Node& child : ptrs) {
-                    self(&child, depth + 1);
+            auto list = node->as_directory().transform([&](const auto& d) { return d.children(); });
+            if (list) {
+                auto nodes = *list | sr::to<Vec<Pair<String, Id>>>();
+                sr::sort(nodes, std::less<>{}, [&](auto&& p) { return std::get<0>(p); });
+
+                for (auto [_, id] : nodes) {
+                    self(id, depth + 1);
                 }
             };
         };
 
-        print_impl(&node, 0u);
+        print_impl(tree.root(), 0u);
 
         return ctx.out();
     }
@@ -123,15 +121,6 @@ public:
     {
     }
 };
-
-template <typename T>
-[[noreturn]] madbfs::Unit raise_expect_error(
-    Errc                 errc,
-    std::source_location loc = std::source_location::current()
-)
-{
-    throw ExpectError{ errc, loc };
-}
 
 String diff_str(Str str1, Str str2)
 {
@@ -157,142 +146,81 @@ String diff_str(Str str1, Str str2)
     return buf;
 }
 
-namespace mock
-{
-    using namespace madbfs;
-
-    struct DummyTransport final : public transport::Transport
-    {
-        Str name() const override { return "dummy"; }
-
-        bool running() const override { return true; }
-
-        void stop(rpc::Status) override{};
-
-        Await<void> start() override { co_return; };
-
-        AExpect<rpc::Response> send(rpc::Request req) override
-        {
-            using namespace rpc;
-            co_return req.visit(Overload{
-                // clang-format off
-                [] (const req::Stat&         ) -> rpc::Response { return resp::Stat         {}; },
-                [] (const req::Listdir&      ) -> rpc::Response { return resp::Listdir      {}; },
-                [] (const req::Readlink&     ) -> rpc::Response { return resp::Readlink     {}; },
-                [] (const req::Mknod&        ) -> rpc::Response { return resp::Mknod        {}; },
-                [] (const req::Mkdir&        ) -> rpc::Response { return resp::Mkdir        {}; },
-                [] (const req::Unlink&       ) -> rpc::Response { return resp::Unlink       {}; },
-                [] (const req::Rmdir&        ) -> rpc::Response { return resp::Rmdir        {}; },
-                [] (const req::Rename&       ) -> rpc::Response { return resp::Rename       {}; },
-                [] (const req::Truncate&     ) -> rpc::Response { return resp::Truncate     {}; },
-                [] (const req::Utimens&      ) -> rpc::Response { return resp::Utimens      {}; },
-                [] (const req::CopyFileRange&) -> rpc::Response { return resp::CopyFileRange{}; },
-                [] (const req::Open&         ) -> rpc::Response { return resp::Open         {}; },
-                [] (const req::Close&        ) -> rpc::Response { return resp::Close        {}; },
-                [] (const req::Read&         ) -> rpc::Response { return resp::Read         {}; },
-                [] (const req::Write&        ) -> rpc::Response { return resp::Write        {}; },
-                [] (const req::Ping&         ) -> rpc::Response { return resp::Ping         {}; },
-                // clang-format on
-            });
-        }
-
-        AExpect<rpc::Response> send(rpc::Request req, Milliseconds /* timeout */) override
-        {
-            return send(std::move(req));
-        }
-    };
-
-    const auto dummy_strategy = connection_strategy::Custom{ .create = [] {
-        return std::make_unique<DummyTransport>();
-    } };
-}
-
 int main()
 {
     using namespace ut::literals;
     using ut::expect, ut::that;
 
+    using namespace madbfs;
+    using Reg = tree::node::Regular;
+    using Dir = tree::node::Directory;
+    using Lnk = tree::node::Link;
+
     spdlog::set_default_logger(spdlog::null_logger_mt("madbfs-test-tree"));
     // spdlog::set_level(spdlog::level::debug);
 
-    "constructed FileTree have same shape"_test = [&] {
-        using namespace madbfs;
+    "constructed Tree have same shape"_test = [&] {
+        auto tree = tree::Tree{ "/", {} };
+        auto root = tree.root();
 
-        auto context    = madbfs::async::Context{};
-        auto guard      = madbfs::net::make_work_guard(context);
-        auto thread     = std::jthread{ [&] { context.run(); } };
-        auto connection = madbfs::Connection{ context, mock::dummy_strategy };
-        auto tree       = Filesystem{ context, connection, std::nullopt, std::nullopt };
+        auto _ = std::ignore;
 
-        using madbfs::path::operator""_path;
+        auto hello = tree.create_node(root, "hello", Stat{}, Dir{}, false).value();
+        auto world = tree.create_node(hello.id, "world.txt", Stat{}, Reg{}, false).value();
+        _          = tree.create_node(hello.id, "foo.txt", Stat{}, Reg{}, false).value();
+        _          = tree.create_node(hello.id, "movie.mp4", Stat{}, Reg{}, false).value();
 
-#define unwrap(T) transform_error([](auto e) { return raise_expect_error<T>(e); }).value()
+        auto bar = tree.create_node(hello.id, "bar", Stat{}, Dir{}, false).value();
+        _        = tree.create_node(bar.id, "baz.txt", Stat{}, Reg{}, false).value();
+        _        = tree.create_node(bar.id, "qux.txt", Stat{}, Reg{}, false).value();
+        _        = tree.create_node(bar.id, "quux.txt", Stat{}, Reg{}, false).value();
 
-        auto coro = [&] -> madbfs::Await<void> {
-            (co_await tree.mkdir("/hello"_path, 0)).unwrap(Node*);
-            (co_await tree.mknod("/hello/world.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/hello/foo.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/hello/movie.mp4"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mkdir("/hello/bar"_path, 0)).unwrap(Node*);
-            (co_await tree.mknod("/hello/bar/baz.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/hello/bar/qux.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/hello/bar/quux.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mkdir("/bye"_path, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/world.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/movie.mp4"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/music.mp3"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mkdir("/bye/family"_path, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/family/dad.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/family/mom.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mkdir("/bye/friends"_path, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/friends/bob.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mkdir("/bye/friends/school"_path, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/friends/school/kal'tsit.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/friends/school/closure.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mkdir("/bye/friends/work"_path, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/friends/work/loughshinny <3.txt"_path, 0, 0)).unwrap(Node*);
-            (co_await tree.mknod("/bye/friends/work/eblana?.mp4"_path, 0, 0)).unwrap(Node*);
+        auto bye   = tree.create_node(root, "bye", Stat{}, Dir{}, false).value();
+        _          = tree.create_node(bye.id, "world.txt", Stat{}, Reg{}, false).value();
+        _          = tree.create_node(bye.id, "movie.mp4", Stat{}, Reg{}, false).value();
+        auto music = tree.create_node(bye.id, "music.mp3", Stat{}, Reg{}, false).value();
 
-            tree.symlink("/bye/friends/school/hehe"_path, "/bye/friends/work").unwrap(void);
-            tree.symlink("/hello/wife"_path, "/bye/friends/work/loughshinny <3.txt").unwrap(void);
+        auto family = tree.create_node(bye.id, "family", Stat{}, Dir{}, false).value();
+        _           = tree.create_node(family.id, "dad.txt", Stat{}, Reg{}, false).value();
+        _           = tree.create_node(family.id, "mom.txt", Stat{}, Reg{}, false).value();
 
-            (co_await tree.mknod("/bye/theresa.txt"_path, 0, 0)).unwrap(Node*);
+        auto friends = tree.create_node(bye.id, "friends", Stat{}, Dir{}, false).value();
+        auto bob     = tree.create_node(friends.id, "bob.txt", Stat{}, Reg{}, false).value();
 
-            auto tree_str = fmt::format("\n{}", tree.root());
-            expect(expected == tree_str) << diff_str(expected, tree_str);
+        auto school = tree.create_node(friends.id, "school", Stat{}, Dir{}, false).value();
+        _           = tree.create_node(school.id, "kal'tsit.txt", Stat{}, Reg{}, false).value();
+        _           = tree.create_node(school.id, "closure.txt", Stat{}, Reg{}, false).value();
 
-            (co_await tree.unlink("/hello/world.txt"_path)).unwrap(void);
-            (co_await tree.unlink("/bye/music.mp3"_path)).unwrap(void);
-            (co_await tree.unlink("/bye/friends/bob.txt"_path)).unwrap(void);
-            (co_await tree.unlink("/bye/friends/school/hehe"_path)).unwrap(void);
+        auto work = tree.create_node(friends.id, "work", Stat{}, Dir{}, false).value();
+        _         = tree.create_node(work.id, "loughshinny <3.txt", Stat{}, Reg{}, false).value();
+        _         = tree.create_node(work.id, "eblana?.mp4", Stat{}, Reg{}, false).value();
 
-            // there is no recursive delete
-            Node& bar   = tree.traverse("/hello/bar"_path).unwrap(Node*);
-            auto  paths = Vec<madbfs::path::PathBuf>{};
+        auto link_1 = Lnk{ .target = "/bye/friends/work" };
+        auto hehe   = tree.create_node(school.id, "hehe", Stat{}, link_1).value();
 
-            auto dummy = bar.build_path();
-            dummy.extend("dummy");
+        auto link_2 = Lnk{ .target = "/bye/friends/work/loughshinny <3.txt" };
+        _           = tree.create_node(hello.id, "wife", Stat{}, link_2).value();
 
-            auto entries = bar.as_directory()->get().children()
-                         | sv::transform([](auto& node) { return node->name(); })    //
-                         | sr::to<Vec<String>>();
+        _ = tree.create_node(bye.id, "theresa.txt", Stat{}, Reg{}, false).value();
 
-            for (const auto& name : entries) {
-                dummy.rename(name);
-                (co_await tree.unlink(dummy)).unwrap(void);
-            }
+        auto tree_str = fmt::format("\n{}", tree);
+        expect(expected == tree_str) << diff_str(expected, tree_str);
 
-            (co_await tree.rmdir("/hello/bar"_path)).unwrap(void);
+        tree.remove(world.id).value();
+        tree.remove(music.id).value();
+        tree.remove(bob.id).value();
+        tree.remove(hehe.id).value();
 
-            tree_str = fmt::format("\n{}", tree.root());
-            expect(expected_rm == tree_str) << diff_str(expected_rm, tree_str);
-        };
+        // bar reference may have been invalidated, thus refetching using the id
+        auto& bar_node = tree.get(bar.id).value();
+        auto& bar_dir  = bar_node.as_directory().value();
 
-#undef unwrap
+        for (auto&& [name, id] : std::as_const(bar_dir).children()) {
+            tree.remove(id).value();
+        }
+        tree.remove(bar.id).value();
 
-        madbfs::async::block(context, coro());
-
-        guard.reset();
-        context.stop();
+        tree_str = fmt::format("\n{}", tree);
+        expect(expected_rm == tree_str) << diff_str(expected_rm, tree_str);
     };
 }

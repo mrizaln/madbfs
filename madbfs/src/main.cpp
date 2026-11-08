@@ -1,6 +1,6 @@
 #include "madbfs/args.hpp"
 #include "madbfs/cmd.hpp"
-#include "madbfs/operations.hpp"
+#include "madbfs/madbfs.hpp"
 
 #include <madbfs-common/log.hpp>
 #include <madbfs-gen/version.hpp>
@@ -58,57 +58,56 @@ Await<int> push(const args::PushOpt& opt)
     co_return 0;
 }
 
-int mount(const args::MountOpt& opt)
+int mount(args::MountOpt& opt)
 {
-    if (not log::init(opt.log_level, opt.log_file)) {
+    if (not log::init(opt.app.log_level, opt.app.log_file)) {
         return 1;
     }
 
     fmt::println("[madbfs] version is {}", version::get_version_full());
-    if (opt.caching) {
+    if (opt.app.caching) {
         fmt::println(
             "[madbfs] mount '{}@{}' [cache={} MiB, page={} KiB]",
-            opt.serial,
-            opt.root,
-            opt.caching->cachesize,
-            opt.caching->pagesize
+            opt.app.serial,
+            opt.app.root,
+            opt.app.caching->cachesize,
+            opt.app.caching->pagesize
         );
     } else {
-        fmt::println("[madbfs] mount '{}@{}' [no cache]", opt.serial, opt.root);
+        fmt::println("[madbfs] mount '{}@{}' [no cache]", opt.app.serial, opt.app.root);
     }
 
-    if (opt.log_file != "-") {
+    if (opt.app.log_file != "-") {
         log_i(__func__, "[madbfs] version is {}", version::get_version_full());
-        if (opt.caching) {
+        if (opt.app.caching) {
             log_i(
                 __func__,
                 "[madbfs] mount '{}@{}' at '{}' with cache size {} MiB and page size {} KiB",
-                opt.serial,
-                opt.root,
-                opt.mount,
-                opt.caching->cachesize,
-                opt.caching->pagesize
+                opt.app.serial,
+                opt.app.root,
+                opt.fuse.mount,
+                opt.app.caching->cachesize,
+                opt.app.caching->pagesize
             );
         } else {
             log_i(
                 __func__,
                 "[madbfs] mount '{}@{}' at '{}' with cache disabled",
-                opt.serial,
-                opt.root,
-                opt.mount
+                opt.app.serial,
+                opt.app.root,
+                opt.fuse.mount
             );
         }
     }
 
-    fmt::println("[madbfs] unmount with 'fusermount -u {:?}'", opt.mount);
+    fmt::println("[madbfs] unmount with 'fusermount -u {:?}'", opt.fuse.mount);
 
-    if (::setenv("ANDROID_SERIAL", opt.serial.c_str(), 1) < 0) {
+    if (::setenv("ANDROID_SERIAL", opt.app.serial.c_str(), 1) < 0) {
         fmt::println(stderr, "error: failed to set env variable 'ANDROID_SERIAL' ({})", strerror(errno));
         return 1;
     }
 
-    const auto args = opt.args.inner();
-    return fuse_main(args.argc, args.argv, &operations::operations, (void*)&opt);
+    return madbfs::ll::run(opt);
 }
 
 int main(int argc, char** argv)
@@ -121,8 +120,8 @@ try {
     context.restart();
 
     return parsed.visit(Overload{
-        [&](const args::MountOpt& opt) { return mount(opt); },
-        [&](const args::PushOpt& opt) { return async::once(context, push(opt)); },
+        [&](args::MountOpt& opt) { return mount(opt); },
+        [&](args::PushOpt& opt) { return async::once(context, push(opt)); },
         [](int ret) { return ret; },
     });
 } catch (const std::exception& e) {

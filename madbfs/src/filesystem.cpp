@@ -1,7 +1,6 @@
 #include "madbfs/filesystem.hpp"
 
 #include "madbfs/connection.hpp"
-#include "madbfs/node.hpp"
 
 #include <madbfs-common/log.hpp>
 
@@ -9,6 +8,7 @@
 #include <sys/stat.h>
 
 #include <cassert>
+#include <unordered_set>
 
 using namespace madbfs;
 
@@ -18,932 +18,916 @@ constexpr auto timespec_omit = timespec{ .tv_sec = 0, .tv_nsec = UTIME_OMIT };
 // helper functions/classes
 namespace
 {
-    // NOTE: Errc::not_connected, Errc::timed_out, and Errc::resource_unavailable_try_again should be
-    // considered an OK error since it can happen if the device is disconnected. The error should not be
-    // cached as node.
-    bool should_cache_error(Errc err)
+    Opt<RenameMode> to_rename_mode(u32 flags)
     {
-        return err != std::errc::not_connected    //
-           and err != std::errc::timed_out        //
-           and err != std::errc::resource_unavailable_try_again;
+        switch (flags) {
+        case 0: return RenameMode::Normal;
+        case RENAME_NOREPLACE: return RenameMode::Noreplace;
+        case RENAME_EXCHANGE: return RenameMode::Exchange;
+        default: return std::nullopt;
+        }
     }
 
-    Opt<cache::LruCache> construct_cache(async::Context& ctx, Connection& connection, Opt<Caching> caching)
+    tree::File file_from_mode(mode_t mode)
     {
-        return caching.transform([&](auto c) mutable {
-            return async::block(ctx, cache::LruCache::create(connection, c.page_size, c.max_pages));
-        });
+        switch (mode & S_IFMT) {
+        case S_IFREG: return tree::node::Regular{};
+        case S_IFDIR: return tree::node::Directory{};
+        case S_IFLNK: return tree::node::Link{};
+        default: return tree::node::Other{};
+        }
     }
 
-    blksize_t page_size_or_default(Opt<cache::LruCache>& cache)
+    Str mode_name(mode_t mode)
     {
-        constexpr auto default_page_size = 64 * 1024;    // use minimum page size
-
-        auto page_size = cache.transform(&cache::LruCache::page_size).value_or(default_page_size);
-        return static_cast<blksize_t>(page_size);
+        switch (mode & S_IFMT) {
+        case S_IFREG: return "regular";
+        case S_IFDIR: return "directory";
+        case S_IFLNK: return "symlink";
+        default: return "other";
+        }
     }
 }
 
 // filesystem.hpp impl
 namespace madbfs
 {
-    Filesystem::Filesystem(
-        async::Context& ctx,
-        Connection&     connection,
-        Opt<Caching>    caching,
-        Opt<Seconds>    ttl
+    AExpect<Filesystem> Filesystem::create(
+        Connection&      connection,
+        cache::LruCache* cache,
+        path::Path       root_path
     )
-        : m_connection{ connection }
-        , m_root{ "/", nullptr, {}, node::Directory{} }
-        , m_cache{ construct_cache(ctx, connection, caching) }
-        , m_ttl{ ttl }
     {
-    }
-
-    AExpect<Ref<Node>> Filesystem::build(Node& parent, path::Path path)
-    {
-        const auto name = path.filename();
-
-        auto build_then_expire = [&](Str name, Stat stat, File file) {
-            return parent.build(name, std::move(stat), std::move(file)).transform([&](Node& node) {
-                node.expires_after(m_ttl.value_or(Seconds::max()));
-                return std::ref(node);
-            });
-        };
-
-        auto stat = co_await m_connection.stat(path);
-        if (not stat.has_value()) {
-            auto err = stat.error();
-            if (should_cache_error(err)) {
-                std::ignore = build_then_expire(name, {}, node::Error{ err });
-            }
-            co_return Unexpect{ err };
-        }
-
-        switch (stat->mode & S_IFMT) {
-        case S_IFREG: co_return build_then_expire(name, *stat, node::Regular{});
-        case S_IFDIR: co_return build_then_expire(name, *stat, node::Directory{});
-        case S_IFLNK: co_return build_then_expire(name, *stat, node::Link{});
-        default: co_return build_then_expire(name, *stat, node::Other{});
-        }
-    }
-
-    AExpect<Ref<Node>> Filesystem::build_directory(Node& parent, path::Path path)
-    {
-        const auto name = path.filename();
-
-        auto build_then_expire = [&](Str name, Stat stat, File file) {
-            return parent.build(name, std::move(stat), std::move(file)).transform([&](Node& node) {
-                node.expires_after(m_ttl.value_or(Seconds::max()));
-                return std::ref(node);
-            });
-        };
-
-        auto stat = co_await m_connection.stat(path);
-        if (not stat.has_value()) {
-            auto err = stat.error();
-            if (should_cache_error(err)) {
-                std::ignore = build_then_expire(name, {}, node::Error{ err });
-            }
-            co_return Unexpect{ err };
-        } else if ((stat->mode & S_IFMT) != S_IFDIR) {
-            co_return Unexpect{ Errc::not_a_directory };
-        }
-
-        co_return build_then_expire(name, *stat, node::Directory{});
-    }
-
-    Expect<Ref<Node>> Filesystem::traverse(path::Path path)
-    {
-        if (path.is_root()) {
-            return m_root;
-        }
-
-        auto* current = &m_root;
-
-        for (auto name : path.iter()) {
-            auto next = current->traverse(name);
-            if (not next.has_value()) {
-                return Unexpect{ next.error() };
-            }
-            current = &next->get();
-        }
-
-        return *current;
-    }
-
-    AExpect<Ref<Node>> Filesystem::traverse_or_build(path::Path path)
-    {
-        if (path.is_root()) {
-            co_return m_root;
-        }
-
-        auto* current      = &m_root;
-        auto  current_path = path::PathBuf{};
-
-        // iterate until parent
-        for (auto name : path.parent_path().iter()) {
-            current_path.extend(name);
-            if (auto next = current->traverse(name); next.has_value()) {
-                if (auto& node = next->get(); node.expired()) {
-                    if (auto res = co_await update(node, current_path); not res) {
-                        co_return Unexpect{ res.error() };
-                    }
-                }
-                current = &next->get();
-                continue;
-            }
-
-            auto next = co_await build_directory(*current, current_path);
-            if (not next) {
-                co_return Unexpect{ next.error() };
-            }
-
-            current = &next->get();
-        }
-
-        current_path.extend(path.filename());
-        if (auto found = current->traverse(path.filename()); found.has_value()) {
-            if (auto& node = found->get(); node.expired()) {
-                if (auto res = co_await update(node, current_path); not res) {
-                    co_return Unexpect{ res.error() };
-                }
-            }
-            co_return found;
-        }
-
-        co_return co_await build(*current, current_path);
-    }
-
-    AExpect<void> Filesystem::update(Node& node, path::Path path)
-    {
-        log_d(__func__, "{:?}", path);
-
-        auto new_stat = co_await m_connection.stat(path);
-        auto old_stat = node.stat();
-
-        if (not new_stat) {
-            auto err = new_stat.error();
-            if (should_cache_error(err)) {
-                co_await mutate_and_invalidate(node, node::Error{ err });
-                node.expires_after(m_ttl.value_or(Seconds::max()));
-            }
-            co_return Unexpect{ err };
-        }
-
-        // no change
-        if (not node.is_error() and not detect_modification(old_stat, *new_stat)) {
-            log_d(__func__, "unchanged: {:?}", path);
-            node.expires_after(m_ttl.value_or(Seconds::max()));
-            co_return Expect<void>{};
-        }
-
-        log_w(__func__, "  changed: {:?}", path);
-
-        switch (new_stat->mode & S_IFMT) {
-        case S_IFREG: {
-            node.set_stat(*new_stat);
-            co_await mutate_and_invalidate(node, node::Regular{});    // invalidate currently held data
-            node.expires_after(m_ttl.value_or(Seconds::max()));
-        } break;
-        case S_IFDIR: {
-            if (S_ISDIR(old_stat.mode)) {    // previously directory
-                node.set_stat(*new_stat);
-                node.set_synced(false);    // don't mutate, force rescan
-                node.expires_after(m_ttl.value_or(Seconds::max()));
-            } else {
-                node.set_stat(*new_stat);
-                co_await mutate_and_invalidate(node, node::Directory{});    // not directory, becomes one
-                node.expires_after(m_ttl.value_or(Seconds::max()));
-            }
-        } break;
-        case S_IFLNK: {
-            node.set_stat(*new_stat);
-            co_await mutate_and_invalidate(node, node::Link{});
-            node.expires_after(m_ttl.value_or(Seconds::max()));
-        } break;
-        default: {
-            node.set_stat(*new_stat);
-            co_await mutate_and_invalidate(node, node::Other{});
-            node.expires_after(m_ttl.value_or(Seconds::max()));
-        } break;
-        }
-
-        co_return Expect<void>{};
-    }
-
-    Await<void> Filesystem::mutate_and_invalidate(Node& node, File file)
-    {
-        auto old = node.mutate(std::move(file));
-
-        if (auto dir = std::get_if<node::Directory>(&old)) {
-            auto nodes = std::vector<Node*>{};
-            for (const auto& node : dir->children()) {
-                walk(*node, [&](Node& n) { m_handles.erase(&n), nodes.push_back(&n); });
-            }
-            if (m_cache) {
-                for (auto node : nodes) {
-                    co_await m_cache->invalidate_one(node->id(), false);    // flush? child maybe unchanged
-                }
-            }
-            m_handles.erase(&node);
-        } else if (std::get_if<node::Regular>(&old)) {
-            if (m_cache) {
-                co_await m_cache->invalidate_one(node.id(), false);    // no flush since the file changed
-            }
-            m_handles.erase(&node);
-        }
-    }
-
-    void Filesystem::walk(Node& start, std::function<void(Node&)> func)
-    {
-        auto stack = Vec<Node*>{ &start };
-
-        while (not stack.empty()) {
-            auto node = stack.back();
-            stack.pop_back();
-
-            func(*node);
-
-            if (auto dir = node->as_directory(); dir) {
-                for (const auto& node : dir->get().children()) {
-                    stack.push_back(node.get());
-                }
-            }
-        }
-    }
-
-    AExpect<void> Filesystem::readdir(path::Path path, Filler filler, off_t offset)
-    {
-        auto current = &m_root;
-
-        if (not path.is_root()) {
-            auto maybe_node = co_await traverse_or_build(path);
-            if (not maybe_node.has_value()) {
-                co_return Unexpect{ maybe_node.error() };
-            }
-            current = &maybe_node->get();
-        }
-
-        auto current_dir = current->as_directory();
-        if (not current_dir) {
-            co_return Unexpect{ current_dir.error() };
-        }
-
-        auto& list    = current_dir->get().children();
-        auto  pathbuf = path.extend_copy("dummy").value();
-
-        auto build_file = [&](Str name, mode_t mode) -> Await<File> {
-            auto renamed = pathbuf.rename(name);
-            assert(renamed);
-
-            switch (mode & S_IFMT) {
-            case S_IFREG: co_return node::Regular{};
-            case S_IFDIR: co_return node::Directory{};
-            case S_IFLNK: co_return node::Link{};
-            default: co_return node::Other{};
-            }
-        };
-
-        if (not current->has_synced()) {
-            auto may_stats = co_await m_connection.statdir(path);
-            if (not may_stats) {
-                co_return Unexpect{ may_stats.error() };
-            }
-
-            if (list.empty()) {
-                for (auto [stat, name] : may_stats.value()) {
-                    log_d(__func__, "[{:?}] new entry    : {:?}", current->name(), name);
-
-                    auto file  = co_await build_file(name, stat.mode);
-                    auto child = std::make_unique<Node>(name, current, std::move(stat), std::move(file));
-                    child->expires_after(m_ttl.value_or(Seconds::max()));
-                    list.emplace(std::move(child));
-                }
-            } else {
-                auto new_list = std::unordered_set<Str>{};
-
-                // update old entries or add a new one if not exists
-                for (auto [stat, name] : may_stats.value()) {
-                    new_list.emplace(name);
-
-                    auto found = list.find(name);
-                    if (found == list.end()) {
-                        log_d(__func__, "[{:?}] new entry: {:?}", current->name(), name);
-
-                        auto file  = co_await build_file(name, stat.mode);
-                        auto child = std::make_unique<Node>(name, current, std::move(stat), std::move(file));
-                        child->expires_after(m_ttl.value_or(Seconds::max()));
-                        list.emplace(std::move(child));
-
-                        continue;
-                    }
-
-                    auto& child = (**found);
-                    if (child.is_error()) {    // Error node
-                        log_d(__func__, "[{:?}]   changed: {:?}", current->name(), name);
-
-                        auto file = co_await build_file(name, stat.mode);
-                        child.set_stat(std::move(stat));
-                        co_await mutate_and_invalidate(child, std::move(file));
-                        child.expires_after(m_ttl.value_or(Seconds::max()));
-                    } else if (child.expired() and detect_modification(child.stat(), stat)) {
-                        log_d(__func__, "[{:?}]   changed: {:?}", current->name(), name);
-
-                        auto file = co_await build_file(name, stat.mode);
-                        child.set_stat(std::move(stat));
-                        co_await mutate_and_invalidate(child, std::move(file));
-                        child.expires_after(m_ttl.value_or(Seconds::max()));
-                    }
-
-                    log_d(__func__, "[{:?}] unchanged: {:?}", current->name(), name);
-                }
-
-                // remove old entries if doesn't exist in new entries
-                for (auto it = list.begin(); it != list.end();) {
-                    auto name = (**it).name();
-                    if (not new_list.contains(name)) {
-                        log_d(__func__, "[{:?}]   removed: {:?}", current->name(), name);
-                        if (m_cache) {
-                            co_await m_cache->invalidate_one((**it).id(), false);    // should I flush
-                        }
-                        it = list.erase(it);
-                        continue;
-                    }
-                    ++it;
-                }
-            }
-
-            current->set_synced(true);
-        }
-
-        struct stat stat;
-
-        for (auto&& [i, node] : std::as_const(list) | sv::enumerate | sv::drop(offset)) {
-            if (not node->is_error()) {
-                node->fill_stbuf(&stat, page_size_or_default(m_cache));
-                auto full = filler(node->name().data(), &stat, i + 1);
-                if (full) {
-                    break;
-                }
-            }
-        }
-
-        co_return Expect<void>{};
-    }
-
-    AExpect<void> Filesystem::getattr(path::Path path, struct stat* stbuf)
-    {
-        co_return (co_await traverse_or_build(path)).and_then([&](Node& node) -> Expect<void> {
-            if (auto err = node.as_error(); err) {
-                return Unexpect{ err->error };
-            }
-            node.fill_stbuf(stbuf, page_size_or_default(m_cache));
-            return Expect<void>{};
+        co_return (co_await connection.stat(root_path)).transform([&](Stat stat) {
+            return Filesystem{ connection, cache, root_path, stat };
         });
     }
 
-    AExpect<Str> Filesystem::readlink(path::Path path)
+    Filesystem::Filesystem(
+        Connection&      connection,
+        cache::LruCache* cache,
+        path::Path       root_path,
+        Stat             root_stat
+    )
+        : m_connection{ connection }
+        , m_tree{ root_path, root_stat }
+        , m_cache{ cache }
     {
-        auto link = (co_await traverse_or_build(path)).and_then([](Node& node) { return node.as_link(); });
+    }
 
+    void Filesystem::fill_stbuf(const tree::Node& node, Id id, struct stat* stbuf)
+    {
+        constexpr auto default_page_size = 64 * 1024;    // use minimum page size
+
+        auto page_size = m_cache ? m_cache->page_size() : default_page_size;
+        node.fill_stbuf(stbuf, id, static_cast<blksize_t>(page_size));
+    }
+
+    AExpect<void> Filesystem::exchange_nodes(tree::Entry left, tree::Entry right)
+    {
+        auto&& [id_l, node_l] = left;
+        auto&& [id_r, node_r] = right;
+
+        auto name_l = node_l.name();
+        auto name_r = node_r.name();
+
+        auto pid_l = node_l.parent();
+        auto pid_r = node_r.parent();
+
+        // if the left and right nodes exist, their parents must be as well
+        auto& pnode_l = *m_tree.get(pid_l);
+        auto& pnode_r = *m_tree.get(pid_r);
+
+        auto& pdir_l = *pnode_l.as_directory();
+        auto& pdir_r = *pnode_r.as_directory();
+
+        // since left and right parents are referenced from their respective child, erase will always succeed
+        std::ignore = pdir_l.erase(name_l);
+        std::ignore = pdir_r.erase(name_r);
+
+        // should I check overwrites? or does FUSE already check this for me?
+        std::ignore = pdir_l.insert(name_r, id_r, true);
+        std::ignore = pdir_r.insert(name_l, id_l, true);
+
+        node_l.set_parent(pid_r);
+        node_r.set_parent(pid_l);
+
+        pnode_l.refresh_stat(timespec_omit, timespec_now);
+        pnode_r.refresh_stat(timespec_omit, timespec_now);
+
+        co_return Expect<void>{};
+    }
+
+    AExpect<void> Filesystem::move_node(tree::Entry left, Str new_name, tree::Entry new_parent)
+    {
+        auto&& [id_l, node_l]   = left;
+        auto&& [pid_r, pnode_r] = new_parent;
+
+        auto  pid_l   = node_l.parent();
+        auto& pnode_l = *m_tree.get(pid_l);
+
+        auto& pdir_l = *pnode_l.as_directory();
+        auto& pdir_r = *pnode_r.as_directory();
+
+        std::ignore = pdir_l.erase(node_l.name());
+        node_l.set_name(new_name);
+
+        // TODO: handle overwrites (Node specified by the Id haven't cleaned from m_nodes)
+        std::ignore = pdir_r.insert(node_l.name(), id_l, true);
+        node_l.set_parent(pid_r);
+
+        pnode_l.refresh_stat(timespec_omit, timespec_now);
+        pnode_r.refresh_stat(timespec_omit, timespec_now);
+
+        co_return Expect<void>{};
+    }
+
+    AExpect<void> Filesystem::refresh_dir(Id id, path::Path path)
+    {
+        log_d(__func__, "refresh dir [{}]: {}", id, path);
+
+        if (auto dir = m_tree.get(id).and_then([](tree::Node& n) { return n.as_directory(); }); not dir) {
+            co_return Unexpect{ dir.error() };
+        }
+
+        // `id` exists and is directory from this point
+
+        auto pathbuf = path.extend_copy("dummy").value();
+
+        auto build_file = [&](Str name, mode_t mode) -> tree::File {
+            auto renamed = pathbuf.rename(name);
+            assert(renamed);
+            return file_from_mode(mode);
+        };
+
+        auto may_stats = co_await m_connection.statdir(path);
+        if (not may_stats) {
+            co_return Unexpect{ may_stats.error() };
+        }
+
+        auto stats    = may_stats.value() | sr::to<std::vector>();
+        auto new_list = std::unordered_set<Str>{};
+
+        // update old entries or add a new one if not exists
+        for (auto [stat, name] : stats) {
+            new_list.emplace(name);
+
+            auto found = m_tree.get_child(id, name);
+
+            // new entries
+            if (not found) {
+
+                auto file  = build_file(name, stat.mode);
+                auto entry = m_tree.create_node(id, name, std::move(stat), std::move(file));
+
+                log_d(__func__, "[{:?}] new entry: [{}] {:?}", path, entry->id, name);
+
+                continue;
+            }
+
+            auto&& [child_id, child] = *found;
+
+            if (detect_modification(child.stat(), stat)) {
+                log_d(__func__, "[{:?}]   changed: {:?}", path, name);
+
+                auto file = build_file(name, stat.mode);
+                child.set_stat(std::move(stat));
+
+                co_await mutate_and_invalidate(child, child_id, std::move(file));
+            }
+
+            log_d(__func__, "[{:?}] unchanged: {:?}", path, name);
+        }
+
+        auto& dir  = *m_tree.get(id).and_then([](tree::Node& n) { return n.as_directory(); });
+        auto& list = dir.children();
+
+        // remove old entries if doesn't exist in new entries
+        for (auto it = list.begin(); it != list.end();) {
+            const auto& [name, id] = *it;
+            if (not new_list.contains(name)) {
+                log_d(__func__, "[{:?}]   removed: {:?}", path, name);
+                if (m_cache) {
+                    co_await m_cache->invalidate_one(id, false);    // should I flush?
+                }
+                it = list.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        dir.set_readdir(true);
+        co_return Expect<void>{};
+    }
+
+    Await<void> Filesystem::mutate_and_invalidate(tree::Node& node, Id id, tree::File file)
+    {
+        auto old = node.mutate(std::move(file));
+
+        if (auto dir = std::get_if<tree::node::Directory>(&old)) {
+            auto ids = std::vector<Id>{};
+            for (auto&& [_, id] : dir->children()) {
+                walk(id, [&](tree::Entry e) { m_handles.erase(e.id), ids.push_back(e.id); });
+            }
+            if (m_cache) {
+                for (auto id : ids) {
+                    co_await m_cache->invalidate_one(id, false);    // flush? child maybe unchanged
+                }
+            }
+            m_handles.erase(id);
+        } else if (std::get_if<tree::node::Regular>(&old)) {
+            if (m_cache) {
+                co_await m_cache->invalidate_one(id, false);    // no flush since the file changed
+            }
+            m_handles.erase(id);
+        }
+    }
+
+    usize Filesystem::walk(Id start, std::function<void(tree::Entry)> func)
+    {
+        auto stack = Vec<Id>{ start };
+        auto count = 0uz;
+
+        while (not stack.empty()) {
+            auto id = stack.back();
+            stack.pop_back();
+
+            if (auto node = m_tree.get(id); node) {
+                func({ id, *node });
+                ++count;
+
+                if (auto dir = node->as_directory(); dir) {
+                    for (auto&& [_, id] : dir->children()) {
+                        stack.push_back(id);
+                    }
+                }
+            }
+        }
+
+        return count;
+    }
+
+    AExpect<void> Filesystem::ll_lookup(Id parent, Str name, struct stat* stbuf)
+    {
+        // check if it has been looked up
+        if (auto entry = m_tree.get_child(parent, name); entry) {
+            fill_stbuf(entry->node, entry->id, stbuf);
+            entry->node.incr_lookup(1);
+
+            log_d(__func__, "looked-up from tree: [{}] {}", entry->id, name);
+
+            co_return Expect<void>{};
+        }
+
+        auto path = m_tree.build_path(parent, name);
+        if (not path) {
+            log_c(__func__, "failed to build path: {}", name);
+            co_return Unexpect{ path.error() };
+        }
+
+        co_return (co_await m_connection.stat(*path)).transform([&](Stat stat) {
+            auto file  = file_from_mode(stat.mode);
+            auto entry = m_tree.create_node(parent, name, stat, file, true);
+
+            fill_stbuf(entry->node, entry->id, stbuf);
+
+            log_d("ll_lookup", "lookup out of tree: [{}] {}", entry->id, *path);
+        });
+    }
+
+    AExpect<void> Filesystem::ll_forget(Id id, u64 nlookup)
+    {
+        auto remove = false;
+
+        if (auto node = m_tree.get(id); node) {
+            auto current = node->decr_lookup(nlookup);
+            remove       = current == 0;
+        }
+
+        if (not remove) {
+            co_return Expect<void>{};
+        }
+
+        // node must exist since `remove` can only be true if above branch is executed
+        auto node = m_tree.remove(id).value();
+
+        auto unlinked = m_orphans.remove(node.parent(), node.name());
+        if (not unlinked) {
+            co_return Expect<void>{};
+        }
+
+        if (auto reg = node.as_regular(); reg) {
+            if (reg->open_count > 0) [[unlikely]] {
+                m_handles.erase(id);
+            }
+            if (m_cache) {
+                co_await m_cache->invalidate_one(id, true);
+            }
+        }
+
+        auto path = m_tree.build_path(node.parent(), *unlinked);
+        if (not path) {
+            co_return Unexpect{ path.error() };
+        }
+
+        co_return co_await m_connection.unlink(*path);
+    }
+
+    AExpect<void> Filesystem::ll_getattr(Id id, struct stat* stbuf)
+    {
+        // TODO: check for modification
+        co_return m_tree.get(id).transform([&](tree::Node& node) { fill_stbuf(node, id, stbuf); });
+    }
+
+    AExpect<void> Filesystem::ll_setattr(
+        Id            id,
+        Opt<u64>      size,
+        Opt<timespec> atime,
+        Opt<timespec> mtime,
+        struct stat*  stbuf
+    )
+    {
+        auto node = m_tree.get(id);
+        if (not node) {
+            co_return Unexpect{ node.error() };
+        }
+
+        auto path = m_tree.build_path(id);
+        if (not path) {
+            co_return Unexpect{ path.error() };
+        }
+
+        if (size) {
+            if (auto file = node->as_regular(); not file) {
+                co_return Unexpect{ file.error() };
+            }
+
+            if (m_cache) {
+                std::ignore = co_await m_cache->flush(id);
+            }
+
+            if (auto res = co_await m_connection.truncate(*path, static_cast<off_t>(*size)); not res) {
+                co_return Unexpect{ res.error() };
+            }
+
+            auto old_size = static_cast<usize>(node->stat().size);
+            auto new_size = static_cast<usize>(*size);
+
+            // error from Cache::truncate are from eviction only, which should not matter for this operation
+            if (m_cache) {
+                std::ignore = co_await m_cache->truncate(id, old_size, new_size);
+            }
+
+            node->set_size(static_cast<off_t>(*size));
+        }
+
+        if (atime or mtime) {
+            auto atime_real = atime.value_or(timespec_omit);
+            auto mtime_real = mtime.value_or(timespec_omit);
+
+            if (auto res = co_await m_connection.utimens(*path, atime_real, mtime_real); not res) {
+                co_return Unexpect{ res.error() };
+            }
+
+            if (auto res = co_await m_connection.stat(*path); not res) {
+                co_return Unexpect{ res.error() };
+            } else {
+                node->set_stat(std::move(*res));
+            }
+        }
+
+        log_d(__func__, "fill stbuf");
+        fill_stbuf(*node, id, stbuf);
+        co_return Expect<void>{};
+    }
+
+    AExpect<Str> Filesystem::ll_readlink(Id id)
+    {
+        auto node = m_tree.get(id);
+        if (not node) {
+            co_return Unexpect{ node.error() };
+        }
+
+        auto path = m_tree.build_path(id);
+        if (not path) {
+            co_return Unexpect{ path.error() };
+        }
+
+        auto link = node->as_link();
         if (not link) {
             co_return Unexpect{ link.error() };
         }
 
-        if (link->get().target) {
-            co_return Str{ link->get().target.value() };
+        if (link->target) {
+            co_return Str{ link->target.value() };
         }
 
-        auto target = co_await m_connection.readlink(path);
+        auto target = co_await m_connection.readlink(*path);
         if (not target) {
             co_return Unexpect{ target.error() };
         }
 
-        link->get().target = std::move(target).value();
-        co_return Str{ link->get().target.value() };
+        link->target = std::move(target).value();
+        co_return Str{ link->target.value() };
     }
 
-    AExpect<Ref<Node>> Filesystem::mknod(path::Path path, mode_t mode, dev_t dev)
+    AExpect<void> Filesystem::ll_mknod(Id parent, Str name, mode_t mode, dev_t dev, struct stat* stbuf)
     {
-        auto parent  = co_await traverse_or_build(path.parent_path());
-        auto may_dir = parent.and_then([](Node& node) { return node.as_directory(); });
-
-        if (not may_dir) {
-            co_return Unexpect{ may_dir.error() };
+        auto parent_node = m_tree.get(parent);
+        if (not parent_node) {
+            co_return Unexpect{ parent_node.error() };
         }
 
-        auto& dir       = may_dir->get();
-        auto  name      = path.filename();
-        auto  overwrite = false;
+        auto path = m_tree.build_path(parent, name);
+        if (not path) {
+            co_return Unexpect{ path.error() };
+        }
 
-        if (auto node = dir.find(name); node) {
-            if (not node->get().is_error()) {
-                co_return Unexpect{ Errc::file_exists };
+        auto dir = parent_node->as_directory();
+        if (not dir) {
+            co_return Unexpect{ dir.error() };
+        }
+
+        auto overwrite = false;
+        if (auto id = dir->find(name); id) {
+            auto node = m_tree.get(*id);
+            if (not node) {
+                co_return Unexpect{ Errc::no_such_file_or_directory };
             }
             overwrite = true;
         }
 
-        if (auto created = co_await m_connection.mknod(path, mode, dev); not created) {
-            parent->get().refresh_stat(timespec_omit, timespec_now);
+        if (auto created = co_await m_connection.mknod(*path, mode, dev); not created) {
+            parent_node->refresh_stat(timespec_omit, timespec_now);
             co_return Unexpect{ created.error() };
         }
 
-        co_return (co_await m_connection.stat(path))
+        co_return (co_await m_connection.stat(*path))
             .and_then([&](Stat stat) {
-                auto node = std::make_unique<Node>(name, &parent->get(), std::move(stat), node::Regular{});
-                return dir.insert(std::move(node), overwrite);
+                return m_tree.create_node(parent, name, std::move(stat), tree::node::Regular{}, true);
             })
-            .transform([&](auto&& pair) { return pair.first; });
+            .transform([&](tree::Entry entry) { fill_stbuf(entry.node, entry.id, stbuf); });
     }
 
-    AExpect<Ref<Node>> Filesystem::mkdir(path::Path path, mode_t mode)
+    AExpect<void> Filesystem::ll_mkdir(Id parent, Str name, mode_t mode, struct stat* stbuf)
     {
-        auto parent  = co_await traverse_or_build(path.parent_path());
-        auto may_dir = parent.and_then([](Node& node) { return node.as_directory(); });
-
-        if (not may_dir) {
-            co_return Unexpect{ may_dir.error() };
+        auto parent_node = m_tree.get(parent);
+        if (not parent_node) {
+            co_return Unexpect{ parent_node.error() };
         }
 
-        auto& dir       = may_dir->get();
-        auto  name      = path.filename();
-        auto  overwrite = false;
+        auto path = m_tree.build_path(parent, name);
+        if (not path) {
+            co_return Unexpect{ path.error() };
+        }
 
-        if (auto node = dir.find(name); node) {
-            if (not node->get().is_error()) {
-                co_return Unexpect{ Errc::file_exists };
+        auto dir = parent_node->as_directory();
+        if (not dir) {
+            co_return Unexpect{ dir.error() };
+        }
+
+        auto overwrite = false;
+        if (auto id = dir->find(name); id) {
+            if (auto node = m_tree.get(*id); not node) {
+                co_return Unexpect{ Errc::no_such_file_or_directory };
             }
             overwrite = true;
         }
 
-        if (auto created = co_await m_connection.mkdir(path, mode); not created) {
-            parent->get().refresh_stat(timespec_omit, timespec_now);
+        if (auto created = co_await m_connection.mkdir(*path, mode); not created) {
+            parent_node->refresh_stat(timespec_omit, timespec_now);
             co_return Unexpect{ created.error() };
         }
 
-        co_return (co_await m_connection.stat(path))
+        co_return (co_await m_connection.stat(*path))
             .and_then([&](Stat stat) {
-                auto node = std::make_unique<Node>(name, &parent->get(), std::move(stat), node::Directory{});
-                return dir.insert(std::move(node), overwrite);
+                return m_tree.create_node(parent, name, std::move(stat), tree::node::Directory{}, true);
             })
-            .transform([&](auto&& pair) { return pair.first; });
+            .transform([&](tree::Entry entry) { fill_stbuf(entry.node, entry.id, stbuf); });
     }
 
-    AExpect<void> Filesystem::unlink(path::Path path)
+    AExpect<void> Filesystem::ll_unlink(Id parent, Str name)
     {
-        auto parent  = co_await traverse_or_build(path.parent_path());    // what if path is not traversed yet
-        auto may_dir = parent.and_then([](Node& node) { return node.as_directory(); });
-
-        if (not may_dir) {
-            co_return Unexpect{ may_dir.error() };
+        auto child = m_tree.get_child(parent, name);
+        if (not child) {
+            co_return Unexpect{ child.error() };
         }
 
-        auto& dir  = may_dir->get();
-        auto  name = path.filename();
+        auto& pnode = *m_tree.get(parent);
+        auto& dir   = *pnode.as_directory();
 
-        auto erased = dir.find(name).and_then([&](Node& node) -> Expect<Uniq<Node>> {
-            if (node.is_directory()) {
-                return Unexpect{ Errc::is_a_directory };
+        if (child->node.is_directory()) {
+            co_return Unexpect{ Errc::is_a_directory };
+        }
+
+        auto path = m_tree.build_path(child->id);
+        if (not path) {
+            co_return Unexpect{ path.error() };
+        }
+
+        if (auto reg = child->node.as_regular(); reg and reg->open_count > 0) {
+            auto orphan_name = m_orphans.add(parent, name);
+            auto orphan_path = path.value();
+            auto renamed     = orphan_path.rename(orphan_name);
+            assert(renamed);
+
+            if (auto res = co_await m_connection.rename(*path, orphan_path, 0); not res) {
+                m_orphans.remove(parent, name);
+                co_return Unexpect{ res.error() };
             }
-            auto erased = dir.erase(name);
-            assert(erased.has_value());
-            return std::move(erased).value();
-        });
 
-        if (not erased) {
-            co_return Unexpect{ erased.error() };
+            co_await m_cache->rename(child->id, orphan_path);
+        } else {
+            if (auto res = co_await m_connection.unlink(*path); not res) {
+                co_return Unexpect{ res.error() };
+            }
+
+            m_tree.remove(child->id);
         }
 
-        if (auto res = co_await m_connection.unlink(path); not res) {
-            auto overwritten = dir.insert(std::move(*erased), true);    // re-insert on failure :P
-            assert(not overwritten.has_value());
-            parent->get().refresh_stat(timespec_omit, timespec_now);
-            co_return Unexpect{ res.error() };
-        }
-
-        m_handles.erase(erased->get());
-        if (m_cache) {
-            co_await m_cache->invalidate_one((*erased)->id(), false);
-        }
+        pnode.refresh_stat(timespec_omit, timespec_now);
+        auto erased = dir.erase(name);
+        assert(erased.has_value());
 
         co_return Expect<void>{};
     }
 
-    AExpect<void> Filesystem::rmdir(path::Path path)
+    AExpect<void> Filesystem::ll_rmdir(Id parent, Str name)
     {
-        auto parent  = co_await traverse_or_build(path.parent_path());    // what if path is not traversed yet
-        auto may_dir = parent.and_then([](Node& node) { return node.as_directory(); });
-
-        if (not may_dir) {
-            co_return Unexpect{ may_dir.error() };
+        auto child = m_tree.get_child(parent, name);
+        if (not child) {
+            co_return Unexpect{ child.error() };
         }
 
-        auto& dir  = may_dir->get();
-        auto  name = path.filename();
+        auto& pnode = *m_tree.get(parent);
+        auto& dir   = *pnode.as_directory();
 
-        auto target = dir.find(name).and_then([](Node& target) { return target.as_directory(); });
+        auto target = child->node.as_directory();
         if (not target) {
             co_return Unexpect{ target.error() };
         }
 
-        // disallow erasing if all the children is not Error
-        if (const auto& children = target->get().children(); not children.empty()) {
-            if (not sr::all_of(children, [](const Uniq<Node>& node) { return node->is_error(); })) {
-                co_return Unexpect{ Errc::directory_not_empty };
-            }
+        if (not target->children().empty()) {
+            co_return Unexpect{ Errc::directory_not_empty };
         }
 
-        co_return (co_await m_connection.rmdir(path)).transform([&] {
-            parent->get().refresh_stat(timespec_omit, timespec_now);
-            dir.erase(name);
+        auto path = m_tree.build_path(child->id);
+        if (not path) {
+            co_return Unexpect{ path.error() };
+        }
+
+        co_return (co_await m_connection.rmdir(*path)).transform([&] {
+            pnode.refresh_stat(timespec_omit, timespec_now);
+            std::ignore = m_tree.remove(child->id);
+            std::ignore = dir.erase(name);
         });
     }
 
-    AExpect<void> Filesystem::rename(path::Path from, path::Path to, u32 flags)
+    AExpect<void> Filesystem::ll_rename(Id parent, Str name, Id new_parent, Str new_name, u32 flags)
     {
-        // I don't think root can be moved, :P
-        if (from.is_root()) {
-            co_return Unexpect{ Errc::operation_not_supported };
+        auto mode = to_rename_mode(flags);
+        if (not mode) {
+            co_return Unexpect{ Errc::invalid_argument };
         }
 
-        auto from_node = co_await traverse_or_build(from);
-        if (not from_node.has_value()) {
-            co_return Unexpect{ from_node.error() };
+        auto from_entry = m_tree.get_child(parent, name);
+        if (not from_entry) {
+            co_return Unexpect{ from_entry.error() };
         }
 
-        auto  from_parent = from_node->get().parent();
-        auto& from_dir    = from_parent->as_directory()->get();    // guaranteed to be directory
-
-        auto to_parent = co_await traverse_or_build(to.parent_path());
-        auto to_dir    = to_parent.and_then([](Node& node) { return node.as_directory(); });
-        if (not to_dir) {
-            co_return Unexpect{ to_dir.error() };
+        auto from_path = m_tree.build_path(from_entry->id);
+        if (not from_path) {
+            co_return Unexpect{ from_path.error() };
         }
 
-        if ((flags & RENAME_EXCHANGE) != 0) {
-            auto to_node = co_await traverse_or_build(to);
-            if (not to_node.has_value()) {
-                co_return Unexpect{ to_node.error() };
-            } else if (auto err = to_node->get().as_error(); err != nullptr) {
-                co_return Unexpect{ err->error };
-            }
-        } else if ((flags & RENAME_NOREPLACE) != 0) {
-            auto to_node = co_await traverse_or_build(to);
-            if (to_node.has_value() and not to_node->get().is_error()) {
+        log_d(__func__, "rename entry [{}]: {}", from_entry->id, from_entry->node.name());
+
+        switch (*mode) {
+        case RenameMode::Noreplace: {
+            if (auto to_entry = m_tree.get_child(new_parent, new_name); to_entry) {
                 co_return Unexpect{ Errc::file_exists };
             }
-        }
 
-        auto res = co_await m_connection.rename(from, to, flags);
-        if (not res) {
-            co_return Unexpect{ res.error() };
-        }
-
-        from_parent->refresh_stat(timespec_omit, timespec_now);
-        to_parent->get().refresh_stat(timespec_omit, timespec_now);
-
-        auto node = from_dir.extract(from.filename()).value();
-        if (m_cache) {
-            co_await m_cache->rename(node->id(), to);
-        }
-
-        node->set_name(to.filename());
-        node->set_parent(&to_parent->get());
-        auto overwritten = to_dir->get().insert(std::move(node), true).value();
-
-        if ((flags & RENAME_EXCHANGE) != 0) {
-            assert(overwritten.second != nullptr);
-            auto node = std::move(overwritten).second;
-
-            if (m_cache) {
-                co_await m_cache->rename(node->id(), from);
+            auto to_path = m_tree.build_path(new_parent, new_name);
+            if (not to_path) {
+                co_return Unexpect{ to_path.error() };
             }
-            node->set_name(from.filename());
-            node->set_parent(from_parent);
 
-            auto res = from_dir.insert(std::move(node), false);
-            assert(res->second == nullptr);    // has extracted before
-        } else if (overwritten.second != nullptr) {
-            if (m_cache) {
-                co_await m_cache->invalidate_one(overwritten.second->id(), false);
+            if (auto res = co_await m_connection.rename(*from_path, *to_path, flags); not res) {
+                co_return Unexpect{ res.error() };
             }
-            m_handles.erase(overwritten.second.get());
-        }
+            if (m_cache) {
+                co_await m_cache->rename(from_entry->id, *to_path);
+            }
 
-        co_return Expect<void>{};
+            // parent must exist at this point
+            auto to_parent = tree::Entry{
+                .id   = new_parent,
+                .node = *m_tree.get(new_parent),
+            };
+
+            co_return co_await move_node(*from_entry, new_name, to_parent);
+        } break;
+        case RenameMode::Exchange: {
+            auto to_entry = m_tree.get_child(new_parent, new_name);
+            if (not to_entry) {
+                co_return Unexpect{ to_entry.error() };
+            }
+
+            auto to_path = m_tree.build_path(new_parent, new_name);
+            if (not to_path) {
+                co_return Unexpect{ to_path.error() };
+            }
+
+            if (auto res = co_await m_connection.rename(*from_path, *to_path, flags); not res) {
+                co_return Unexpect{ res.error() };
+            }
+            if (m_cache) {
+                co_await m_cache->rename(from_entry->id, *to_path);
+            }
+
+            co_return co_await exchange_nodes(*from_entry, *to_entry);
+        } break;
+        case RenameMode::Normal: [[fallthrough]];
+        default: {
+            auto to_parent = m_tree.get(new_parent);
+            if (not to_parent) {
+                co_return Unexpect{ to_parent.error() };
+            }
+            if (not to_parent->is_directory()) {
+                co_return Unexpect{ Errc::not_a_directory };
+            }
+
+            auto to_path = m_tree.build_path(new_parent, new_name);
+            if (not to_path) {
+                co_return Unexpect{ to_path.error() };
+            }
+
+            if (auto res = co_await m_connection.rename(*from_path, *to_path, flags); not res) {
+                co_return Unexpect{ res.error() };
+            }
+            if (m_cache) {
+                co_await m_cache->rename(from_entry->id, *to_path);
+            }
+
+            co_return co_await move_node(*from_entry, new_name, { new_parent, *to_parent });
+        }
+        }
     }
 
-    AExpect<void> Filesystem::utimens(path::Path path, timespec atime, timespec mtime)
+    AExpect<u64> Filesystem::ll_open(Id id, i32 flags)
     {
-        auto node = co_await traverse_or_build(path);
+        auto node = m_tree.get(id);
         if (not node) {
             co_return Unexpect{ node.error() };
         }
-        if (auto res = co_await m_connection.utimens(path, atime, mtime); not res) {
-            co_return Unexpect{ res.error() };
-        }
-        co_return (co_await m_connection.stat(path)).transform([&](Stat stat) {
-            node->get().set_stat(std::move(stat));
-        });
-    }
 
-    AExpect<void> Filesystem::truncate(path::Path path, off_t size)
-    {
-        auto may_node = co_await traverse_or_build(path);
-        auto may_file = may_node.and_then([](Node& node) { return node.as_regular(); });
-
-        if (not may_file) {
-            co_return Unexpect{ may_file.error() };
+        auto file = node->as_regular();
+        if (not file) {
+            co_return Unexpect{ file.error() };
         }
 
-        // flush first
-        if (m_cache) {
-            std::ignore = co_await m_cache->flush(may_node->get().id());
+        auto mode = static_cast<OpenMode>(O_ACCMODE & flags);
+
+        auto path = m_tree.build_path(id);
+        if (not path) {
+            co_return Unexpect{ path.error() };
         }
 
-        if (auto res = co_await m_connection.truncate(path, size); not res) {
-            co_return Unexpect{ res.error() };
-        }
-
-        auto& node = may_node->get();
-
-        auto old_size = static_cast<usize>(node.stat().size);
-        auto new_size = static_cast<usize>(size);
-
-        // error from Cache::truncate are from eviction only, which should not matter for this file
-        if (m_cache) {
-            std::ignore = co_await m_cache->truncate(node.id(), old_size, new_size);
-        }
-
-        node.set_size(size);
-        node.refresh_stat(timespec_omit, timespec_now);
-
-        co_return Expect<void>{};
-    }
-
-    AExpect<u64> Filesystem::open(path::Path path, int flags)
-    {
-        auto may_node = co_await traverse_or_build(path);
-        auto may_file = may_node.and_then([](Node& node) { return node.as_regular(); });
-
-        if (not may_file) {
-            co_return Unexpect{ may_file.error() };
-        }
-
-        auto& node = may_node->get();
-        auto  mode = static_cast<OpenMode>(O_ACCMODE & flags);
+        ++file->open_count;
 
         // send hint to cache to prepare a real fd that can be used for further operations
         if (m_cache) {
-            co_return (co_await m_cache->hint_open(node.id(), path, mode)).transform([&] {
-                return m_handles.store(&node, mode, 0);
+            co_return (co_await m_cache->hint_open(id, *path, mode)).transform([&] {
+                return m_handles.store(id, mode, 0);
             });
         } else {
-            co_return (co_await m_connection.open(path, mode)).transform([&](u64 real_fd) {
-                return m_handles.store(&node, mode, real_fd);
+            co_return (co_await m_connection.open(*path, mode)).transform([&](u64 real_fd) {
+                return m_handles.store(id, mode, real_fd);
             });
         }
     }
 
-    AExpect<usize> Filesystem::read(u64 fd, Span<char> out, off_t offset)
+    AExpect<usize> Filesystem::ll_read(u64 fd, Span<char> out, off_t offset)
     {
         auto handle = m_handles.find(fd, OpenMode::Read);
         if (not handle) {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
+        auto node = m_tree.get(handle->id);
+        if (not node) {
+            co_return Unexpect{ Errc::bad_file_descriptor };
+        }
+
         auto after = [&](usize ret) {
-            handle->node->refresh_stat(timespec_now, timespec_omit);
+            node->refresh_stat(timespec_now, timespec_omit);
             return ret;
         };
 
         if (m_cache) {
-            co_return (co_await m_cache->read(handle->node->id(), out, offset)).transform(after);
+            co_return (co_await m_cache->read(handle->id, out, offset)).transform(after);
         } else {
             assert(handle->real_fd != 0 && "on no-cache, the file descriptor is exposed directly, not 0");
             co_return (co_await m_connection.read(handle->real_fd, out, offset)).transform(after);
         }
     }
 
-    AExpect<usize> Filesystem::write(u64 fd, Str in, off_t offset)
+    AExpect<usize> Filesystem::ll_write(u64 fd, Span<const char> in, off_t offset)
     {
         auto handle = m_handles.find(fd, OpenMode::Write);
         if (not handle) {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        auto may_file = handle->node->as_regular();
-        if (not may_file) [[unlikely]] {
+        auto node = m_tree.get(handle->id);
+        if (not node) {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        auto& file = may_file->get();
+        auto file = node->as_regular();
+        if (not file) [[unlikely]] {
+            co_return Unexpect{ Errc::bad_file_descriptor };
+        }
 
         auto after = [&](usize ret) {
             // the file size is defined as offset + size from last write if it's higher than previous size
             auto new_size = offset + static_cast<off_t>(ret);
-            auto size     = std::max(handle->node->stat().size, new_size);
+            auto size     = std::max(node->stat().size, new_size);
 
-            handle->node->set_size(size);
-            handle->node->refresh_stat(timespec_omit, timespec_now);
+            node->set_size(size);
+            node->refresh_stat(timespec_omit, timespec_now);
 
-            file.dirty = true;
+            file->dirty = true;
 
             return ret;
         };
 
         if (m_cache) {
-            co_return (co_await m_cache->write(handle->node->id(), in, offset)).transform(after);
+            co_return (co_await m_cache->write(handle->id, in, offset)).transform(after);
         } else {
             co_return (co_await m_connection.write(handle->real_fd, in, offset)).transform(after);
         }
     }
 
-    AExpect<void> Filesystem::flush(u64 fd)
-    {
-        auto handle = m_handles.find(fd);
-        if (not handle) {
-            co_return Unexpect{ Errc::bad_file_descriptor };
-        }
-
-        auto may_file = handle->node->as_regular();
-        if (not may_file) [[unlikely]] {
-            co_return Unexpect{ Errc::bad_file_descriptor };
-        }
-
-        auto& file = may_file->get();
-        if (not file.dirty) {
-            co_return Expect<void>{};    // no writes, do nothing
-        }
-
-        if (m_cache) {
-            co_return (co_await m_cache->flush(handle->node->id())).transform([&] {
-                handle->node->refresh_stat(timespec_omit, timespec_now);
-                file.dirty = false;
-            });
-        } else {
-            // do nothing, write already happens on write :P
-            file.dirty = false;
-            co_return Expect<void>{};
-        }
-    }
-
-    AExpect<void> Filesystem::release(u64 fd)
+    AExpect<void> Filesystem::ll_release(u64 fd)
     {
         auto handle = m_handles.release(fd);
         if (not handle) {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        auto may_file = handle->node->as_regular();
-        if (not may_file) [[unlikely]] {
+        auto node = m_tree.get(handle->id);
+        if (not node) {
             co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        auto& file = may_file->get();
-        if (file.dirty and m_cache) {
-            if (auto res = co_await m_cache->flush(handle->node->id()); not res) {
+        auto file = node->as_regular();
+        if (not file) [[unlikely]] {
+            co_return Unexpect{ Errc::bad_file_descriptor };
+        }
+
+        if (file->dirty and m_cache) {
+            if (auto res = co_await m_cache->flush(handle->id); not res) {
                 co_return Unexpect{ res.error() };
             }
 
-            handle->node->refresh_stat(timespec_omit, timespec_now);
-            file.dirty = false;
+            node->refresh_stat(timespec_omit, timespec_now);
+            file->dirty = false;
+        }
+
+        if (file->open_count > 0) {
+            --file->open_count;
         }
 
         // send hint to cache to close its associated fd for this node if exist
         if (m_cache) {
-            co_return co_await m_cache->hint_close(handle->node->id(), handle->mode);
+            co_return co_await m_cache->hint_close(handle->id, handle->mode);
         } else {
             co_return co_await m_connection.close(handle->real_fd);
         }
     }
 
-    AExpect<usize> Filesystem::copy_file_range(
-        path::Path in_path,
-        u64        in_fd,
-        off_t      in_off,
-        path::Path out_path,
-        u64        out_fd,
-        off_t      out_off,
-        size_t     size
-    )
+    AExpect<void> Filesystem::ll_fsync(u64 fd, bool data_only)
     {
-        // just in-case they have dirty pages
-        std::ignore = co_await flush(in_fd);
-        std::ignore = co_await flush(out_fd);
-
-        auto in_node = traverse(in_path);
-        if (not in_node) {
-            co_return Unexpect{ in_node.error() };
+        auto handle = m_handles.find(fd);
+        if (not handle) {
+            co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        auto out_node = traverse(out_path);
-        if (not out_node) {
-            co_return Unexpect{ out_node.error() };
+        auto node = m_tree.get(handle->id);
+        if (not node) {
+            co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        auto copied = co_await m_connection.copy_file_range(in_path, in_off, out_path, out_off, size);
-        if (not copied) {
-            co_return Unexpect{ copied.error() };
+        auto file = node->as_regular();
+        if (not file) [[unlikely]] {
+            co_return Unexpect{ Errc::bad_file_descriptor };
         }
 
-        co_return (co_await m_connection.stat(out_path)).and_then([&](Stat new_stat) {
-            in_node->get().refresh_stat(timespec_now, timespec_omit);
-            out_node->get().set_stat(new_stat);
-            return copied;
-        });
-    }
-
-    Expect<void> Filesystem::symlink(path::Path path, Str target)
-    {
-        auto parent  = traverse(path.parent_path());
-        auto may_dir = parent.and_then([](Node& node) { return node.as_directory(); });
-
-        if (not may_dir) {
-            return Unexpect{ may_dir.error() };
-        }
-
-        auto& dir  = may_dir->get();
-        auto  name = path.filename();
-
-        if (dir.find(name)) {
-            return Unexpect{ Errc::file_exists };
-        }
-
-        // NOTE: we can't really make a symlink on android from adb (unless rooted device iirc), so this
-        // operation actually not creating any link on the adb device, just on the in-memory filetree.
-
-        auto now  = SystemClock::now().time_since_epoch();
-        auto sec  = std::chrono::duration_cast<Seconds>(now);
-        auto nsec = std::chrono::duration_cast<Nanoseconds>(now - sec);
-
-        auto time = timespec{ .tv_sec = sec.count(), .tv_nsec = nsec.count() };
-
-        // dummy stat for symlink based on
-        // lrw-r--r--  root root 21 2024-10-05 09:19:29.000000000 +0700 /sdcard -> /storage/self/primary
-        auto stat = Stat{
-            .links = 1,
-            .size  = 21,
-            .mtime = time,
-            .atime = time,
-            .ctime = time,
-            .mode  = S_IFLNK | S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,    // mode: "lrw-r--r--"
-            .uid   = 0,
-            .gid   = 0,
-        };
-
-        auto link = node::Link{ String{ target } };
-        auto node = std::make_unique<Node>(name, &parent->get(), std::move(stat), std::move(link));
-
-        return dir.insert(std::move(node), false).transform(sink_void);
-    }
-
-    AExpect<void> Filesystem::initialize(path::Path path)
-    {
-        if (auto stat = co_await m_connection.stat(path::Path{}); stat.has_value()) {
-            m_root.set_stat(*stat);
-            if (not path.is_root()) {
-                std::ignore = co_await traverse_or_build(path);
-            }
-        } else {
-            co_return Unexpect{ stat.error() };
+        if (not file->dirty) {
+            co_return Expect<void>{};    // no writes, do nothing
         }
 
         if (m_cache) {
-            co_await m_cache->initialize();
+            co_return (co_await m_cache->flush(handle->id)).transform([&] {
+                node->refresh_stat(timespec_omit, timespec_now);
+                file->dirty = false;
+            });
+        } else {
+            // do nothing, write already happens on write :P
+            file->dirty = false;
+            co_return Expect<void>{};
+        }
+    }
+
+    AExpect<void> Filesystem::ll_readdir(Id id, off_t offset, Filler filler)
+    {
+        auto node = m_tree.get(id);
+        if (not node) {
+            co_return Unexpect{ node.error() };
+        }
+
+        auto dir = node->as_directory();
+        if (not dir) {
+            co_return Unexpect{ dir.error() };
+        }
+
+        auto path = m_tree.build_path(id);
+        if (not path) {
+            co_return Unexpect{ dir.error() };
+        }
+
+        if (not dir->has_readdir()) {
+            if (auto res = co_await refresh_dir(id, *path); not res) {
+                co_return Unexpect{ res.error() };
+            }
+        }
+
+        struct stat stat;
+
+        auto& children = dir->children();
+
+        for (auto&& [i, child] : std::as_const(children) | sv::enumerate | sv::drop(offset)) {
+            auto node = m_tree.get(child.second);
+            if (not node) {
+                continue;
+            }
+
+            fill_stbuf(*node, child.second, &stat);
+            if (auto full = filler(node->name().data(), &stat, i + 1); full) {
+                break;
+            }
+
+            node->incr_lookup(1);
         }
 
         co_return Expect<void>{};
     }
 
-    Await<void> Filesystem::shutdown()
+    AExpect<usize> Filesystem::ll_copy_file_range(
+        Id     in_id,
+        u64    in_fd,
+        off_t  in_off,
+        Id     out_id,
+        u64    out_fd,
+        off_t  out_off,
+        size_t size
+    )
     {
-        if (m_cache) {
-            co_await m_cache->shutdown();
+        // just in-case they have dirty pages
+        std::ignore = co_await ll_fsync(in_fd, true);
+        std::ignore = co_await ll_fsync(out_fd, true);
+
+        auto in_node = m_tree.get(in_id);
+        if (not in_node) {
+            co_return Unexpect{ in_node.error() };
         }
-    }
 
-    Opt<Seconds> Filesystem::set_ttl(Opt<Seconds> ttl)
-    {
-        auto old = std::exchange(m_ttl, ttl);
-        if (old == ttl) {
-            return old;
+        auto in_path = m_tree.build_path(in_id);
+        if (not in_path) {
+            co_return Unexpect{ in_path.error() };
         }
 
-        // on change from ttl off to ttl on, sets all nodes expiration to that new ttl
-        // on change from ttl on to ttl off, sets all nodes expiration to never
+        auto out_node = m_tree.get(out_id);
+        if (not out_node) {
+            co_return Unexpect{ out_node.error() };
+        }
 
-        log_i(__func__, "ttl changed [{} -> {}] resetting expirations", old, ttl);
-        walk(m_root, [=](Node& node) { node.expires_after(ttl.value_or(Seconds::max())); });
+        auto out_path = m_tree.build_path(out_id);
+        if (not out_path) {
+            co_return Unexpect{ out_path.error() };
+        }
 
-        return old;
-    }
+        auto copied = co_await m_connection.copy_file_range(*in_path, in_off, *out_path, out_off, size);
+        if (not copied) {
+            co_return Unexpect{ copied.error() };
+        }
 
-    usize Filesystem::expires_all()
-    {
-        auto count = 0uz;
-        walk(m_root, [&](Node& node) { ++count, node.expires_after(Seconds{ 0 }); });
-        return count;
+        co_return (co_await m_connection.stat(*out_path)).and_then([&](Stat new_stat) {
+            in_node->refresh_stat(timespec_now, timespec_omit);
+            out_node->set_stat(new_stat);
+            return copied;
+        });
     }
 }
