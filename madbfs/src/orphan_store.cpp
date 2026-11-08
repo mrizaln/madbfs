@@ -17,10 +17,11 @@ namespace madbfs
 
     Opt<String> OrphanStore::remove(Id parent, Str name)
     {
-        if (auto value = m_map.extract(KeyRef{ .parent = parent, .name = name }); value.empty()) {
+        // std::unordered_map::extract with heterogenous key is only available in GCC 16, my CI has GCC 15
+        if (auto iter = m_map.find(KeyRef{ .parent = parent, .name = name }); iter == m_map.end()) {
             return std::nullopt;
         } else {
-            return std::move(value.mapped());
+            return std::move(m_map.extract(iter).mapped());
         }
     }
 
