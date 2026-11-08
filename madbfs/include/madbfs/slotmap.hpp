@@ -143,7 +143,30 @@ namespace madbfs
     class SlotMap
     {
     public:
-        SlotMap() = default;
+        SlotMap()  = default;
+        ~SlotMap() = default;
+
+        SlotMap(const SlotMap& other)            = delete;
+        SlotMap& operator=(const SlotMap& other) = delete;
+
+        SlotMap(SlotMap&& other) noexcept
+            : m_slots{ std::move(other.m_slots) }
+            , m_versions{ std::move(other.m_versions) }
+            , m_statuses{ std::move(other.m_statuses) }
+            , m_live_count{ std::exchange(other.m_live_count, 0) }
+        {
+        }
+
+        SlotMap& operator=(SlotMap&& other) noexcept
+        {
+            if (this != &other) {
+                m_slots      = std::move(other.m_slots);
+                m_versions   = std::move(other.m_versions);
+                m_statuses   = std::move(other.m_statuses);
+                m_live_count = std::exchange(other.m_live_count, 0);
+            }
+            return *this;
+        }
 
         template <typename... Args>
             requires std::constructible_from<Value, Args...>
