@@ -2,6 +2,7 @@
 
 #include "madbfs/stat.hpp"
 
+#include <madbfs-common/expect_ref.hpp>
 #include <madbfs-common/util/copy_const.hpp>
 #include <madbfs-common/util/var_wrapper.hpp>
 
@@ -22,7 +23,6 @@ namespace madbfs::tree::node
     class Directory;
     struct Link;
     struct Other;
-    struct Error;
 
     /**
      * @class Regular
@@ -31,7 +31,8 @@ namespace madbfs::tree::node
      */
     struct Regular
     {
-        bool dirty = false;
+        bool  dirty      = false;
+        usize open_count = 0;
     };
 
     /**
@@ -120,20 +121,6 @@ namespace madbfs::tree::node
     struct Other
     {
     };
-
-    /**
-     * @class Error
-     *
-     * @brief Last FUSE operation error.
-     *
-     * This class doesn't represent anything in the fileystem but instead represents the last failed
-     * operation on this particular node. The purpose of this class is to cache the failure so madbfs doesn't
-     * need to pass the operation to the device only to have it fail again.
-     */
-    struct Error
-    {
-        Errc error;
-    };
 }
 
 namespace madbfs::tree
@@ -141,7 +128,7 @@ namespace madbfs::tree
     /**
      * @brief Represent a variant of file in the filesystem.
      */
-    struct File : util::VarWrapper<node::Regular, node::Directory, node::Link, node::Other, node::Error>
+    struct File : util::VarWrapper<node::Regular, node::Directory, node::Link, node::Other>
     {
         using VarWrapper::VarWrapper;
     };
@@ -180,17 +167,10 @@ namespace madbfs::tree
         const File& kind() const { return m_kind; }
         const Stat& stat() const { return m_stat; }
 
-        /**
-         * @brief Set expiration from current time + duration.
-         *
-         * @param duration Duration.
-         */
-        void expires_after(Seconds duration);
+        u64 incr_lookup(u64 amount) { return m_nlookup += amount; }
+        u64 decr_lookup(u64 amount) { return m_nlookup -= amount; }
 
-        /**
-         * @brief Check node expiry.
-         */
-        bool expired() const;
+        u64 nlookup() const { return m_nlookup; }
 
         /**
          * @brief Change the file variant of the node with the new one.
@@ -257,44 +237,31 @@ namespace madbfs::tree
          *
          * @return The same pointer to the stbuf.
          */
-        struct stat* fill_stbuf(struct stat* stbuf, Id id, blksize_t page_size);
+        struct stat* fill_stbuf(struct stat* stbuf, Id id, blksize_t page_size) const;
 
         /**
          * @brief Get the regular file variant with various checks for other variants.
          *
          * @return The reference to Regular variant or error code if others.
-         *
-         * This function transparently translate Error node into error code.
          */
         template <typename Self>
-        Expect<Ref<util::CopyConst<node::Regular, Self>>> as_regular(this Self&& self);
+        ExpectRef<util::CopyConst<node::Regular, Self>> as_regular(this Self&& self);
 
         /**
          * @brief Get the directory variant with various checks for other variants.
          *
          * @return The reference to Directory variant or error code if others.
-         *
-         * This function transparently translate Error node into error code.
          */
         template <typename Self>
-        Expect<Ref<util::CopyConst<node::Directory, Self>>> as_directory(this Self&& self);
+        ExpectRef<util::CopyConst<node::Directory, Self>> as_directory(this Self&& self);
 
         /**
          * @brief Get the link variant with various checks for other variants.
          *
          * @return The reference to Link variant or error code if others.
-         *
-         * This function transparently translate Error node into error code.
          */
         template <typename Self>
-        Expect<Ref<util::CopyConst<node::Link, Self>>> as_link(this Self&& self);
-
-        /**
-         * @brief Get Error ptr value if the variant is an Error.
-         *
-         * return nullptr if the Node is not an Error instance.
-         */
-        const node::Error* as_error() const;
+        ExpectRef<util::CopyConst<node::Link, Self>> as_link(this Self&& self);
 
         /**
          * @brief Check if node has Regular variant.
@@ -311,19 +278,14 @@ namespace madbfs::tree
          */
         bool is_link() const { return std::holds_alternative<node::Link>(m_kind); }
 
-        /**
-         * @brief Check if node has Error variant.
-         */
-        bool is_error() const { return std::holds_alternative<node::Error>(m_kind); }
-
     private:
         inline static std::atomic<u64> s_id_counter = 0;
 
-        Id        m_parent     = {};
-        String    m_name       = {};
-        Stat      m_stat       = {};
-        Timepoint m_expiration = Timepoint::max();
-        File      m_kind;
+        Id     m_parent  = {};
+        String m_name    = {};
+        u64    m_nlookup = 1;
+        Stat   m_stat    = {};
+        File   m_kind;
     };
 }
 
@@ -334,7 +296,7 @@ namespace madbfs::tree
 namespace madbfs::tree
 {
     template <typename Self>
-    Expect<Ref<util::CopyConst<node::Regular, Self>>> Node::as_regular(this Self&& self)
+    ExpectRef<util::CopyConst<node::Regular, Self>> Node::as_regular(this Self&& self)
     {
         // NOTE: reading/writing special files (excluding symlink) is not possible by FUSE alone. One
         // can present them by disguising it as regular files though.
@@ -342,7 +304,7 @@ namespace madbfs::tree
         // read: - https://github.com/rpodgorny/unionfs-fuse/issues/66
         //       - https://github.com/libfuse/libfuse/issues/182
 
-        using Ret = Expect<Ref<util::CopyConst<node::Regular, Self>>>;
+        using Ret = ExpectRef<util::CopyConst<node::Regular, Self>>;
         using Reg = util::CopyConst<node::Regular, Self>;
 
         // clang-format off
@@ -351,7 +313,6 @@ namespace madbfs::tree
             [](const node::Directory&    ) -> Ret { return Unexpect{ Errc::is_a_directory };                },
             [](const node::Link&         ) -> Ret { return Unexpect{ Errc::too_many_symbolic_link_levels }; },  // mimic open(2) when no O_NOFOLLOW
             [](const node::Other&        ) -> Ret { return Unexpect{ Errc::operation_not_supported };       },
-            [](const node::Error&     err) -> Ret { return Unexpect{ err.error };                           },
         };
         // clang-format on
 
@@ -359,9 +320,9 @@ namespace madbfs::tree
     }
 
     template <typename Self>
-    Expect<Ref<util::CopyConst<node::Directory, Self>>> Node::as_directory(this Self&& self)
+    ExpectRef<util::CopyConst<node::Directory, Self>> Node::as_directory(this Self&& self)
     {
-        using Ret = Expect<Ref<util::CopyConst<node::Directory, Self>>>;
+        using Ret = ExpectRef<util::CopyConst<node::Directory, Self>>;
         using Dir = util::CopyConst<node::Directory, Self>;
 
         // clang-format off
@@ -370,7 +331,6 @@ namespace madbfs::tree
             [](            Dir&     dir) -> Ret { return dir;                               },
             [](const node::Link&       ) -> Ret { return Unexpect{ Errc::not_a_directory }; },
             [](const node::Other&      ) -> Ret { return Unexpect{ Errc::not_a_directory }; },
-            [](const node::Error&   err) -> Ret { return Unexpect{ err.error };             },
         };
         // clang-format on
 
@@ -378,9 +338,9 @@ namespace madbfs::tree
     }
 
     template <typename Self>
-    Expect<Ref<util::CopyConst<node::Link, Self>>> Node::as_link(this Self&& self)
+    ExpectRef<util::CopyConst<node::Link, Self>> Node::as_link(this Self&& self)
     {
-        using Ret  = Expect<Ref<util::CopyConst<node::Link, Self>>>;
+        using Ret  = ExpectRef<util::CopyConst<node::Link, Self>>;
         using Link = util::CopyConst<node::Link, Self>;
 
         // clang-format off
@@ -389,7 +349,6 @@ namespace madbfs::tree
             [](const node::Directory&     ) -> Ret { return Unexpect{ Errc::invalid_argument }; },
             [](            Link&      link) -> Ret { return link;                               },
             [](const node::Other&         ) -> Ret { return Unexpect{ Errc::invalid_argument }; },
-            [](const node::Error&      err) -> Ret { return Unexpect{ err.error };              },
         };
         // clang-format on
 

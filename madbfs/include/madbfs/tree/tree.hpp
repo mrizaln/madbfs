@@ -1,5 +1,6 @@
 #pragma once
 
+#include <madbfs-common/expect_ref.hpp>
 #include <madbfs-common/util/slice.hpp>
 
 #include "madbfs/slotmap.hpp"
@@ -72,7 +73,7 @@ namespace madbfs::tree
          *
          * The returned reference is only valid until the next `create_node()` call.
          */
-        Expect<Ref<Node>> get(Id id);
+        ExpectRef<Node> get(Id id);
 
         /**
          * @brief Get a const reference to the `Node` pointed by `id`.
@@ -81,7 +82,7 @@ namespace madbfs::tree
          *
          * Same rule apply as the non-const reference overload of this function.
          */
-        Expect<Ref<const Node>> get(Id id) const;
+        ExpectRef<const Node> get(Id id) const;
 
         /**
          * @brief Get the `Entry` to a node contained within `parent_id`.
@@ -119,6 +120,8 @@ namespace madbfs::tree
          * @param id Unique identifier to active `Node` in tree.
          */
         Expect<path::PathBuf> build_path(Id id) const;
+
+        Expect<path::PathBuf> build_path(Id parent, Str name) const;
 
         /**
          * @brief Build path from node pointed by `id`

@@ -9,8 +9,12 @@ using namespace madbfs;
 // this doesn't point anywhere
 static constexpr auto sentinel = madbfs::Id::from_u64(0);
 
+// point to root
+static constexpr auto root_ino = madbfs::Id::from_u64(1);
+
 namespace
 {
+    // don't reverse, use MAX_PATH as well
     Expect<void> create_path(const tree::Tree& tree, Id id, String& buf)
     {
         auto current = id;
@@ -21,14 +25,14 @@ namespace
                 return Unexpect{ Errc::no_such_file_or_directory };
             }
 
-            auto name = node->get().name();
+            auto name = node->name();
             buf.insert(buf.end(), name.rbegin(), name.rend());
-            if (node->get().parent() == sentinel) {
+            if (node->parent() == sentinel) {
                 break;
             }
 
             buf.push_back('/');
-            current = node->get().parent();
+            current = node->parent();
         }
 
         sr::reverse(buf);
@@ -47,34 +51,53 @@ namespace madbfs::tree
 
     Expect<Entry> Tree::create_node(Id parent_id, Str name, Stat stat, File value, bool overwrite)
     {
-        return get(parent_id)    //
-            .and_then([&](Node& n) { return n.as_directory(); })
-            .and_then([&](node::Directory& dir) {
-                auto id = m_nodes.emplace(parent_id, name, std::move(stat), std::move(value));
-                return dir.insert(name, id, overwrite).transform([&](Opt<Id> /* overwritten */) {
-                    return Entry{ id, *m_nodes.at(id) };
-                });
-            });
+        auto id = m_nodes.emplace(parent_id, name, std::move(stat), std::move(value));
+
+        // refetch, may invalidated by above
+        auto res = get(parent_id)    //
+                       .and_then([](Node& n) { return n.as_directory(); })
+                       .and_then([&](node::Directory& dir) { return dir.insert(name, id, overwrite); });
+
+        if (not res) {
+            m_nodes.erase(id);
+            return Unexpect{ res.error() };
+        }
+
+        if (auto orphan = *res; orphan) {
+            m_nodes.erase(*orphan);
+        }
+
+        return Entry{ id, *m_nodes.at(id) };
     }
 
-    Expect<Ref<Node>> Tree::get(Id id)
+    ExpectRef<Node> Tree::get(Id id)
     {
+        if (id == root_ino) {
+            id = m_root;
+        }
         if (auto node = m_nodes.at(id); node) {
-            return std::ref(*node);
+            return *node;
         }
         return Unexpect{ Errc::no_such_file_or_directory };
     }
 
-    Expect<Ref<const Node>> Tree::get(Id id) const
+    ExpectRef<const Node> Tree::get(Id id) const
     {
+        if (id == root_ino) {
+            id = m_root;
+        }
         if (auto node = m_nodes.at(id); node) {
-            return std::ref(*node);
+            return *node;
         }
         return Unexpect{ Errc::no_such_file_or_directory };
     }
 
     Expect<Entry> Tree::get_child(Id parent_id, Str name)
     {
+        if (parent_id == root_ino) {
+            parent_id = m_root;
+        }
+
         auto parent = m_nodes.at(parent_id);
         if (not parent) {
             return Unexpect{ Errc::no_such_file_or_directory };
@@ -103,6 +126,17 @@ namespace madbfs::tree
 
         auto pathbuf = path::create_buf(std::move(buf));
         return ok_or(std::move(pathbuf), Errc::invalid_argument);
+    }
+
+    Expect<path::PathBuf> Tree::build_path(Id parent, Str name) const
+    {
+        auto path = build_path(parent);
+        if (path) {
+            if (not path->extend(name)) {
+                return Unexpect{ Errc::invalid_argument };
+            }
+        }
+        return path;
     }
 
     Expect<path::Path> Tree::build_path(Id id, Vec<util::Slice>& comps_buf, String& buf) const

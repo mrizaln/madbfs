@@ -39,34 +39,11 @@ namespace madbfs::tree::node
 // node.hpp impl: Node
 namespace madbfs::tree
 {
-    void Node::expires_after(Seconds duration)
-    {
-        if (duration == Seconds::max()) {
-            m_expiration = Timepoint::max();
-        } else {
-            m_expiration = SteadyClock::now() + duration;
-        }
-    }
-
-    bool Node::expired() const
-    {
-        // prevent expiration if the file is dirty
-        if (auto file = as_regular(); file and file->get().dirty) {
-            return false;
-        }
-        return SteadyClock::now() > m_expiration;
-    }
-
     // TODO: maybe preserve open file handles? it will be hard though, I may need to do it recursively if
     // directory is changed, idk
     File Node::mutate(File file)
     {
         return std::exchange(m_kind, std::move(file));
-    }
-
-    const node::Error* Node::as_error() const
-    {
-        return std::get_if<node::Error>(&m_kind);
     }
 
     void Node::refresh_stat(timespec atime, timespec mtime)
@@ -112,7 +89,7 @@ namespace madbfs::tree
             .transform(sink_void);
     }
 
-    struct stat* Node::fill_stbuf(struct stat* stbuf, Id id, blksize_t page_size)
+    struct stat* Node::fill_stbuf(struct stat* stbuf, Id id, blksize_t page_size) const
     {
         std::memset(stbuf, 0, sizeof(struct stat));
 
@@ -127,6 +104,7 @@ namespace madbfs::tree
         stbuf->st_atim    = m_stat.atime;
         stbuf->st_mtim    = m_stat.mtime;
         stbuf->st_ctim    = m_stat.ctime;
+        stbuf->st_dev     = 0;
 
         return stbuf;
     }
