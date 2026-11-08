@@ -165,10 +165,10 @@ namespace
      * @param foreground Whether madbfs will be launched is in foreground mode.
      */
     Await<ParseResult> into_mount_opt(
-        const MadbfsOpt& madbfs_opt,
-        FuseArgs         args,
-        String           mountpoint,
-        bool             foreground
+        const MadbfsOpt&         madbfs_opt,
+        const fuse_cmdline_opts& fuse_opt,
+        FuseArgs                 args,
+        String                   mountpoint
     )
     {
         if (madbfs_opt.cache_size <= 0) {
@@ -266,7 +266,7 @@ namespace
 
         // if logfile is set to stdout but not in foreground mode, ignore it.
         auto log_file = to_string(madbfs_opt.log_file);
-        if (log_file == "-" and not foreground) {
+        if (log_file == "-" and not fuse_opt.foreground) {
             log_file = "";
         }
 
@@ -279,17 +279,27 @@ namespace
         }
 
         co_return MountOpt{
-            .args            = std::move(args),
-            .mount           = std::move(mountpoint),
-            .serial          = std::move(serial),
-            .root            = std::move(root),
-            .connection      = connection,
-            .caching         = caching,
-            .log_level       = log_level.value(),
-            .log_file        = std::move(log_file),
-            .ttl             = madbfs_opt.ttl,
-            .timeout         = madbfs_opt.timeout,
-            .writeback_cache = madbfs_opt.writeback != 0,
+            .fuse = {
+                .args              = std::move(args),
+                .mount             = std::move(mountpoint),
+                .singlethread      = fuse_opt.singlethread != 0,
+                .foreground        = fuse_opt.foreground != 0,
+                .debug             = fuse_opt.debug != 0,
+                .nodefault_subtype = fuse_opt.nodefault_subtype != 0,
+                .clone_fd          = fuse_opt.clone_fd != 0,
+                .n_threads         = fuse_opt.max_threads,
+            },
+            .app = {
+                .serial          = std::move(serial),
+                .root            = std::move(root),
+                .connection      = connection,
+                .caching         = caching,
+                .log_level       = log_level.value(),
+                .log_file        = std::move(log_file),
+                .ttl             = madbfs_opt.ttl,
+                .timeout         = madbfs_opt.timeout,
+                .writeback_cache = madbfs_opt.writeback != 0,
+            }
         };
     }
 
@@ -419,8 +429,8 @@ namespace madbfs::args
                 mountpoint = opts.mountpoint;
             }
 
-            // recreate args
-            args = FuseArgs(argc, argv);
+            // // recreate args
+            // args = FuseArgs(argc, argv);
         }
 
         if (::fuse_opt_parse(&args.inner(), &madbfs_opt, madbfs_opt_spec.data(), NULL) != 0) {
@@ -438,6 +448,6 @@ namespace madbfs::args
             co_return 2;
         }
 
-        co_return co_await into_mount_opt(madbfs_opt, std::move(args), *mountpoint, opts.foreground);
+        co_return co_await into_mount_opt(madbfs_opt, opts, std::move(args), std::move(mountpoint).value());
     }
 }
