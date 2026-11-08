@@ -7,9 +7,7 @@
 
 #include <madbfs-common/ipc.hpp>
 
-#include <thread>
-
-struct fuse;
+struct fuse_session;
 
 namespace madbfs
 {
@@ -20,19 +18,21 @@ namespace madbfs
      *
      * Everything is controlled from here. An instantiation of this class will live as long as the fs mounted.
      * The instance will be available as fuse_context's private data.
+     *
+     * Basically the controller of the whole thing.
      */
     class Madbfs
     {
     public:
         Madbfs(
-            struct fuse*     fuse,
-            args::Connection connection,
-            Opt<Caching>     caching,
-            path::Path       custom_root,
-            Str              mount_point,
-            Opt<Seconds>     ttl,
-            Opt<Seconds>     timeout,
-            bool             writeback
+            fuse_session*   se,
+            async::Context& ctx,
+            Connection&     conn,
+            Filesystem&     fs,
+            path::Path      custom_root,
+            Str             mount_point,
+            Opt<Seconds>    ttl,
+            Opt<Seconds>    timeout
         );
 
         ~Madbfs();
@@ -42,6 +42,9 @@ namespace madbfs
 
         Madbfs(const Madbfs&)            = delete;
         Madbfs& operator=(const Madbfs&) = delete;
+
+        AExpect<void> start();
+        void          stop();
 
         /**
          * @brief Create a new real file path on device (by prepending the path with custom root).
@@ -71,8 +74,9 @@ namespace madbfs
          */
         Expect<Array<path::Path, 2>> create_path2(const char* path1, const char* path2);
 
-        Filesystem&     fs() { return m_fs; }
-        async::Context& ctx() { return m_async_ctx; }
+        Filesystem& fs() { return m_fs; }
+
+        Opt<Seconds> ttl() const { return m_ttl; }
 
         Str mountpoint() const { return m_mountpoint; }
 
@@ -123,14 +127,10 @@ namespace madbfs
          */
         Await<void> reaper();
 
-        struct fuse* m_fuse;
+        fuse_session* m_fuse;
 
-        async::Context   m_async_ctx;
-        async::WorkGuard m_work_guard;    // to prevent `async::Context` from returning immediately
-        std::jthread     m_work_thread;
-
-        Connection       m_connection;
-        Filesystem       m_fs;
+        Connection&      m_conn;
+        Filesystem&      m_fs;
         Opt<ipc::Server> m_ipc;
 
         async::Timer    m_watchdog_timer;
@@ -139,6 +139,14 @@ namespace madbfs
 
         path::PathBuf m_root;    // custom root for mounting subdirectory
         String        m_mountpoint;
+        Opt<Seconds>  m_ttl;
         Opt<Seconds>  m_timeout;
+
+        bool m_started = false;
     };
+}
+
+namespace madbfs::ll
+{
+    int run(args::MountOpt& opt);
 }
