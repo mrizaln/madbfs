@@ -580,7 +580,7 @@ namespace madbfs::cache
         /**
          * @brief Invalidate entries for a single file by its id.
          *
-         * This function never fails.
+         * This function never fails. Invalidates associated fds as well.
          *
          * see: `LruCache::invalidate_one()`
          */
@@ -595,11 +595,20 @@ namespace madbfs::cache
             }
 
             if (auto entry = m_table.extract(id); not entry.empty()) {
-                if (entry.mapped().dirty and not should_flush) {
-                    log_w(__func__, "[{}] is dirty but invalidated without flush!", entry.mapped().path);
+                auto& fentry = entry.mapped();
+                if (fentry.dirty and not should_flush) {
+                    log_e(__func__, "[{}] is dirty but invalidated without flush!", fentry.path);
                 }
-                for (auto page : entry.mapped().pages | sv::values) {
+                for (auto page : fentry.pages | sv::values) {
                     m_pages.release(page);
+                }
+
+                for (auto fd : { fentry.read_fd, fentry.write_fd }) {
+                    if (fd) {
+                        if (auto res = co_await m_connection.close(*fd); not res) {
+                            log_e(__func__, "failure on closing fd [{}]: {}", *fd, err_msg(res.error()));
+                        }
+                    }
                 }
             }
 
@@ -611,7 +620,7 @@ namespace madbfs::cache
          *
          * This function never fails.
          *
-         * Remove and release all page entries in lookup table.
+         * Remove and release all page entries in lookup table. Invalidates all fds as well.
          *
          * see: `LruCache::invalidate_all()`
          */
@@ -637,6 +646,8 @@ namespace madbfs::cache
          * This function invalidates all file descriptor even though there are still reader/writer. Since the
          * creation of these fds are lazy, this operation effectively refreshed the fds with new ones from the
          * device. This is useful if transport mode is changed.
+         *
+         * Content cache entries are not touched.
          *
          * see: `LruCache::invalidate_fds()`
          */
