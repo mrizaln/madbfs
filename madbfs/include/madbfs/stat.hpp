@@ -2,6 +2,7 @@
 
 #include <madbfs-common/aliases.hpp>
 
+#include <fmt/format.h>
 #include <sys/types.h>
 
 namespace madbfs
@@ -89,3 +90,12 @@ namespace madbfs
         Exchange  = 1 << 1,
     };
 }
+
+template <>
+struct fmt::formatter<madbfs::Id> : fmt::formatter<madbfs::u64>
+{
+    auto format(const madbfs::Id& id, auto& ctx) const
+    {
+        return fmt::format_to(ctx.out(), "{:016x}", id.to_u64());
+    }
+};
